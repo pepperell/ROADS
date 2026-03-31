@@ -1,5 +1,6 @@
 using System.Numerics;
 using SkiaSharp;
+using Roads.App.World;
 
 namespace Roads.App.Rendering;
 
@@ -18,16 +19,10 @@ public class MarkerRenderer
     }
 
     /// <summary>
-    /// Draws all markers as colored circles with a white border and inner dot.
+    /// Draws markers at all non-defunct nodes that have the specified flag set.
     /// </summary>
-    /// <param name="canvas">SkiaSharp canvas in world-space coordinates.</param>
-    /// <param name="items">List of items to render.</param>
-    /// <param name="getPosition">Function to extract world position from each item.</param>
-    /// <param name="zoom">Current camera zoom level for scaling circle sizes.</param>
-    public void Draw<T>(SKCanvas canvas, List<T> items, Func<T, Vector2> getPosition, float zoom)
+    public void DrawForFlag(SKCanvas canvas, RoadGraph graph, NodeFlags flag, float zoom)
     {
-        if (items.Count == 0) return;
-
         float radius = Math.Max(4f, 6f / zoom);
         float innerRadius = radius * 0.5f;
 
@@ -51,12 +46,15 @@ public class MarkerRenderer
             IsAntialias = true,
         };
 
-        for (int i = 0; i < items.Count; i++)
+        var nodes = graph.Nodes;
+        for (int i = 0; i < nodes.Count; i++)
         {
-            var pos = getPosition(items[i]);
-            canvas.DrawCircle(pos.X, pos.Y, radius, fillPaint);
-            canvas.DrawCircle(pos.X, pos.Y, radius, strokePaint);
-            canvas.DrawCircle(pos.X, pos.Y, innerRadius, innerPaint);
+            var node = nodes[i];
+            if (float.IsNaN(node.Position.X)) continue;
+            if (!node.Flags.HasFlag(flag)) continue;
+            canvas.DrawCircle(node.Position.X, node.Position.Y, radius, fillPaint);
+            canvas.DrawCircle(node.Position.X, node.Position.Y, radius, strokePaint);
+            canvas.DrawCircle(node.Position.X, node.Position.Y, innerRadius, innerPaint);
         }
     }
 }

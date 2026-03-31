@@ -5,40 +5,57 @@ namespace Roads.App.Vehicles;
 
 /// <summary>
 /// Manages vehicle spawning, pathfinding, and rerouting. Handles both manual spawns
-/// (V key) and automatic spawning from spawn points on a timed interval.
+/// (V key) and automatic spawning from spawn-flagged nodes on a timed interval.
+/// Spawn and destination locations are determined by NodeFlags.Spawn and NodeFlags.Destination
+/// on road graph nodes.
 /// </summary>
 public class VehicleSpawner
 {
     private readonly RoadGraph _graph;
     private readonly VehicleStore _vehicles;
-    private readonly List<SpawnPoint> _spawnPoints;
-    private readonly List<DestinationPoint> _destinations;
     private readonly SpatialGrid _vehicleGrid;
     private readonly List<int> _spawnBlockedBuffer = new();
+    private readonly List<int> _spawnNodeCache = new();
+    private readonly List<int> _destNodeCache = new();
+    private int _cacheGraphVersion = -1;
     private float _spawnTimer;
 
-    public VehicleSpawner(RoadGraph graph, VehicleStore vehicles,
-        List<SpawnPoint> spawnPoints, List<DestinationPoint> destinations,
-        SpatialGrid vehicleGrid)
+    public VehicleSpawner(RoadGraph graph, VehicleStore vehicles, SpatialGrid vehicleGrid)
     {
         _graph = graph;
         _vehicles = vehicles;
-        _spawnPoints = spawnPoints;
-        _destinations = destinations;
         _vehicleGrid = vehicleGrid;
     }
 
+    /// <summary>Number of nodes with the Spawn flag (updated on cache rebuild).</summary>
+    public int SpawnNodeCount => EnsureCache()._spawnNodeCache.Count;
+
+    /// <summary>Number of nodes with the Destination flag (updated on cache rebuild).</summary>
+    public int DestinationNodeCount => EnsureCache()._destNodeCache.Count;
+
+    private VehicleSpawner EnsureCache()
+    {
+        if (_cacheGraphVersion != _graph.Version)
+        {
+            _graph.GetNodesWithFlag(NodeFlags.Spawn, _spawnNodeCache);
+            _graph.GetNodesWithFlag(NodeFlags.Destination, _destNodeCache);
+            _cacheGraphVersion = _graph.Version;
+        }
+        return this;
+    }
+
     /// <summary>
-    /// Spawns a vehicle with a pathfinding route. Uses a random spawn point if available,
+    /// Spawns a vehicle with a pathfinding route. Uses a random spawn node if available,
     /// otherwise picks a random active edge as the start location.
     /// </summary>
     public void SpawnRandom()
     {
-        // If spawn points exist, use one randomly
-        if (_spawnPoints.Count > 0)
+        EnsureCache();
+
+        if (_spawnNodeCache.Count > 0)
         {
-            var sp = _spawnPoints[Random.Shared.Next(_spawnPoints.Count)];
-            SpawnFromPoint(sp);
+            int nodeIdx = _spawnNodeCache[Random.Shared.Next(_spawnNodeCache.Count)];
+            SpawnFromNode(nodeIdx);
             return;
         }
 
@@ -57,33 +74,36 @@ public class VehicleSpawner
     }
 
     /// <summary>
-    /// Spawns a vehicle from a specific spawn point, validating that its edge is still active.
+    /// Spawns a vehicle from a spawn-flagged node, picking a random outgoing edge.
     /// </summary>
-    public void SpawnFromPoint(SpawnPoint sp)
+    private void SpawnFromNode(int nodeIndex)
     {
-        if (sp.EdgeIndex >= _graph.Edges.Count || _graph.Edges[sp.EdgeIndex].FromNode < 0)
-            return;
+        var node = _graph.Nodes[nodeIndex];
+        if (float.IsNaN(node.Position.X) || node.EdgeCount == 0) return;
 
-        SpawnOnEdge(sp.EdgeIndex, sp.EdgeT);
+        var outgoing = _graph.GetOutgoingEdges(nodeIndex);
+        int edgeIdx = outgoing[Random.Shared.Next(outgoing.Count)];
+        SpawnOnEdge(edgeIdx, 0.05f);
     }
 
     /// <summary>
-    /// Auto-spawns vehicles from spawn points on a timed interval, respecting the vehicle cap.
+    /// Auto-spawns vehicles from spawn-flagged nodes on a timed interval, respecting the vehicle cap.
     /// Called once per simulation tick from the simulation loop.
     /// </summary>
     public void AutoSpawn(float dt, int maxVehicles)
     {
-        if (_spawnPoints.Count == 0 || _destinations.Count == 0 || _vehicles.Count >= maxVehicles)
+        EnsureCache();
+        if (_spawnNodeCache.Count == 0 || _destNodeCache.Count == 0 || _vehicles.Count >= maxVehicles)
             return;
 
         _spawnTimer += dt;
-        const float spawnInterval = 2f; // one vehicle every 2 seconds per spawn point
+        const float spawnInterval = 2f;
         while (_spawnTimer >= spawnInterval)
         {
             _spawnTimer -= spawnInterval;
             if (_vehicles.Count >= maxVehicles) break;
-            var sp = _spawnPoints[Random.Shared.Next(_spawnPoints.Count)];
-            SpawnFromPoint(sp);
+            int nodeIdx = _spawnNodeCache[Random.Shared.Next(_spawnNodeCache.Count)];
+            SpawnFromNode(nodeIdx);
         }
     }
 
@@ -91,29 +111,26 @@ public class VehicleSpawner
     /// Checks all vehicles that are stopped at the end of their path and assigns a new
     /// random destination route. Removes the vehicle if no valid path can be found.
     /// </summary>
-    /// <summary>Edges that had a vehicle rerouted this tick (prevents overlapping reroutes).</summary>
     private readonly HashSet<int> _reroutedEdgesThisTick = new();
 
     public void RerouteFinished()
     {
+        EnsureCache();
         _reroutedEdgesThisTick.Clear();
 
         for (int i = _vehicles.Count - 1; i >= 0; i--)
         {
-            if (_vehicles.CurrentArc[i] >= 0) continue; // traversing intersection arc
+            if (_vehicles.CurrentArc[i] >= 0) continue;
             if (_vehicles.Speed[i] > 0.01f) continue;
             if (_vehicles.EdgeProgress[i] < 0.99f) continue;
 
             var path = _vehicles.Path[i];
             int pathIdx = _vehicles.PathIndex[i];
-            // Only reroute if at end of path (or no path)
             if (path != null && pathIdx + 1 < path.Count) continue;
 
-            // Only reroute one vehicle per edge per tick to prevent physical overlap
             int currentEdge = _vehicles.CurrentEdge[i];
             if (!_reroutedEdgesThisTick.Add(currentEdge)) continue;
 
-            // Find new destination from current position
             if (currentEdge < 0 || currentEdge >= _graph.Edges.Count
                 || _graph.Edges[currentEdge].FromNode < 0)
             {
@@ -122,30 +139,18 @@ public class VehicleSpawner
                 continue;
             }
 
-            // Vehicle is at the end of its edge — pathfind from the ToNode directly
-            // instead of using FindNewPath (which prepends the current edge)
             var curEdge = _graph.Edges[currentEdge];
             int startNode = curEdge.ToNode;
 
             List<int>? newPath = null;
             for (int attempt = 0; attempt < 50 && newPath == null; attempt++)
             {
-                if (_destinations.Count == 0) break;
-                var dest = _destinations[Random.Shared.Next(_destinations.Count)];
-                if (dest.EdgeIndex < 0 || dest.EdgeIndex >= _graph.Edges.Count
-                    || _graph.Edges[dest.EdgeIndex].FromNode < 0)
-                    continue;
+                if (_destNodeCache.Count == 0) break;
+                int destNode = _destNodeCache[Random.Shared.Next(_destNodeCache.Count)];
 
-                var destEdge = _graph.Edges[dest.EdgeIndex];
-                var destPos = _graph.EvaluateBezier(dest.EdgeIndex, dest.EdgeT);
-                var fromPos = _graph.Nodes[destEdge.FromNode].Position;
-                var toPos = _graph.Nodes[destEdge.ToNode].Position;
-                int destNode = Vector2.DistanceSquared(destPos, fromPos) < Vector2.DistanceSquared(destPos, toPos)
-                    ? destEdge.FromNode : destEdge.ToNode;
+                if (destNode == startNode) continue;
 
-                if (destNode == startNode) continue; // already there
-
-                var p = Pathfinder.FindPath(_graph, startNode, destNode);
+                var p = Pathfinder.FindPath(_graph, startNode, destNode, currentEdge);
                 if (p != null && p.Count > 0)
                 {
                     newPath = p;
@@ -159,8 +164,6 @@ public class VehicleSpawner
                 _vehicles.Remove(i);
                 continue;
             }
-            // Prepend the current edge so the vehicle transitions through an
-            // intersection arc to the new path's first edge naturally.
             newPath.Insert(0, currentEdge);
             _vehicles.Path[i] = newPath;
             _vehicles.PathIndex[i] = 0;
@@ -169,7 +172,7 @@ public class VehicleSpawner
     }
 
     /// <summary>
-    /// Picks a random destination and pathfinds from a given edge, trying both forward and
+    /// Picks a random destination node and pathfinds from a given edge, trying both forward and
     /// reverse directions. Returns the best path, or null if no path found.
     /// </summary>
     public List<int>? FindNewPath(int currentEdge, float currentT)
@@ -181,6 +184,7 @@ public class VehicleSpawner
     private List<int>? FindPathToRandomDestination(int currentEdge, float currentT,
         out int bestStartEdge, out float bestStartT, out int destNode)
     {
+        EnsureCache();
         bestStartEdge = currentEdge;
         bestStartT = currentT;
         destNode = -1;
@@ -191,24 +195,14 @@ public class VehicleSpawner
 
         for (int attempt = 0; attempt < 50; attempt++)
         {
-            if (_destinations.Count == 0) break;
-            var dest = _destinations[Random.Shared.Next(_destinations.Count)];
-            if (dest.EdgeIndex < 0 || dest.EdgeIndex >= _graph.Edges.Count
-                || _graph.Edges[dest.EdgeIndex].FromNode < 0)
-                continue;
-
-            var destEdge = _graph.Edges[dest.EdgeIndex];
-            var destPos = _graph.EvaluateBezier(dest.EdgeIndex, dest.EdgeT);
-            var fromPos = _graph.Nodes[destEdge.FromNode].Position;
-            var toPos = _graph.Nodes[destEdge.ToNode].Position;
-            int dn = Vector2.DistanceSquared(destPos, fromPos) < Vector2.DistanceSquared(destPos, toPos)
-                ? destEdge.FromNode : destEdge.ToNode;
+            if (_destNodeCache.Count == 0) break;
+            int dn = _destNodeCache[Random.Shared.Next(_destNodeCache.Count)];
 
             // Try forward direction
             List<int>? fwdFull = null;
             if (dn != edge.ToNode)
             {
-                var fwdPath = Pathfinder.FindPath(_graph, edge.ToNode, dn);
+                var fwdPath = Pathfinder.FindPath(_graph, edge.ToNode, dn, currentEdge);
                 if (fwdPath != null && fwdPath.Count > 0)
                 {
                     fwdFull = new List<int> { currentEdge };
@@ -226,7 +220,7 @@ public class VehicleSpawner
                 var revEdge = _graph.Edges[reverseEdge];
                 if (dn != revEdge.ToNode)
                 {
-                    var revPath = Pathfinder.FindPath(_graph, revEdge.ToNode, dn);
+                    var revPath = Pathfinder.FindPath(_graph, revEdge.ToNode, dn, reverseEdge);
                     if (revPath != null && revPath.Count > 0)
                     {
                         revFull = new List<int> { reverseEdge };

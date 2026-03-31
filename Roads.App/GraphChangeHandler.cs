@@ -8,28 +8,23 @@ namespace Roads.App;
 /// <summary>
 /// Central handler for all graph mutations. Idempotent — safe to call multiple times;
 /// only runs fix-ups when the graph version has actually changed. Fixes stale state in:
-/// editor selection, spawn/destination markers, and active vehicles.
+/// editor selection, node marker flags, and active vehicles.
 /// </summary>
 public class GraphChangeHandler
 {
     private readonly RoadGraph _graph;
     private readonly EditorState _editorState;
-    private readonly List<SpawnPoint> _spawnPoints;
-    private readonly List<DestinationPoint> _destinations;
     private readonly VehicleStore _vehicles;
     private readonly EdgeSpatialGrid _edgeSpatialGrid;
     private readonly VehicleSpawner _spawner;
     private int _lastHandledGraphVersion;
 
     public GraphChangeHandler(RoadGraph graph, EditorState editorState,
-        List<SpawnPoint> spawnPoints, List<DestinationPoint> destinations,
         VehicleStore vehicles, EdgeSpatialGrid edgeSpatialGrid,
         VehicleSpawner spawner)
     {
         _graph = graph;
         _editorState = editorState;
-        _spawnPoints = spawnPoints;
-        _destinations = destinations;
         _vehicles = vehicles;
         _edgeSpatialGrid = edgeSpatialGrid;
         _spawner = spawner;
@@ -37,7 +32,8 @@ public class GraphChangeHandler
 
     /// <summary>
     /// Checks if the graph version has changed and, if so, fixes stale editor selections,
-    /// re-snaps spawn/destination markers to valid edges, and reroutes vehicles on defunct edges.
+    /// strips marker flags from nodes that now have too many edges, and reroutes vehicles
+    /// on defunct edges.
     /// </summary>
     public void HandleIfNeeded()
     {
@@ -58,54 +54,8 @@ public class GraphChangeHandler
              float.IsNaN(_graph.Nodes[_editorState.SelectedNode].Position.X)))
             _editorState.SelectedNode = -1;
 
-        // 3. Re-snap spawn/destination markers (only if their edge is defunct)
-        for (int i = 0; i < _spawnPoints.Count; i++)
-        {
-            var sp = _spawnPoints[i];
-            if (sp.EdgeIndex >= 0 && sp.EdgeIndex < _graph.Edges.Count
-                && _graph.Edges[sp.EdgeIndex].FromNode >= 0)
-                continue; // edge still valid
-
-            // Preserve direction: use control points to estimate old edge direction
-            var oldDir = Vector2.Zero;
-            if (sp.EdgeIndex >= 0 && sp.EdgeIndex < _graph.Edges.Count)
-            {
-                var oldEdge = _graph.Edges[sp.EdgeIndex];
-                oldDir = oldEdge.ControlPoint2 - oldEdge.ControlPoint1;
-            }
-
-            var (edge, t) = FindNearestEdgeDirectional(sp.Position, oldDir);
-            if (edge >= 0)
-            {
-                sp.EdgeIndex = edge;
-                sp.EdgeT = t;
-                sp.Position = _graph.EvaluateBezier(edge, t);
-                _spawnPoints[i] = sp;
-            }
-        }
-        for (int i = 0; i < _destinations.Count; i++)
-        {
-            var dp = _destinations[i];
-            if (dp.EdgeIndex >= 0 && dp.EdgeIndex < _graph.Edges.Count
-                && _graph.Edges[dp.EdgeIndex].FromNode >= 0)
-                continue; // edge still valid
-
-            var oldDir = Vector2.Zero;
-            if (dp.EdgeIndex >= 0 && dp.EdgeIndex < _graph.Edges.Count)
-            {
-                var oldEdge = _graph.Edges[dp.EdgeIndex];
-                oldDir = oldEdge.ControlPoint2 - oldEdge.ControlPoint1;
-            }
-
-            var (edge, t) = FindNearestEdgeDirectional(dp.Position, oldDir);
-            if (edge >= 0)
-            {
-                dp.EdgeIndex = edge;
-                dp.EdgeT = t;
-                dp.Position = _graph.EvaluateBezier(edge, t);
-                _destinations[i] = dp;
-            }
-        }
+        // 3. Strip Spawn/Destination flags from nodes that now have 3+ outgoing edges
+        _graph.StripMarkerFlagsFromIntersections();
 
         // 4. Fix stale vehicle edges and paths
         for (int i = _vehicles.Count - 1; i >= 0; i--)

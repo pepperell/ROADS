@@ -4,23 +4,23 @@ using Roads.App.World;
 namespace Roads.App.Editor;
 
 /// <summary>
-/// Editor tool that creates vehicle destination points snapped to road edges.
+/// Editor tool that toggles the Destination flag on road nodes.
+/// Only nodes with ≤ 2 outgoing edges (dead-ends or mid-road) can be flagged.
 /// </summary>
 public class DestinationTool
 {
     /// <summary>
-    /// Places a destination point snapped to the nearest road edge.
+    /// Toggles the Destination flag on the nearest node within snap distance.
     /// </summary>
-    /// <param name="worldPos">Click position in world space.</param>
-    /// <param name="graph">Road graph to evaluate edge geometry.</param>
-    /// <param name="edgeGrid">Spatial grid used to find the nearest edge.</param>
-    /// <returns>The new <see cref="DestinationPoint"/>, or <c>null</c> if no edge is within snap distance.</returns>
-    public DestinationPoint? OnClick(Vector2 worldPos, RoadGraph graph, EdgeSpatialGrid edgeGrid)
+    /// <returns>True if a flag was toggled.</returns>
+    public bool OnClick(Vector2 worldPos, RoadGraph graph)
     {
-        var snap = EdgeSnapTool.Snap(worldPos, graph, edgeGrid);
-        if (snap == null) return null;
+        int node = graph.FindNearestNode(worldPos, EditorState.SnapDistance);
+        if (node < 0 || !graph.CanPlaceMarker(node)) return false;
 
-        var (pos, edge, t) = snap.Value;
-        return new DestinationPoint { Position = pos, EdgeIndex = edge, EdgeT = t };
+        var flags = graph.Nodes[node].Flags;
+        flags ^= NodeFlags.Destination;
+        graph.SetNodeFlags(node, flags);
+        return true;
     }
 }

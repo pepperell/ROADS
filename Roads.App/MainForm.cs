@@ -33,8 +33,6 @@ public class MainForm : Form
     private readonly SignalTool _signalTool = new();
     private readonly LaneRestrictionTool _laneRestrictionTool = new();
     private readonly MarkerRenderer _destinationRenderer = new(new SkiaSharp.SKColor(200, 60, 40, 200));
-    private readonly List<SpawnPoint> _spawnPoints = new();
-    private readonly List<DestinationPoint> _destinations = new();
     private readonly SpatialGrid _vehicleGrid = new();
     private readonly StopLineCache _stopLineCache = new();
     private readonly EdgeSpatialGrid _edgeSpatialGrid = new();
@@ -61,8 +59,8 @@ public class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
 
         _editorState.ActiveTool = EditorTool.Road;
-        _spawner = new VehicleSpawner(_roadGraph, _vehicles, _spawnPoints, _destinations, _vehicleGrid);
-        _graphChangeHandler = new GraphChangeHandler(_roadGraph, _editorState, _spawnPoints, _destinations, _vehicles, _edgeSpatialGrid, _spawner);
+        _spawner = new VehicleSpawner(_roadGraph, _vehicles, _vehicleGrid);
+        _graphChangeHandler = new GraphChangeHandler(_roadGraph, _editorState, _vehicles, _edgeSpatialGrid, _spawner);
         _simLoop = new SimulationLoop(_roadGraph, _vehicles, _vehicleGrid, _stopLineCache, _intersectionArcs, _edgeSpatialGrid, _trafficSignals, _stopSigns, _yieldSigns, _spawner, _editorState);
         _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _spawnPointRenderer, _destinationRenderer, _uiRenderer, _sliderPanel, _vehicleInfoPanel, _laneRestrictionTool);
 
@@ -324,8 +322,9 @@ public class MainForm : Form
     private void OnPaintSurface(object? sender, SKCanvas canvas, SKImageInfo info)
     {
         _sceneRenderer.Render(canvas, info, _camera, _roadGraph, _vehicles, _editorState,
-            _spawnPoints, _destinations, _stopLineCache, _intersectionArcs,
-            _trafficSignals, _stopSigns, _yieldSigns, _simLoop, _currentMousePos);
+            _stopLineCache, _intersectionArcs,
+            _trafficSignals, _stopSigns, _yieldSigns, _simLoop,
+            _spawner.SpawnNodeCount, _currentMousePos);
     }
 
     /// <summary>
@@ -446,19 +445,11 @@ public class MainForm : Form
                     _graphChangeHandler.HandleIfNeeded();
                     break;
                 case EditorTool.SpawnPoint:
-                {
-                    var sp = _spawnPointTool.OnClick(worldVec, _roadGraph, _edgeSpatialGrid);
-                    if (sp.HasValue)
-                        _spawnPoints.Add(sp.Value);
+                    _spawnPointTool.OnClick(worldVec, _roadGraph);
                     break;
-                }
                 case EditorTool.Destination:
-                {
-                    var dp = _destinationTool.OnClick(worldVec, _roadGraph, _edgeSpatialGrid);
-                    if (dp.HasValue)
-                        _destinations.Add(dp.Value);
+                    _destinationTool.OnClick(worldVec, _roadGraph);
                     break;
-                }
                 case EditorTool.Signal:
                     _signalTool.OnClick(worldVec, _roadGraph);
                     break;
@@ -475,10 +466,10 @@ public class MainForm : Form
                     _roadTool.OnCancel(_editorState);
                     break;
                 case EditorTool.SpawnPoint:
-                    RemoveNearestSpawnPoint(rWorldVec);
+                    RemoveNearestFlag(rWorldVec, NodeFlags.Spawn);
                     break;
                 case EditorTool.Destination:
-                    RemoveNearestDestination(rWorldVec);
+                    RemoveNearestFlag(rWorldVec, NodeFlags.Destination);
                     break;
                 case EditorTool.Signal:
                     _signalTool.OnRightClick(rWorldVec, _roadGraph, _edgeSpatialGrid,
@@ -584,35 +575,26 @@ public class MainForm : Form
     }
 
     /// <summary>
-    /// Removes the item nearest to the given world position from a list, if within snap distance.
+    /// Clears the given flag from the nearest flagged node within snap distance (right-click removal).
     /// </summary>
-    private static void RemoveNearest<T>(List<T> list, Vector2 worldPos, Func<T, Vector2> getPosition)
+    private void RemoveNearestFlag(Vector2 worldPos, NodeFlags flag)
     {
-        int bestIdx = -1;
+        int bestNode = -1;
         float bestDist = EditorState.SnapDistance * EditorState.SnapDistance;
-        for (int i = 0; i < list.Count; i++)
+        for (int i = 0; i < _roadGraph.Nodes.Count; i++)
         {
-            float d = Vector2.DistanceSquared(worldPos, getPosition(list[i]));
+            var node = _roadGraph.Nodes[i];
+            if (float.IsNaN(node.Position.X)) continue;
+            if (!node.Flags.HasFlag(flag)) continue;
+            float d = Vector2.DistanceSquared(worldPos, node.Position);
             if (d < bestDist)
             {
                 bestDist = d;
-                bestIdx = i;
+                bestNode = i;
             }
         }
-        if (bestIdx >= 0)
-            list.RemoveAt(bestIdx);
+        if (bestNode >= 0)
+            _roadGraph.SetNodeFlags(bestNode, _roadGraph.Nodes[bestNode].Flags & ~flag);
     }
-
-    /// <summary>
-    /// Removes the spawn point nearest to the given world position, if within snap distance.
-    /// </summary>
-    private void RemoveNearestSpawnPoint(Vector2 worldPos)
-        => RemoveNearest(_spawnPoints, worldPos, sp => sp.Position);
-
-    /// <summary>
-    /// Removes the destination point nearest to the given world position, if within snap distance.
-    /// </summary>
-    private void RemoveNearestDestination(Vector2 worldPos)
-        => RemoveNearest(_destinations, worldPos, dp => dp.Position);
 
 }

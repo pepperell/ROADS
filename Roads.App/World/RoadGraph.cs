@@ -169,11 +169,12 @@ public class RoadGraph
         return _nodes[nodeIndex].EdgeCount == 0 && _incomingCount[nodeIndex] == 0;
     }
 
-    /// <summary>Marks a node as defunct by setting its position to NaN and removing its turn matrix.</summary>
+    /// <summary>Marks a node as defunct by setting its position to NaN, clearing marker flags, and removing its turn matrix.</summary>
     private void MarkNodeDefunct(int nodeIndex)
     {
         var node = _nodes[nodeIndex];
         node.Position = new System.Numerics.Vector2(float.NaN, float.NaN);
+        node.Flags &= ~(NodeFlags.Spawn | NodeFlags.Destination);
         _nodes[nodeIndex] = node;
         _turnMatrix.Remove(nodeIndex);
     }
@@ -864,6 +865,50 @@ public class RoadGraph
         }
 
         return nearest;
+    }
+
+    /// <summary>
+    /// Returns whether a node can have Spawn or Destination flags (non-defunct, ≤ 2 outgoing edges).
+    /// </summary>
+    public bool CanPlaceMarker(int nodeIndex)
+    {
+        if (nodeIndex < 0 || nodeIndex >= _nodes.Count) return false;
+        var node = _nodes[nodeIndex];
+        if (float.IsNaN(node.Position.X)) return false;
+        return node.EdgeCount <= 2;
+    }
+
+    /// <summary>
+    /// Collects all non-defunct node indices that have the given flag set.
+    /// </summary>
+    public void GetNodesWithFlag(NodeFlags flag, List<int> result)
+    {
+        result.Clear();
+        for (int i = 0; i < _nodes.Count; i++)
+        {
+            var node = _nodes[i];
+            if (float.IsNaN(node.Position.X)) continue;
+            if (node.Flags.HasFlag(flag))
+                result.Add(i);
+        }
+    }
+
+    /// <summary>
+    /// Strips Spawn/Destination flags from any node that now has more than 2 outgoing edges.
+    /// Called after graph mutations that change adjacency.
+    /// </summary>
+    public void StripMarkerFlagsFromIntersections()
+    {
+        for (int i = 0; i < _nodes.Count; i++)
+        {
+            var node = _nodes[i];
+            if (float.IsNaN(node.Position.X)) continue;
+            if (node.EdgeCount > 2 && (node.Flags & (NodeFlags.Spawn | NodeFlags.Destination)) != 0)
+            {
+                node.Flags &= ~(NodeFlags.Spawn | NodeFlags.Destination);
+                _nodes[i] = node;
+            }
+        }
     }
 
     /// <summary>

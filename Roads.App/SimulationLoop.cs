@@ -112,7 +112,7 @@ public class SimulationLoop
             _yieldSigns.RebuildIfNeeded(_graph);
             _trafficSignals.Update(_graph, SimDt);
             _stopSigns.Update(_graph, _vehicles, _stopLineCache, SimDt);
-            _yieldSigns.Update(_graph, _vehicles, _stopLineCache, SimDt);
+            _yieldSigns.Update(_graph, _vehicles, _stopLineCache, _intersectionArcs, SimDt);
             LaneChangeLogic.UpdateAll(_vehicles, _graph, _vehicleGrid, _intersectionArcs, _stopLineCache, SimDt);
             LaneChangeLogic.ApplyMergeSpeedBias(_vehicles, _graph, _vehicleGrid, _intersectionArcs, _stopLineCache);
             SteeringController.UpdateAll(_vehicles, _graph, _vehicleGrid, _stopLineCache, _intersectionArcs, _trafficSignals, _stopSigns, _yieldSigns, SimDt);

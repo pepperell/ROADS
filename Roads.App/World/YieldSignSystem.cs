@@ -27,6 +27,8 @@ public class YieldSignSystem
     private bool[] _isAtYieldNode = Array.Empty<bool>();
     /// <summary>Per-edge: true if this edge is exempt from its node's yield sign (user toggled off).</summary>
     private bool[] _edgeExempt = Array.Empty<bool>();
+    /// <summary>Per-edge: true if a vehicle is currently on an arc originating from this edge at a yield node.</summary>
+    private bool[] _edgeHasArcVehicle = Array.Empty<bool>();
 
     /// <summary>Graph version when the system was last rebuilt.</summary>
     private int _cachedVersion = -1;
@@ -103,6 +105,7 @@ public class YieldSignSystem
             _isYieldEdge = new bool[edgeCount];
             _isAtYieldNode = new bool[edgeCount];
             _edgeExempt = new bool[edgeCount];
+            _edgeHasArcVehicle = new bool[edgeCount];
 
             Array.Copy(oldExempt, _edgeExempt, Math.Min(oldExempt.Length, edgeCount));
         }
@@ -135,7 +138,7 @@ public class YieldSignSystem
     /// <param name="vehicles">Vehicle store with current positions and speeds.</param>
     /// <param name="stopLines">Stop line cache for stop-t values.</param>
     /// <param name="dt">Delta time in seconds (unused but kept for interface consistency).</param>
-    public void Update(RoadGraph graph, VehicleStore vehicles, StopLineCache stopLines, float dt)
+    public void Update(RoadGraph graph, VehicleStore vehicles, StopLineCache stopLines, IntersectionArcCache arcCache, float dt)
     {
         int edgeCount = Math.Min(graph.Edges.Count, _edgeLeadProgress.Length);
 
@@ -148,7 +151,7 @@ public class YieldSignSystem
         }
 
         // Single pass: find lead vehicle per yield edge
-        // Skip vehicles on intersection arcs — they've already passed through
+        // Skip vehicles on intersection arcs — they're tracked separately below
         for (int v = 0; v < vehicles.Count; v++)
         {
             if (vehicles.State[v] != VehicleState.Driving) continue;
@@ -167,6 +170,19 @@ public class YieldSignSystem
                 float edgeLength = graph.Edges[edge].Length;
                 _edgeDistToStop[edge] = (stopT - progress) * edgeLength;
             }
+        }
+
+        // Track vehicles actively on arcs at yield nodes
+        Array.Clear(_edgeHasArcVehicle, 0, edgeCount);
+        for (int v = 0; v < vehicles.Count; v++)
+        {
+            if (vehicles.State[v] != VehicleState.Driving) continue;
+            int arcIdx = vehicles.CurrentArc[v];
+            if (arcIdx < 0) continue;
+            var arc = arcCache.GetArc(arcIdx);
+            int inEdge = arc.IncomingEdge;
+            if (inEdge >= 0 && inEdge < edgeCount && _isAtYieldNode[inEdge])
+                _edgeHasArcVehicle[inEdge] = true;
         }
     }
 
@@ -204,6 +220,15 @@ public class YieldSignSystem
         {
             if (otherEdge == edgeIndex) continue;
             if (otherEdge < 0 || otherEdge >= _edgeLeadProgress.Length) continue;
+
+            // Vehicle actively on an arc from this edge = close cross-traffic
+            if (_edgeHasArcVehicle[otherEdge])
+            {
+                hasCrossTraffic = true;
+                hasCloseCrossTraffic = true;
+                continue;
+            }
+
             if (_edgeLeadProgress[otherEdge] == 0f) continue; // no vehicle on this edge
 
             float dist = _edgeDistToStop[otherEdge];
@@ -268,6 +293,15 @@ public class YieldSignSystem
         {
             if (otherEdge == edgeIndex) continue;
             if (otherEdge < 0 || otherEdge >= _edgeLeadProgress.Length) continue;
+
+            // Vehicle actively on an arc = threat regardless of turn type
+            if (_edgeHasArcVehicle[otherEdge])
+            {
+                hasCrossTraffic = true;
+                hasCloseCrossTraffic = true;
+                continue;
+            }
+
             if (_edgeLeadProgress[otherEdge] == 0f) continue;
 
             float dist = _edgeDistToStop[otherEdge];

@@ -3,30 +3,38 @@ using System.Numerics;
 namespace Roads.App.World;
 
 /// <summary>
-/// A* shortest-path finder over the road graph. Uses travel time (edge length / speed limit)
-/// as cost and Euclidean distance / max speed as an admissible heuristic.
+/// Edge-based A* shortest-path finder over the road graph. Uses travel time
+/// (edge length / speed limit) as cost and Euclidean distance / max speed as an
+/// admissible heuristic. States are edge indices (not nodes), so the turn matrix
+/// is respected at every expansion — U-turns are never generated.
 /// Reuses scratch buffers via ThreadStatic to avoid per-call allocations.
 /// </summary>
 public static class Pathfinder
 {
-    /// <summary>Reusable g-score dictionary, cleared per call.</summary>
+    /// <summary>Reusable g-score dictionary keyed by edge index, cleared per call.</summary>
     [ThreadStatic] private static Dictionary<int, float>? _gScore;
-    /// <summary>Reusable came-from dictionary, cleared per call.</summary>
-    [ThreadStatic] private static Dictionary<int, (int prevNode, int edgeIndex)>? _cameFrom;
-    /// <summary>Reusable closed set, cleared per call.</summary>
+    /// <summary>Reusable came-from dictionary: edge index → previous edge index.</summary>
+    [ThreadStatic] private static Dictionary<int, int>? _cameFrom;
+    /// <summary>Reusable closed set of edge indices, cleared per call.</summary>
     [ThreadStatic] private static HashSet<int>? _closed;
-    /// <summary>Reusable priority queue, cleared per call.</summary>
+    /// <summary>Reusable priority queue of edge indices, cleared per call.</summary>
     [ThreadStatic] private static PriorityQueue<int, float>? _open;
 
     /// <summary>
-    /// Finds the shortest path from <paramref name="startNode"/> to <paramref name="endNode"/> using A*.
-    /// Cost is travel time (edge length / speed limit).
+    /// Finds the shortest path from <paramref name="startNode"/> to <paramref name="endNode"/>
+    /// using edge-based A*. Cost is travel time (edge length / speed limit). The turn matrix
+    /// is checked at every expansion so generated paths never contain U-turns.
     /// </summary>
     /// <param name="graph">Road graph to search.</param>
     /// <param name="startNode">Index of the start node.</param>
     /// <param name="endNode">Index of the destination node.</param>
+    /// <param name="incomingEdge">
+    /// If >= 0, only seed edges reachable from this incoming edge (via turn matrix) are considered.
+    /// Use this when the caller will prepend <paramref name="incomingEdge"/> to the result to
+    /// prevent a U-turn at the path boundary.
+    /// </param>
     /// <returns>List of edge indices forming the path, or <c>null</c> if no path exists.</returns>
-    public static List<int>? FindPath(RoadGraph graph, int startNode, int endNode)
+    public static List<int>? FindPath(RoadGraph graph, int startNode, int endNode, int incomingEdge = -1)
     {
         if (startNode == endNode) return new List<int>();
         if (float.IsNaN(graph.Nodes[startNode].Position.X)) return null;
@@ -36,7 +44,7 @@ public static class Pathfinder
 
         // Reuse scratch buffers
         var gScore = _gScore ??= new Dictionary<int, float>();
-        var cameFrom = _cameFrom ??= new Dictionary<int, (int, int)>();
+        var cameFrom = _cameFrom ??= new Dictionary<int, int>();
         var closed = _closed ??= new HashSet<int>();
         var open = _open ??= new PriorityQueue<int, float>();
 
@@ -45,43 +53,63 @@ public static class Pathfinder
         closed.Clear();
         open.Clear();
 
-        gScore[startNode] = 0f;
-        open.Enqueue(startNode, Heuristic(graph.Nodes[startNode].Position, endPos));
+        // Seed: outgoing edges from startNode, optionally filtered by turn matrix
+        var seedEdges = incomingEdge >= 0
+            ? graph.GetAllowedTurns(startNode, incomingEdge)
+            : GetOutgoingEdgeList(graph, startNode);
+
+        foreach (int edgeIdx in seedEdges)
+        {
+            var edge = graph.Edges[edgeIdx];
+            if (edge.FromNode < 0) continue;
+            int toNode = edge.ToNode;
+            if (float.IsNaN(graph.Nodes[toNode].Position.X)) continue;
+
+            float speed = edge.SpeedLimit;
+            if (speed < 0.1f) speed = 0.1f;
+            float cost = edge.Length / speed;
+
+            gScore[edgeIdx] = cost;
+            open.Enqueue(edgeIdx, cost + Heuristic(graph.Nodes[toNode].Position, endPos));
+        }
 
         while (open.Count > 0)
         {
-            int current = open.Dequeue();
+            int currentEdge = open.Dequeue();
 
-            if (current == endNode)
-                return ReconstructPath(cameFrom, endNode);
+            var currentEdgeData = graph.Edges[currentEdge];
+            int toNode = currentEdgeData.ToNode;
 
-            if (!closed.Add(current))
+            if (toNode == endNode)
+                return ReconstructPath(cameFrom, currentEdge);
+
+            if (!closed.Add(currentEdge))
                 continue;
 
-            float currentG = gScore[current];
+            float currentG = gScore[currentEdge];
 
-            foreach (int edgeIdx in graph.GetOutgoingEdges(current))
+            // Expand via turn matrix — only legal turns from this edge
+            var allowedTurns = graph.GetAllowedTurns(toNode, currentEdge);
+            foreach (int neighborEdge in allowedTurns)
             {
-                var edge = graph.Edges[edgeIdx];
-                if (edge.FromNode < 0) continue; // defunct
+                var neighborData = graph.Edges[neighborEdge];
+                if (neighborData.FromNode < 0) continue;
 
-                int neighbor = edge.ToNode;
-                if (closed.Contains(neighbor)) continue;
-                if (float.IsNaN(graph.Nodes[neighbor].Position.X)) continue; // defunct node
+                int neighborToNode = neighborData.ToNode;
+                if (float.IsNaN(graph.Nodes[neighborToNode].Position.X)) continue;
 
-                // Cost = travel time: length / speed limit
-                float speed = edge.SpeedLimit;
+                float speed = neighborData.SpeedLimit;
                 if (speed < 0.1f) speed = 0.1f;
-                float edgeCost = edge.Length / speed;
+                float edgeCost = neighborData.Length / speed;
 
                 float tentativeG = currentG + edgeCost;
 
-                if (!gScore.TryGetValue(neighbor, out float bestG) || tentativeG < bestG)
+                if (!gScore.TryGetValue(neighborEdge, out float bestG) || tentativeG < bestG)
                 {
-                    gScore[neighbor] = tentativeG;
-                    cameFrom[neighbor] = (current, edgeIdx);
-                    float fScore = tentativeG + Heuristic(graph.Nodes[neighbor].Position, endPos);
-                    open.Enqueue(neighbor, fScore);
+                    gScore[neighborEdge] = tentativeG;
+                    cameFrom[neighborEdge] = currentEdge;
+                    float fScore = tentativeG + Heuristic(graph.Nodes[neighborToNode].Position, endPos);
+                    open.Enqueue(neighborEdge, fScore);
                 }
             }
         }
@@ -131,7 +159,7 @@ public static class Pathfinder
                 return (arcIdx, outEdge, path);
             }
 
-            var tailPath = FindPath(graph, fromNode, destinationNode);
+            var tailPath = FindPath(graph, fromNode, destinationNode, outEdge);
             if (tailPath == null) continue;
 
             // Compute total cost: outEdge cost + tail path cost
@@ -165,19 +193,30 @@ public static class Pathfinder
         return Vector2.Distance(from, to) / 30f;
     }
 
-    /// <summary>Traces back through the cameFrom map to build the edge-index path from start to end.</summary>
-    private static List<int> ReconstructPath(Dictionary<int, (int prevNode, int edgeIndex)> cameFrom, int endNode)
+    /// <summary>Traces back through the cameFrom map to build the edge-index path.</summary>
+    private static List<int> ReconstructPath(Dictionary<int, int> cameFrom, int endEdge)
     {
         var path = new List<int>();
-        int current = endNode;
+        int current = endEdge;
 
-        while (cameFrom.TryGetValue(current, out var prev))
+        while (true)
         {
-            path.Add(prev.edgeIndex);
-            current = prev.prevNode;
+            path.Add(current);
+            if (!cameFrom.TryGetValue(current, out int prev))
+                break;
+            current = prev;
         }
 
         path.Reverse();
         return path;
+    }
+
+    /// <summary>Gets all outgoing edges from a node as a list (for seed when no incoming edge).</summary>
+    private static List<int> GetOutgoingEdgeList(RoadGraph graph, int nodeIndex)
+    {
+        var result = new List<int>();
+        foreach (int edge in graph.GetOutgoingEdges(nodeIndex))
+            result.Add(edge);
+        return result;
     }
 }

@@ -211,15 +211,17 @@ public static class SteeringController
             int prevPathIdx = pathIdx;
 
             int nextEdge = path[pathIdx + 1];
-            var nextEdgeData = graph.Edges[nextEdge];
-            if (nextEdgeData.FromNode < 0)
+            if (nextEdge < 0 || nextEdge >= graph.Edges.Count || graph.Edges[nextEdge].FromNode < 0)
             {
+                store.Path[index] = null;
+                store.PathIndex[index] = 0;
                 store.Speed[index] = 0f;
                 store.Throttle[index] = 0f;
                 store.Brake[index] = 0f;
                 store.EdgeProgress[index] = 1f;
                 return TransitionResult.Returned;
             }
+            var nextEdgeData = graph.Edges[nextEdge];
 
             // Resolve intersection arc (with reroute fallback)
             byte inLane = store.CurrentLane[index];
@@ -242,17 +244,9 @@ public static class SteeringController
                         if (otherArc < 0) continue;
 
                         bool blocked = false;
-                        if (otherArc == arcIdx && store.ArcProgress[j] < 0.5f)
+                        foreach (int conflictArc in conflicts)
                         {
-                            // Same arc, other vehicle hasn't cleared the first half — wait
-                            blocked = true;
-                        }
-                        else
-                        {
-                            foreach (int conflictArc in conflicts)
-                            {
-                                if (otherArc == conflictArc) { blocked = true; break; }
-                            }
+                            if (otherArc == conflictArc) { blocked = true; break; }
                         }
 
                         if (blocked)
@@ -592,14 +586,7 @@ public static class SteeringController
             }
         }
 
-        // Hard overlap prevention
-        if (gap < 0.5f && gap < float.MaxValue)
-        {
-            store.Speed[index] = MathF.Max(0f, store.Speed[index] * 0.5f);
-            store.Throttle[index] = 0f;
-            store.Brake[index] = 1.0f;
-            return;
-        }
+        if (ApplyHardOverlapBrake(store, index, gap)) return;
 
         float idmAccel = ComputeIdmAcceleration(speed, targetSpeed, gap, deltaV);
         var (idmThrottle, idmBrake) = MapIdmToControls(idmAccel);
@@ -635,13 +622,14 @@ public static class SteeringController
         float distToEnd = MathF.Sqrt((vx - arcEndPos.X) * (vx - arcEndPos.X) + (vy - arcEndPos.Y) * (vy - arcEndPos.Y));
         var projPos = arcCache.EvaluateArc(arcIdx, arcProgress);
         float distToProj = MathF.Sqrt((vx - projPos.X) * (vx - projPos.X) + (vy - projPos.Y) * (vy - projPos.Y));
+        float remainingDist = (1f - arcProgress) * arcLength;
         if (distToEnd < distToProj || distToEnd < VehicleLength * 0.5f)
-            arcProgress = 0.98f; // force arc completion
+            remainingDist = 0f; // force arc completion
 
         LogDiag(store, index, $"TICK_ARC proj={arcProgress:F4} distEnd={distToEnd:F2} distProj={distToProj:F2}");
 
-        // Check for arc completion
-        if (arcProgress >= 0.98f)
+        // Check for arc completion (distance-based)
+        if (remainingDist < VehicleLength * 0.5f)
         {
             // Exit arc, enter next edge
             var path = store.Path[index];
@@ -650,19 +638,19 @@ public static class SteeringController
             // Use the arc's outgoing edge directly — the path may have been
             // invalidated by a swap-remove while the vehicle was on the arc.
             int nextEdge = arc.OutgoingEdge;
-            var nextEdgeData = graph.Edges[nextEdge];
-
-            if (nextEdgeData.FromNode < 0)
+            if (nextEdge < 0 || nextEdge >= graph.Edges.Count || graph.Edges[nextEdge].FromNode < 0)
             {
-                // Next edge is defunct — stop
                 store.CurrentArc[index] = -1;
                 store.ArcProgress[index] = 0f;
+                store.Path[index] = null;
+                store.PathIndex[index] = 0;
                 store.Speed[index] = 0f;
                 store.Throttle[index] = 0f;
                 store.Brake[index] = 0f;
                 store.EdgeProgress[index] = 1f;
                 return;
             }
+            var nextEdgeData = graph.Edges[nextEdge];
 
             // Reconcile PathIndex with the path: find the arc's outgoing edge
             // in the path so subsequent transitions work correctly.
@@ -821,12 +809,8 @@ public static class SteeringController
         float gap = aheadDist - VehicleLength;
         float deltaV = speed - leaderSpeed;
 
-        // Hard overlap prevention
-        if (gap < 0.5f && gap < float.MaxValue)
+        if (ApplyHardOverlapBrake(store, index, gap))
         {
-            store.Speed[index] = MathF.Max(0f, store.Speed[index] * 0.5f);
-            store.Throttle[index] = 0f;
-            store.Brake[index] = 1.0f;
             LogArcConflict(store, index,
                 $"HARD_OVERLAP_ARC arcIdx={arcIdx} node={arc.NodeIndex} gap={gap:F3} " +
                 $"aheadDist={aheadDist:F3} leaderSpd={leaderSpeed:F3}" +
@@ -846,6 +830,18 @@ public static class SteeringController
     /// Computes IDM (Intelligent Driver Model) acceleration.
     /// </summary>
     /// <param name="speed">Current vehicle speed in m/s.</param>
+    /// <summary>
+    /// Emergency brake when gap is dangerously small. Returns true if braking was applied.
+    /// </summary>
+    private static bool ApplyHardOverlapBrake(VehicleStore store, int index, float gap)
+    {
+        if (gap >= 0.5f || gap >= float.MaxValue) return false;
+        store.Speed[index] = MathF.Max(0f, store.Speed[index] * 0.5f);
+        store.Throttle[index] = 0f;
+        store.Brake[index] = 1.0f;
+        return true;
+    }
+
     /// <param name="desiredSpeed">Target speed in m/s.</param>
     /// <param name="gap">Bumper-to-bumper gap to leader in meters.</param>
     /// <param name="deltaV">Speed difference (positive = closing on leader).</param>
@@ -864,7 +860,7 @@ public static class SteeringController
         // Gap term: (s*/gap)^2
         float gapTerm = gap > 0.01f ? (sStar / gap) * (sStar / gap) : 100f;
 
-        return IdmMaxAccel * (1f - freeRoadTerm - gapTerm);
+        return Math.Clamp(IdmMaxAccel * (1f - freeRoadTerm - gapTerm), -MaxBrakeDecel, IdmMaxAccel);
     }
 
     /// <summary>
@@ -910,9 +906,9 @@ public static class SteeringController
             if (path != null && pathIdx + 1 < path.Count)
             {
                 int nextE = path[pathIdx + 1];
-                var nextEd = graph.Edges[nextE];
-                if (nextEd.FromNode >= 0)
+                if (nextE >= 0 && nextE < graph.Edges.Count && graph.Edges[nextE].FromNode >= 0)
                 {
+                    var nextEd = graph.Edges[nextE];
                     bool extend = true;
                     if (checkCollinearity)
                     {

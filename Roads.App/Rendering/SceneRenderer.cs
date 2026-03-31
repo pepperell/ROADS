@@ -43,11 +43,10 @@ public class SceneRenderer
     /// </summary>
     public void Render(SKCanvas canvas, SKImageInfo info, Camera camera,
         RoadGraph graph, VehicleStore vehicles, EditorState editorState,
-        List<SpawnPoint> spawnPoints, List<DestinationPoint> destinations,
         StopLineCache stopLineCache, IntersectionArcCache intersectionArcs,
         TrafficSignalSystem trafficSignals, StopSignSystem stopSigns,
         YieldSignSystem yieldSigns, SimulationLoop simLoop,
-        Point currentMousePos)
+        int spawnNodeCount, Point currentMousePos)
     {
         canvas.Clear(new SKColor(40, 42, 48));
 
@@ -81,9 +80,9 @@ public class SceneRenderer
         if (editorState.SelectedVehicle >= 0)
             _vehicleRenderer.DrawSelectionOverlay(canvas, vehicles, editorState.SelectedVehicle, graph, stopLineCache, intersectionArcs);
 
-        // Draw spawn points and destinations
-        _spawnPointRenderer.Draw(canvas, spawnPoints, sp => sp.Position, camera.Zoom);
-        _destinationRenderer.Draw(canvas, destinations, dp => dp.Position, camera.Zoom);
+        // Draw spawn and destination node markers
+        _spawnPointRenderer.DrawForFlag(canvas, graph, NodeFlags.Spawn, camera.Zoom);
+        _destinationRenderer.DrawForFlag(canvas, graph, NodeFlags.Destination, camera.Zoom);
 
         // Draw control point handles in Select mode
         DrawControlPointHandles(canvas, graph, editorState, camera);
@@ -95,7 +94,7 @@ public class SceneRenderer
         // Reset transform for UI overlay
         canvas.ResetMatrix();
 
-        string statusText = BuildStatusText(graph, vehicles, editorState, spawnPoints, simLoop, camera);
+        string statusText = BuildStatusText(graph, vehicles, editorState, spawnNodeCount, simLoop, camera);
         _uiRenderer.Draw(canvas, editorState, statusText, info.Width, info.Height);
         _sliderPanel.Draw(canvas, info.Width);
         if (editorState.SelectedVehicle >= 0)
@@ -332,7 +331,7 @@ public class SceneRenderer
     }
 
     private static string BuildStatusText(RoadGraph graph, VehicleStore vehicles,
-        EditorState editorState, List<SpawnPoint> spawnPoints,
+        EditorState editorState, int spawnNodeCount,
         SimulationLoop simLoop, Camera camera)
     {
         string status = editorState.IsDrawingRoad ? " [drawing]" : "";
@@ -359,7 +358,7 @@ public class SceneRenderer
             float mph = sel.SpeedLimit * 2.23694f;
             selInfo = $"  |  Selected: {sel.LaneCount} lane(s) [+/- lanes]  Speed: {mph:F0} mph [ [ / ] to change]";
         }
-        string spawnInfo = spawnPoints.Count > 0 ? $"Spawn Pts: {spawnPoints.Count}" : "V=spawn, or place Spawn Pts";
+        string spawnInfo = spawnNodeCount > 0 ? $"Spawn Nodes: {spawnNodeCount}" : "V=spawn, or place Spawn Pts";
         string timeInfo = simLoop.Paused ? "PAUSED" : $"{simLoop.TimeScale}x";
         string debugInfo = VehicleRenderer.ShowArcConflicts ? "  |  [G] ARC DEBUG" : "";
         return $"Zoom: {camera.Zoom:F2}x  |  Speed: {timeInfo}  |  Edges: {graph.ActiveEdgeCount}  |  Vehicles: {vehicles.Count}  |  {spawnInfo}{status}{selInfo}{debugInfo}";

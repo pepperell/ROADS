@@ -16,8 +16,10 @@ public static class LaneChangeLogic
     private const float LaneChangeDuration = 2.0f;
     /// <summary>Lane width in meters.</summary>
     private const float LaneWidth = SimConstants.LaneWidth;
-    /// <summary>Cooldown in seconds after completing a lane change before the next evaluation.</summary>
+    /// <summary>Cooldown in seconds after completing a turn-prep lane change.</summary>
     private const float CooldownAfterChange = 3.0f;
+    /// <summary>Cooldown in seconds after completing a congestion lane change (longer to prevent oscillation).</summary>
+    private const float CongestionCooldownAfterChange = 6.0f;
     /// <summary>Base distance in meters ahead at which turn preparation lane changes begin.</summary>
     private const float TurnPrepBaseDistance = 150f;
     /// <summary>Additional prep distance in meters per lane that must be crossed.</summary>
@@ -93,7 +95,9 @@ public static class LaneChangeLogic
                     // Complete the lane change
                     store.CurrentLane[i] = store.TargetLane[i];
                     store.LaneChangeProgress[i] = 0f;
-                    store.LaneChangeCooldown[i] = CooldownAfterChange;
+                    store.LaneChangeCooldown[i] = store.MergeUrgency[i] > 0f
+                        ? CooldownAfterChange
+                        : CongestionCooldownAfterChange;
                 }
                 continue; // don't evaluate new changes during an active one
             }
@@ -311,8 +315,7 @@ public static class LaneChangeLogic
                         var restrictions = graph.GetLaneRestrictions(currentEdgeIdx, lane);
                         if (restrictions == null)
                         {
-                            int dist = Math.Abs(lane - currentLane);
-                            if (dist < bestDist) { bestDist = dist; bestLane = lane; }
+                            continue;
                         }
                         else
                         {
@@ -565,14 +568,24 @@ public static class LaneChangeLogic
 
             if (nearestAhead < float.MaxValue && nearestBehind < float.MaxValue)
             {
-                // Gap exists between two vehicles — bias toward its center
-                float gapCenter = (nearestAhead - nearestBehind) * 0.5f;
-                if (gapCenter > 2f)
-                    store.MergeSpeedBias[i] = Math.Clamp(gapCenter * 0.15f, 0f, maxBias);
-                else if (gapCenter < -2f)
-                    store.MergeSpeedBias[i] = Math.Clamp(gapCenter * 0.15f, -maxBias, 0f);
-                else
+                // Only bias toward gap if it's large enough for the vehicle to fit
+                float totalGap = nearestAhead + nearestBehind - VehicleLength;
+                if (totalGap < VehicleLength * 0.5f)
+                {
+                    // Gap too small — don't waste effort centering in it
                     store.MergeSpeedBias[i] = 0f;
+                }
+                else
+                {
+                    // Gap exists between two vehicles — bias toward its center
+                    float gapCenter = (nearestAhead - nearestBehind) * 0.5f;
+                    if (gapCenter > 2f)
+                        store.MergeSpeedBias[i] = Math.Clamp(gapCenter * 0.15f, 0f, maxBias);
+                    else if (gapCenter < -2f)
+                        store.MergeSpeedBias[i] = Math.Clamp(gapCenter * 0.15f, -maxBias, 0f);
+                    else
+                        store.MergeSpeedBias[i] = 0f;
+                }
             }
             else if (nearestAhead < 20f && nearestBehind == float.MaxValue)
             {

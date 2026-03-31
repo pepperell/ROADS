@@ -16,8 +16,12 @@ public enum NodeFlags : byte
     StopSign = 2,
     /// <summary>Node has yield signs (vehicles slow and check for cross-traffic).</summary>
     Yield = 4,
+    /// <summary>Node is a vehicle spawn point (only valid on nodes with ≤ 2 outgoing edges).</summary>
+    Spawn = 8,
     /// <summary>Signal was explicitly placed by the user (not auto-assigned).</summary>
     ManualSignal = 16,
+    /// <summary>Node is a vehicle destination (only valid on nodes with ≤ 2 outgoing edges).</summary>
+    Destination = 32,
 }
 
 /// <summary>
