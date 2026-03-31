@@ -1,0 +1,69 @@
+using System.Numerics;
+
+namespace Roads.App.World;
+
+/// <summary>
+/// Road classification affecting default speed limits and visual style.
+/// </summary>
+public enum RoadType : byte
+{
+    Residential = 0,
+    Arterial = 1,
+    Highway = 2,
+    Dirt = 3,
+}
+
+/// <summary>
+/// Per-edge behavior flags.
+/// </summary>
+[Flags]
+public enum EdgeFlags : ushort
+{
+    None = 0,
+}
+
+/// <summary>
+/// A directed edge in the road graph, representing one direction of travel between two nodes.
+/// Two-way roads are stored as a pair of edges (forward and reverse) sharing the same nodes.
+/// The curve is a cubic Bezier defined by FromNode.Position, ControlPoint1, ControlPoint2,
+/// and ToNode.Position. A defunct edge has FromNode set to -1.
+/// </summary>
+public struct RoadEdge
+{
+    /// <summary>Index of the start node. Set to -1 when the edge has been deleted.</summary>
+    public int FromNode;
+    /// <summary>Index of the end node (travel direction is FromNode → ToNode).</summary>
+    public int ToNode;
+    /// <summary>Arc length in meters, precomputed for pathfinding cost.</summary>
+    public float Length;
+    /// <summary>Maximum speed in meters per second.</summary>
+    public float SpeedLimit;
+    /// <summary>Number of lanes in this travel direction (1 = single lane).</summary>
+    public byte LaneCount;
+    /// <summary>Classification of this road (residential, arterial, highway, dirt).</summary>
+    public RoadType RoadType;
+    /// <summary>Per-edge behavior flags (one-way, no parking, bus lane, etc.).</summary>
+    public EdgeFlags Flags;
+    /// <summary>First cubic Bezier control point (near FromNode).</summary>
+    public Vector2 ControlPoint1;
+    /// <summary>Second cubic Bezier control point (near ToNode).</summary>
+    public Vector2 ControlPoint2;
+}
+
+/// <summary>
+/// Provides default speed limits per road type.
+/// </summary>
+public static class RoadTypeDefaults
+{
+    /// <summary>
+    /// Returns the default speed limit in m/s for a given road type.
+    /// </summary>
+    public static float GetDefaultSpeedLimit(RoadType type) => type switch
+    {
+        RoadType.Residential => 11.2f,  // ~25 mph
+        RoadType.Arterial    => 20.1f,  // ~45 mph
+        RoadType.Highway     => 31.3f,  // ~70 mph
+        RoadType.Dirt        => 6.7f,   // ~15 mph
+        _                    => 13.4f,  // ~30 mph
+    };
+}
