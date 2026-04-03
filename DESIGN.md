@@ -597,17 +597,17 @@ Section 6: Settings (time scale, target population, etc.)
 ### Phase 4: Driver Personalities & Daily Routines
 **Goal:** Each driver has unique traits affecting driving style, and follows a daily schedule.
 
-- [ ] DriverPersonality struct with trait generation (normal distributions)
-- [ ] Named archetypes (Lead Foot, Sunday Driver, etc.)
-- [ ] Traits wired into physics: speed bias, reaction delay, steering PID gains, following distance
-- [ ] Simulation clock (0-24 hour cycle, displayed on UI)
+- [X] DriverPersonality struct with trait generation (normal distributions)
+- [X] Named archetypes (Lead Foot, Sunday Driver, etc.)
+- [X] Traits wired into physics: speed bias, reaction delay, steering PID gains, following distance
+- [X] Simulation clock (0-24 hour cycle, displayed on UI)
 - [X] Time scale controls (pause, 1x-64x, keyboard shortcuts)
-- [ ] Points of Interest (POI) data structure and editor placement
+- [X] Points of Interest (POI) data structure and editor placement
 - [ ] Daily schedule system (departure times, destination types)
 - [ ] Schedule-driven spawning (morning rush, evening rush, etc.)
 - [ ] Vehicle parking (arrive at POI → state change to parked → depart later)
 - [ ] Population manager (target vehicle count, spawn rate control)
-- [ ] Day/night visual changes (background color, headlights at night)
+- [X] Day/night visual changes (background color, headlights at night)
 
 **Deliverable:** Full day/night cycle with drivers commuting on schedules, each with unique driving behavior.
 

@@ -66,9 +66,17 @@ public class RoadRenderer
     /// connecting roads don't overlap each other's lines. Also draws stop lines and nodes.
     /// For paired edges (forward/reverse), only the lower-index edge is drawn to avoid overdraw.
     /// </summary>
-    public void Draw(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom)
+    public void Draw(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom, float darkness = 0f)
     {
         if (graph.Edges.Count == 0) return;
+
+        // Dim road colors at night
+        float ambient = 1f - darkness * 0.45f;
+        _surfacePaint.Color = new SKColor(Dim(70, ambient), Dim(72, ambient), Dim(78, ambient));
+        _nodePaint.Color = new SKColor(Dim(120, ambient), Dim(130, ambient), Dim(150, ambient));
+        _edgeLinePaint.Color = new SKColor(Dim(200, ambient), Dim(200, ambient), Dim(200, ambient));
+        _centerLinePaint.Color = new SKColor(Dim(220, ambient), Dim(180, ambient), Dim(40, ambient));
+        _laneDividerPaint.Color = new SKColor(Dim(180, ambient), Dim(180, ambient), Dim(180, ambient), (byte)(160 * ambient));
 
         RebuildCacheIfNeeded(graph);
 
@@ -501,6 +509,9 @@ public class RoadRenderer
             }
         }
     }
+
+    private static byte Dim(int baseValue, float ambient) =>
+        (byte)Math.Clamp((int)(baseValue * ambient), 0, 255);
 
     /// <summary>
     /// Pre-computed SkiaSharp paths for rendering a single road edge: center line, left/right

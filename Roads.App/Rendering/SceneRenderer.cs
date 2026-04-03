@@ -17,21 +17,19 @@ public class SceneRenderer
     private readonly RoadRenderer _roadRenderer;
     private readonly VehicleRenderer _vehicleRenderer;
     private readonly MarkerRenderer _spawnPointRenderer;
-    private readonly MarkerRenderer _destinationRenderer;
     private readonly UIRenderer _uiRenderer;
     private readonly SliderPanel _sliderPanel;
     private readonly VehicleInfoPanel _vehicleInfoPanel;
     private readonly LaneRestrictionTool _laneRestrictionTool;
 
     public SceneRenderer(RoadRenderer roadRenderer, VehicleRenderer vehicleRenderer,
-        MarkerRenderer spawnPointRenderer, MarkerRenderer destinationRenderer,
+        MarkerRenderer spawnPointRenderer,
         UIRenderer uiRenderer, SliderPanel sliderPanel, VehicleInfoPanel vehicleInfoPanel,
         LaneRestrictionTool laneRestrictionTool)
     {
         _roadRenderer = roadRenderer;
         _vehicleRenderer = vehicleRenderer;
         _spawnPointRenderer = spawnPointRenderer;
-        _destinationRenderer = destinationRenderer;
         _uiRenderer = uiRenderer;
         _sliderPanel = sliderPanel;
         _vehicleInfoPanel = vehicleInfoPanel;
@@ -48,22 +46,26 @@ public class SceneRenderer
         YieldSignSystem yieldSigns, SimulationLoop simLoop,
         int spawnNodeCount, Point currentMousePos)
     {
-        canvas.Clear(new SKColor(40, 42, 48));
+        float darkness = simLoop.Clock.Darkness;
+        var (bgColor, gridColor) = GetEnvironmentColors(darkness);
+        canvas.Clear(bgColor);
 
         var transform = camera.GetTransformMatrix(info.Width, info.Height);
         canvas.SetMatrix(transform);
 
         // Draw grid
-        DrawGrid(canvas, camera, info);
+        DrawGrid(canvas, camera, info, gridColor);
 
         // Draw roads
-        _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom);
+        _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness);
         _roadRenderer.DrawSignals(canvas, graph, trafficSignals, stopLineCache, camera.Zoom);
         _roadRenderer.DrawStopSigns(canvas, graph, stopSigns, stopLineCache, camera.Zoom);
         _roadRenderer.DrawYieldSigns(canvas, graph, yieldSigns, stopLineCache, camera.Zoom);
         _roadRenderer.DrawSpeedLimitSigns(canvas, graph, camera.Zoom);
 
-        // Draw selection highlights
+        // Draw hover and selection highlights
+        DrawEdgeHoverHighlight(canvas, graph, editorState);
+        DrawNodeHoverHighlight(canvas, graph, editorState, camera);
         DrawEdgeHighlight(canvas, graph, editorState);
         DrawNodeHighlight(canvas, graph, editorState, intersectionArcs, camera);
 
@@ -75,14 +77,14 @@ public class SceneRenderer
         DrawCrossingPreviews(canvas, editorState, camera);
 
         // Draw vehicles
-        _vehicleRenderer.Draw(canvas, vehicles, camera.Zoom);
+        _vehicleRenderer.Draw(canvas, vehicles, camera.Zoom, darkness);
         _vehicleRenderer.DrawArcConflictOverlay(canvas, vehicles, intersectionArcs);
         if (editorState.SelectedVehicle >= 0)
             _vehicleRenderer.DrawSelectionOverlay(canvas, vehicles, editorState.SelectedVehicle, graph, stopLineCache, intersectionArcs);
 
         // Draw spawn and destination node markers
         _spawnPointRenderer.DrawForFlag(canvas, graph, NodeFlags.Spawn, camera.Zoom);
-        _destinationRenderer.DrawForFlag(canvas, graph, NodeFlags.Destination, camera.Zoom);
+        MarkerRenderer.DrawPOIMarkers(canvas, graph, camera.Zoom);
 
         // Draw control point handles in Select mode
         DrawControlPointHandles(canvas, graph, editorState, camera);
@@ -101,11 +103,11 @@ public class SceneRenderer
             _vehicleInfoPanel.Draw(canvas, vehicles, editorState.SelectedVehicle, graph, info.Height, intersectionArcs);
     }
 
-    private static void DrawGrid(SKCanvas canvas, Camera camera, SKImageInfo info)
+    private static void DrawGrid(SKCanvas canvas, Camera camera, SKImageInfo info, SKColor gridColor)
     {
         using var gridPaint = new SKPaint
         {
-            Color = new SKColor(60, 62, 68),
+            Color = gridColor,
             StrokeWidth = 1f / camera.Zoom,
             IsAntialias = true
         };
@@ -123,6 +125,83 @@ public class SceneRenderer
             canvas.DrawLine(x, worldTop, x, worldBottom, gridPaint);
         for (float y = startY; y <= worldBottom; y += gridSize)
             canvas.DrawLine(worldLeft, y, worldRight, y, gridPaint);
+    }
+
+    /// <summary>Returns the hover highlight color (fill alpha, stroke alpha) for the active tool.</summary>
+    private static (SKColor fill, SKColor stroke) GetHoverColors(EditorState editorState)
+    {
+        return editorState.ActiveTool switch
+        {
+            EditorTool.Delete     => (new SKColor(220, 60, 60, 50), new SKColor(220, 60, 60, 120)),
+            EditorTool.SpawnPoint => (new SKColor(40, 200, 80, 50), new SKColor(40, 200, 80, 120)),
+            EditorTool.Destination => GetDestinationHoverColors(editorState),
+            EditorTool.Signal     => (new SKColor(220, 200, 40, 50), new SKColor(220, 200, 40, 120)),
+            _                     => (new SKColor(100, 200, 255, 50), new SKColor(100, 200, 255, 120)),
+        };
+    }
+
+    private static (SKColor fill, SKColor stroke) GetDestinationHoverColors(EditorState editorState)
+    {
+        int colorIdx = (int)editorState.SelectedPOIType - 1;
+        var c = colorIdx >= 0 && colorIdx < UIRenderer.POIColors.Length
+            ? UIRenderer.POIColors[colorIdx]
+            : new SKColor(200, 60, 40, 200);
+        return (new SKColor(c.Red, c.Green, c.Blue, 50), new SKColor(c.Red, c.Green, c.Blue, 120));
+    }
+
+    private static void DrawNodeHoverHighlight(SKCanvas canvas, RoadGraph graph,
+        EditorState editorState, Camera camera)
+    {
+        int idx = editorState.HoveredNode;
+        if (idx < 0 || idx >= graph.Nodes.Count || float.IsNaN(graph.Nodes[idx].Position.X)
+            || idx == editorState.SelectedNode)
+            return;
+
+        var (fillColor, strokeColor) = GetHoverColors(editorState);
+        var pos = graph.Nodes[idx].Position;
+        const float radius = 5f;
+        using var fillPaint = new SKPaint
+        {
+            Color = fillColor,
+            Style = SKPaintStyle.Fill,
+            IsAntialias = true,
+        };
+        using var strokePaint = new SKPaint
+        {
+            Color = strokeColor,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = Math.Max(1f, 2f / camera.Zoom),
+            IsAntialias = true,
+        };
+        canvas.DrawCircle(pos.X, pos.Y, radius, fillPaint);
+        canvas.DrawCircle(pos.X, pos.Y, radius, strokePaint);
+    }
+
+    private static void DrawEdgeHoverHighlight(SKCanvas canvas, RoadGraph graph, EditorState editorState)
+    {
+        int idx = editorState.HoveredEdge;
+        if (idx < 0 || idx >= graph.Edges.Count || graph.Edges[idx].FromNode < 0
+            || idx == editorState.SelectedEdge)
+            return;
+
+        var (fillColor, _) = GetHoverColors(editorState);
+        using var hoverPaint = new SKPaint
+        {
+            Color = fillColor,
+            StrokeWidth = graph.Edges[idx].LaneCount * 2 * 3.5f + 2f,
+            Style = SKPaintStyle.Stroke,
+            StrokeCap = SKStrokeCap.Round,
+            IsAntialias = true,
+        };
+        using var path = new SKPath();
+        var p0 = graph.EvaluateBezier(idx, 0f);
+        path.MoveTo(p0.X, p0.Y);
+        for (int s = 1; s <= 20; s++)
+        {
+            var pt = graph.EvaluateBezier(idx, s / 20f);
+            path.LineTo(pt.X, pt.Y);
+        }
+        canvas.DrawPath(path, hoverPaint);
     }
 
     private static void DrawEdgeHighlight(SKCanvas canvas, RoadGraph graph, EditorState editorState)
@@ -160,7 +239,7 @@ public class SceneRenderer
             return;
 
         var nodePos = graph.Nodes[editorState.SelectedNode].Position;
-        float nodeRadius = Math.Max(6f, 10f / camera.Zoom);
+        const float nodeRadius = 5f;
         using var nodeHighlightFill = new SKPaint
         {
             Color = new SKColor(100, 200, 255, 100),
@@ -255,6 +334,14 @@ public class SceneRenderer
     {
         if (editorState.ActiveTool != EditorTool.Select) return;
 
+        int selNode = editorState.SelectedNode;
+        int selEdge = editorState.SelectedEdge;
+        bool hasSelectedEdge = selEdge >= 0 && selEdge < graph.Edges.Count
+            && graph.Edges[selEdge].FromNode >= 0;
+        bool hasSelectedNode = selNode >= 0 && selNode < graph.Nodes.Count;
+
+        if (!hasSelectedEdge && !hasSelectedNode) return;
+
         float handleRadius = Math.Max(3f, 5f / camera.Zoom);
         using var handlePaint = new SKPaint
         {
@@ -270,24 +357,50 @@ public class SceneRenderer
             IsAntialias = true,
         };
 
-        for (int i = 0; i < graph.Edges.Count; i++)
+        // Selected edge: show both control points
+        if (hasSelectedEdge)
         {
-            var edge = graph.Edges[i];
-            if (edge.FromNode < 0) continue;
-            // Skip reverse edge of a pair — only show primary handles
-            int reverse = graph.FindReverseEdge(i);
-            if (reverse >= 0 && reverse < i) continue;
+            int primaryIdx = selEdge;
+            int rev = graph.FindReverseEdge(primaryIdx);
+            if (rev >= 0 && rev < primaryIdx) primaryIdx = rev;
 
+            var edge = graph.Edges[primaryIdx];
             var fromPos = graph.Nodes[edge.FromNode].Position;
             var toPos = graph.Nodes[edge.ToNode].Position;
 
-            // Draw lines from node to control point
             canvas.DrawLine(fromPos.X, fromPos.Y, edge.ControlPoint1.X, edge.ControlPoint1.Y, linePaint);
             canvas.DrawLine(toPos.X, toPos.Y, edge.ControlPoint2.X, edge.ControlPoint2.Y, linePaint);
-
-            // Draw control point handles
             canvas.DrawCircle(edge.ControlPoint1.X, edge.ControlPoint1.Y, handleRadius, handlePaint);
             canvas.DrawCircle(edge.ControlPoint2.X, edge.ControlPoint2.Y, handleRadius, handlePaint);
+        }
+
+        // Selected node: show only the adjacent CP on each connected edge
+        if (hasSelectedNode)
+        {
+            var drawn = new HashSet<(int, int)>(); // (primaryEdge, cpIndex) to avoid duplicates
+            for (int i = 0; i < graph.Edges.Count; i++)
+            {
+                var e = graph.Edges[i];
+                if (e.FromNode < 0) continue;
+
+                int cpSide; // which CP is adjacent to the selected node
+                if (e.FromNode == selNode) cpSide = 1;
+                else if (e.ToNode == selNode) cpSide = 2;
+                else continue;
+
+                // Deduplicate via primary edge
+                int primary = i;
+                int rev = graph.FindReverseEdge(i);
+                if (rev >= 0 && rev < i) { primary = rev; cpSide = cpSide == 1 ? 2 : 1; }
+                if (!drawn.Add((primary, cpSide))) continue;
+
+                var edge = graph.Edges[primary];
+                var nodePos = graph.Nodes[cpSide == 1 ? edge.FromNode : edge.ToNode].Position;
+                var cpPos = cpSide == 1 ? edge.ControlPoint1 : edge.ControlPoint2;
+
+                canvas.DrawLine(nodePos.X, nodePos.Y, cpPos.X, cpPos.Y, linePaint);
+                canvas.DrawCircle(cpPos.X, cpPos.Y, handleRadius, handlePaint);
+            }
         }
     }
 
@@ -359,8 +472,35 @@ public class SceneRenderer
             selInfo = $"  |  Selected: {sel.LaneCount} lane(s) [+/- lanes]  Speed: {mph:F0} mph [ [ / ] to change]";
         }
         string spawnInfo = spawnNodeCount > 0 ? $"Spawn Nodes: {spawnNodeCount}" : "V=spawn, or place Spawn Pts";
-        string timeInfo = simLoop.Paused ? "PAUSED" : $"{simLoop.TimeScale}x";
+        string clockDisplay = simLoop.Clock.GetDisplayTime();
+        string timeInfo = simLoop.Paused ? $"{clockDisplay} PAUSED" : $"{clockDisplay} {simLoop.TimeScale}x";
         string debugInfo = VehicleRenderer.ShowArcConflicts ? "  |  [G] ARC DEBUG" : "";
         return $"Zoom: {camera.Zoom:F2}x  |  Speed: {timeInfo}  |  Edges: {graph.ActiveEdgeCount}  |  Vehicles: {vehicles.Count}  |  {spawnInfo}{status}{selInfo}{debugInfo}";
     }
+
+    private static (SKColor bg, SKColor grid) GetEnvironmentColors(float darkness)
+    {
+        // Warmth peaks mid-transition (dawn/dusk center) and is zero at full day or full night
+        float warmth = (darkness > 0f && darkness < 1f)
+            ? 1f - MathF.Abs(darkness * 2f - 1f)
+            : 0f;
+
+        // Day: (55,58,52)  Night: (12,14,22)  Dawn/Dusk warm bias: +R, -B
+        float bgR = Lerp(55, 12, darkness) + warmth * 18;
+        float bgG = Lerp(58, 14, darkness) - warmth * 4;
+        float bgB = Lerp(52, 22, darkness) - warmth * 14;
+
+        // Grid: slightly lighter than background
+        float grR = Lerp(75, 25, darkness) + warmth * 14;
+        float grG = Lerp(78, 27, darkness) - warmth * 4;
+        float grB = Lerp(72, 35, darkness) - warmth * 12;
+
+        return (
+            new SKColor(ClampByte(bgR), ClampByte(bgG), ClampByte(bgB)),
+            new SKColor(ClampByte(grR), ClampByte(grG), ClampByte(grB))
+        );
+    }
+
+    private static float Lerp(float a, float b, float t) => a + (b - a) * t;
+    private static byte ClampByte(float v) => (byte)Math.Clamp((int)v, 0, 255);
 }

@@ -53,10 +53,20 @@ public static class VehiclePhysics
         if (store.DiagVehicle == index)
             SteeringController.LogDiag(store, index, "PHYSICS");
 
-        // Apply throttle/brake to speed
+        // Apply reaction-time lag filter (exponential smoothing on throttle/brake)
+        float reactionTime = store.ReactionTime[index];
+        float alpha = 1f - MathF.Exp(-dt / MathF.Max(reactionTime, 0.033f));
+        store.SmoothedThrottle[index] += (store.Throttle[index] - store.SmoothedThrottle[index]) * alpha;
+        // Emergency brake bypass: don't lag hard stops
+        if (store.Brake[index] >= 0.99f)
+            store.SmoothedBrake[index] = 1.0f;
+        else
+            store.SmoothedBrake[index] += (store.Brake[index] - store.SmoothedBrake[index]) * alpha;
+
+        // Apply smoothed throttle/brake to speed
         float maxAccel = SimConstants.MaxAccel;
         float maxBrake = SimConstants.MaxBrakeDecel;
-        float accel = store.Throttle[index] * maxAccel - store.Brake[index] * maxBrake;
+        float accel = store.SmoothedThrottle[index] * maxAccel - store.SmoothedBrake[index] * maxBrake;
         speed += accel * dt;
         store.Speed[index] = MathF.Max(0f, speed);
     }

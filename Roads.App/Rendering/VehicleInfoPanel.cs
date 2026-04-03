@@ -81,6 +81,12 @@ public class VehicleInfoPanel
             lines.Add($"Path: edge {pathIdx + 1} of {path.Count}  ({remaining} left)");
         }
 
+        // Driver personality
+        var archetypeName = ((DriverArchetype)store.Archetype[vehicleIndex]).ToString();
+        lines.Add($"Driver: {archetypeName}");
+        lines.Add($"  Spd: {store.SpeedBias[vehicleIndex]:F2}x  Aggr: {store.Aggressiveness[vehicleIndex]:F2}  Brake: {store.BrakingComfort[vehicleIndex]:F1}");
+        lines.Add($"  React: {store.ReactionTime[vehicleIndex]:F2}s  Steer: {store.SteeringSharpness[vehicleIndex]:F1}x  LnChg: {store.LaneChangeBias[vehicleIndex]:F2}");
+
         // Draw panel
         float panelHeight = lines.Count * LineHeight + Padding * 2;
         float px = Padding;

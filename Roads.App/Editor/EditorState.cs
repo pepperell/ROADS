@@ -1,3 +1,5 @@
+using Roads.App.World;
+
 namespace Roads.App.Editor;
 
 /// <summary>
@@ -25,6 +27,9 @@ public class EditorState
     /// <summary>Currently active editor tool.</summary>
     public EditorTool ActiveTool { get; set; } = EditorTool.Select;
 
+    /// <summary>POI type to assign when placing destination nodes (sticky across tool switches).</summary>
+    public POIType SelectedPOIType { get; set; } = POIType.Home;
+
     /// <summary>Index of the node where the current road segment starts, or <c>null</c> if not drawing.</summary>
     public int? RoadStartNode { get; set; }
 
@@ -33,6 +38,12 @@ public class EditorState
 
     /// <summary>Index of the currently selected edge, or -1 if none.</summary>
     public int SelectedEdge { get; set; } = -1;
+
+    /// <summary>Index of the edge under the mouse cursor, or -1 if none.</summary>
+    public int HoveredEdge { get; set; } = -1;
+
+    /// <summary>Index of the node under the mouse cursor, or -1 if none.</summary>
+    public int HoveredNode { get; set; } = -1;
 
     /// <summary>Index of the currently selected node, or -1 if none.</summary>
     public int SelectedNode { get; set; } = -1;
@@ -72,6 +83,8 @@ public class EditorState
     {
         RoadStartNode = null;
         SelectedEdge = -1;
+        HoveredEdge = -1;
+        HoveredNode = -1;
         SelectedNode = -1;
         SelectedVehicle = -1;
         DragNodeIndex = -1;

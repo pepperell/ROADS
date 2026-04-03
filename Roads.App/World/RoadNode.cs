@@ -25,6 +25,20 @@ public enum NodeFlags : byte
 }
 
 /// <summary>
+/// Type of Point of Interest at a destination node.
+/// </summary>
+public enum POIType : byte
+{
+    None = 0,
+    Home,
+    Work,
+    Shop,
+    Leisure,
+    School,
+    Parking,
+}
+
+/// <summary>
 /// A node in the road graph representing an intersection or endpoint.
 /// Nodes own a contiguous slice of the adjacency list for outgoing edges.
 /// A defunct node has Position set to NaN.
@@ -39,4 +53,6 @@ public struct RoadNode
     public byte EdgeCount;
     /// <summary>Traffic control flags for this intersection.</summary>
     public NodeFlags Flags;
+    /// <summary>Point of Interest type (only meaningful when Destination flag is set).</summary>
+    public POIType PointOfInterest;
 }

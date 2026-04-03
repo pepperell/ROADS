@@ -264,6 +264,16 @@ public class VehicleSpawner
         var tangent = _graph.EvaluateBezierTangent(bestStartEdge, bestStartT);
         float heading = MathF.Atan2(tangent.Y, tangent.X);
         int vi = _vehicles.Add(pos.X, pos.Y, heading, bestStartEdge);
+        var traits = DriverPersonalityGenerator.GenerateRandom();
+        _vehicles.Aggressiveness[vi] = traits.Aggressiveness;
+        _vehicles.SpeedBias[vi] = traits.SpeedBias;
+        _vehicles.ReactionTime[vi] = traits.ReactionTime;
+        _vehicles.SteeringSharpness[vi] = traits.SteeringSharpness;
+        _vehicles.BrakingComfort[vi] = traits.BrakingComfort;
+        _vehicles.LaneChangeBias[vi] = traits.LaneChangeBias;
+        _vehicles.PatienceTimer[vi] = traits.PatienceTimer;
+        _vehicles.PreferredVehicle[vi] = traits.PreferredVehicle;
+        _vehicles.Archetype[vi] = (byte)traits.Archetype;
         _vehicles.Path[vi] = bestPath;
         _vehicles.PathIndex[vi] = 0;
         _vehicles.EdgeProgress[vi] = bestStartT;

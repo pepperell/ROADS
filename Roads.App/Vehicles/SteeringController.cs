@@ -80,7 +80,8 @@ public static class SteeringController
         var edge = graph.Edges[edgeIdx];
         if (edge.FromNode < 0) return; // defunct edge
         float baseSpeedLimit = edge.SpeedLimit > 0f ? edge.SpeedLimit : TargetSpeed;
-        float targetSpeed = Math.Clamp(baseSpeedLimit + store.MergeSpeedBias[index], 0f, baseSpeedLimit * 1.15f);
+        float biasedSpeed = baseSpeedLimit * store.SpeedBias[index];
+        float targetSpeed = Math.Clamp(biasedSpeed + store.MergeSpeedBias[index], 0f, biasedSpeed * 1.15f);
         float speed = store.Speed[index];
         float progress = store.EdgeProgress[index];
         float edgeLength = edge.Length;
@@ -113,11 +114,11 @@ public static class SteeringController
         float stopAtT = stopT - halfVehT;
 
         // Block crossing on red
-        if (CheckRedLightBlocking(store, index, signal, speed, progress, stopAtT, edgeLength))
+        if (CheckRedLightBlocking(store, index, signal, speed, progress, stopAtT, edgeLength, store.BrakingComfort[index]))
             return;
 
         // Handle edge transitions (arc entrance, direct jump, or end-of-path stop)
-        var transition = HandleEdgeTransition(store, index, graph, stopLines, arcCache, ref edgeIdx, ref edge, ref edgeLength, ref progress, ref rawProgress, ref baseSpeedLimit, ref targetSpeed, ref stopT, ref halfVehT, ref stopAtT, speed, vx, vy);
+        var transition = HandleEdgeTransition(store, index, graph, stopLines, arcCache, signals, ref edgeIdx, ref edge, ref edgeLength, ref progress, ref rawProgress, ref baseSpeedLimit, ref targetSpeed, ref stopT, ref halfVehT, ref stopAtT, speed, vx, vy);
         if (transition == TransitionResult.Returned) return;
 
         store.EdgeProgress[index] = progress;
@@ -172,10 +173,10 @@ public static class SteeringController
     /// If blocked, forces full stop and returns true.
     /// </summary>
     private static bool CheckRedLightBlocking(VehicleStore store, int index,
-        SignalState signal, float speed, float progress, float stopAtT, float edgeLength)
+        SignalState signal, float speed, float progress, float stopAtT, float edgeLength, float comfortDecel)
     {
         bool blockedBySignal = signal == SignalState.Red ||
-            (signal == SignalState.Yellow && speed * speed / (2f * IdmComfortDecel) * 0.8f < (stopAtT - progress) * edgeLength);
+            (signal == SignalState.Yellow && speed * speed / (2f * comfortDecel) * 0.8f < (stopAtT - progress) * edgeLength);
         if (progress >= stopAtT && blockedBySignal)
         {
             store.EdgeProgress[index] = stopAtT - 0.001f;
@@ -193,7 +194,7 @@ public static class SteeringController
     /// Returns <see cref="TransitionResult.Returned"/> if the caller should return immediately.
     /// </summary>
     private static TransitionResult HandleEdgeTransition(VehicleStore store, int index, RoadGraph graph,
-        StopLineCache stopLines, IntersectionArcCache arcCache,
+        StopLineCache stopLines, IntersectionArcCache arcCache, TrafficSignalSystem signals,
         ref int edgeIdx, ref RoadEdge edge, ref float edgeLength, ref float progress,
         ref float rawProgress, ref float baseSpeedLimit, ref float targetSpeed,
         ref float stopT, ref float halfVehT, ref float stopAtT,
@@ -237,6 +238,9 @@ public static class SteeringController
                 {
                     // Check if any vehicle is on a conflicting arc or too close on the same arc
                     var conflicts = arcCache.GetConflictingArcs(arcIdx);
+                    bool isTrafficLightNode = signals.IsTrafficLight(arc.NodeIndex);
+                    var mySignal = isTrafficLightNode ? signals.GetSignal(arc.IncomingEdge) : SignalState.Green;
+
                     for (int j = 0; j < store.Count; j++)
                     {
                         if (j == index || store.State[j] != VehicleState.Driving) continue;
@@ -251,6 +255,18 @@ public static class SteeringController
 
                         if (blocked)
                         {
+                            // At traffic-light nodes, same-phase vehicles should not block
+                            // each other — the signal already manages inter-phase right-of-way.
+                            // Only block if arcs come from different phases (e.g. a stale
+                            // vehicle from the previous red phase still clearing the intersection).
+                            if (isTrafficLightNode && mySignal == SignalState.Green)
+                            {
+                                var otherArcData = arcCache.GetArc(otherArc);
+                                var otherSignal = signals.GetSignal(otherArcData.IncomingEdge);
+                                if (otherSignal == SignalState.Green)
+                                    continue; // same phase, both green — proceed
+                            }
+
                             store.EdgeProgress[index] = stopAtT;
                             store.Throttle[index] = 0f;
                             store.Brake[index] = 1.0f;
@@ -263,7 +279,10 @@ public static class SteeringController
                         }
                     }
 
-                    // Check if a vehicle on the outgoing edge is mid-lane-change into our lane
+                    // Check if a vehicle on the outgoing edge is mid-lane-change into our lane.
+                    // Only block for actual lane-change conflicts: a vehicle whose current lane
+                    // is NOT our exit lane but is actively changing INTO it. Vehicles already
+                    // traveling in the exit lane are handled by IDM look-ahead on the arc.
                     {
                         int outEdge = arc.OutgoingEdge;
                         byte outLane = arc.OutgoingLane;
@@ -276,7 +295,10 @@ public static class SteeringController
                             {
                                 if (j == index || store.State[j] != VehicleState.Driving) continue;
                                 if (store.CurrentEdge[j] != outEdge || store.CurrentArc[j] >= 0) continue;
-                                if (store.CurrentLane[j] != outLane && store.TargetLane[j] != outLane) continue;
+                                // Skip vehicles already in our lane — they're handled by arc IDM look-ahead
+                                if (store.CurrentLane[j] == outLane) continue;
+                                // Only block if this vehicle is actively lane-changing into our exit lane
+                                if (store.TargetLane[j] != outLane) continue;
 
                                 float edgeDist = (store.EdgeProgress[j] - outStartT) * outLength;
                                 if (edgeDist < VehicleLength * 2f)
@@ -458,7 +480,8 @@ public static class SteeringController
         edgeLength = nextLength;
         progress = store.EdgeProgress[index];
         baseSpeedLimit = edge.SpeedLimit > 0f ? edge.SpeedLimit : TargetSpeed;
-        targetSpeed = Math.Clamp(baseSpeedLimit + store.MergeSpeedBias[index], 0f, baseSpeedLimit * 1.15f);
+        float biasedSpeedN = baseSpeedLimit * store.SpeedBias[index];
+        targetSpeed = Math.Clamp(biasedSpeedN + store.MergeSpeedBias[index], 0f, biasedSpeedN * 1.15f);
         stopT = stopLines.GetStopTAtToNode(edgeIdx);
         halfVehT = (VehicleLength * 0.5f) / edgeLength;
         stopAtT = stopT - halfVehT;
@@ -519,14 +542,15 @@ public static class SteeringController
         float errorDerivative = (headingError - prevError) / dt;
         store.PrevHeadingError[index] = headingError;
 
-        float steer = Kp * headingError + Kd * errorDerivative - Klat * lateralError;
+        float sharpness = store.SteeringSharpness[index];
+        float steer = (Kp * sharpness) * headingError + (Kd * sharpness) * errorDerivative - Klat * lateralError;
         steer = MathF.Max(-MaxSteer, MathF.Min(MaxSteer, steer));
         if (store.DiagVehicle == index)
         {
             _diagWriter ??= new StreamWriter("diag.log", append: true) { AutoFlush = true };
             _diagWriter.WriteLine(
                 $"  STEER hdgErr={headingError * 180f / MathF.PI:F1} latErr={lateralError:F3} " +
-                $"errDeriv={errorDerivative:F3} steer={steer * 180f / MathF.PI:F1}");
+                $"errDeriv={errorDerivative:F3} steer={steer * 180f / MathF.PI:F1} sharp={sharpness:F2}");
         }
 
         store.SteeringAngle[index] = steer;
@@ -541,6 +565,9 @@ public static class SteeringController
         float speed, float targetSpeed, float progress, float stopAtT,
         SignalState signal, SignalState yieldSignal)
     {
+        float comfortDecel = store.BrakingComfort[index];
+        float timeHeadway = MapAggressivenessToTimeHeadway(store.Aggressiveness[index]);
+
         var (aheadDist, leaderSpeed) = FindNearbyThreats(store, index, grid, graph);
 
         float gap = aheadDist - VehicleLength;
@@ -555,7 +582,7 @@ public static class SteeringController
                 bool shouldStop = true;
                 if (signal == SignalState.Yellow)
                 {
-                    float stoppingDist = speed * speed / (2f * IdmComfortDecel);
+                    float stoppingDist = speed * speed / (2f * comfortDecel);
                     shouldStop = distToStop > stoppingDist * 0.8f;
                 }
                 if (shouldStop)
@@ -588,7 +615,7 @@ public static class SteeringController
 
         if (ApplyHardOverlapBrake(store, index, gap)) return;
 
-        float idmAccel = ComputeIdmAcceleration(speed, targetSpeed, gap, deltaV);
+        float idmAccel = ComputeIdmAcceleration(speed, targetSpeed, gap, deltaV, timeHeadway, comfortDecel);
         var (idmThrottle, idmBrake) = MapIdmToControls(idmAccel);
 
         store.Brake[index] = idmBrake;
@@ -750,12 +777,14 @@ public static class SteeringController
         float errorDerivative = (headingError - prevError) / dt;
         store.PrevHeadingError[index] = headingError;
 
-        float steer = Kp * headingError + Kd * errorDerivative;
+        float arcSharpness = store.SteeringSharpness[index];
+        float steer = (Kp * arcSharpness) * headingError + (Kd * arcSharpness) * errorDerivative;
         steer = MathF.Max(-MaxSteer, MathF.Min(MaxSteer, steer));
         store.SteeringAngle[index] = steer;
 
         // IDM car-following (world-space, works regardless of edge/arc)
-        float targetSpeed = arc.SpeedLimit > 0f ? arc.SpeedLimit : TargetSpeed;
+        float arcBaseSpeed = arc.SpeedLimit > 0f ? arc.SpeedLimit : TargetSpeed;
+        float targetSpeed = arcBaseSpeed * store.SpeedBias[index];
         var (aheadDist, leaderSpeed) = FindVehicleAhead(store, index, grid, graph);
         int leaderIndex = -1; // track leader for conflict logging
 
@@ -819,7 +848,9 @@ public static class SteeringController
             return;
         }
 
-        float idmAccel = ComputeIdmAcceleration(speed, targetSpeed, gap, deltaV);
+        float arcTimeHeadway = MapAggressivenessToTimeHeadway(store.Aggressiveness[index]);
+        float arcComfortDecel = store.BrakingComfort[index];
+        float idmAccel = ComputeIdmAcceleration(speed, targetSpeed, gap, deltaV, arcTimeHeadway, arcComfortDecel);
         var (idmThrottle, idmBrake) = MapIdmToControls(idmAccel);
 
         store.Brake[index] = idmBrake;
@@ -842,11 +873,21 @@ public static class SteeringController
         return true;
     }
 
+    /// <summary>
+    /// Maps Aggressiveness (0–1) to IDM time headway (seconds).
+    /// High aggression = close following (0.8s), low aggression = large gap (2.0s).
+    /// </summary>
+    private static float MapAggressivenessToTimeHeadway(float aggressiveness)
+        => 2.0f - aggressiveness * 1.2f;
+
     /// <param name="desiredSpeed">Target speed in m/s.</param>
     /// <param name="gap">Bumper-to-bumper gap to leader in meters.</param>
     /// <param name="deltaV">Speed difference (positive = closing on leader).</param>
+    /// <param name="timeHeadway">Desired time headway in seconds (IDM T parameter).</param>
+    /// <param name="comfortDecel">Comfortable deceleration in m/s^2 (IDM b parameter).</param>
     /// <returns>Acceleration in m/s^2 (positive = accelerate, negative = brake).</returns>
-    private static float ComputeIdmAcceleration(float speed, float desiredSpeed, float gap, float deltaV)
+    private static float ComputeIdmAcceleration(float speed, float desiredSpeed, float gap, float deltaV,
+        float timeHeadway, float comfortDecel)
     {
         // Free-road term: (v/v0)^4
         float vRatio = desiredSpeed > 0.01f ? speed / desiredSpeed : 0f;
@@ -854,8 +895,8 @@ public static class SteeringController
         float freeRoadTerm = vRatio2 * vRatio2;
 
         // Desired dynamic gap: s* = s0 + max(0, v*T + v*Δv / (2*sqrt(a*b)))
-        float interaction = speed * deltaV / (2f * MathF.Sqrt(IdmMaxAccel * IdmComfortDecel));
-        float sStar = IdmMinGap + MathF.Max(0f, speed * IdmTimeHeadway + interaction);
+        float interaction = speed * deltaV / (2f * MathF.Sqrt(IdmMaxAccel * comfortDecel));
+        float sStar = IdmMinGap + MathF.Max(0f, speed * timeHeadway + interaction);
 
         // Gap term: (s*/gap)^2
         float gapTerm = gap > 0.01f ? (sStar / gap) * (sStar / gap) : 100f;

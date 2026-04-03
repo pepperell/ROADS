@@ -79,6 +79,31 @@ public class VehicleStore
     /// <summary>Speed bias in m/s applied to find merge gaps (positive = speed up, negative = slow down).</summary>
     public float[] MergeSpeedBias = Array.Empty<float>();
 
+    // ── Driver personality (cold, set at spawn) ──
+
+    /// <summary>Aggressiveness (0–1): affects following distance, lane change gaps.</summary>
+    public float[] Aggressiveness = Array.Empty<float>();
+    /// <summary>Speed bias (0.8–1.3): multiplier on speed limit for desired speed.</summary>
+    public float[] SpeedBias = Array.Empty<float>();
+    /// <summary>Reaction time (0.3–1.2s): delay before responding to throttle/brake changes.</summary>
+    public float[] ReactionTime = Array.Empty<float>();
+    /// <summary>Steering sharpness (0.5–2.0): multiplier on PD steering gains.</summary>
+    public float[] SteeringSharpness = Array.Empty<float>();
+    /// <summary>Comfortable deceleration (1.5–4.0 m/s²): IDM 'b' parameter.</summary>
+    public float[] BrakingComfort = Array.Empty<float>();
+    /// <summary>Lane change eagerness (0–1): affects lane change frequency and duration.</summary>
+    public float[] LaneChangeBias = Array.Empty<float>();
+    /// <summary>Patience before risky maneuvers (5–180s).</summary>
+    public float[] PatienceTimer = Array.Empty<float>();
+    /// <summary>Preferred vehicle type index.</summary>
+    public byte[] PreferredVehicle = Array.Empty<byte>();
+    /// <summary>Driver archetype enum value, for UI display.</summary>
+    public byte[] Archetype = Array.Empty<byte>();
+    /// <summary>Smoothed throttle input after reaction-time lag filter.</summary>
+    public float[] SmoothedThrottle = Array.Empty<float>();
+    /// <summary>Smoothed brake input after reaction-time lag filter.</summary>
+    public float[] SmoothedBrake = Array.Empty<float>();
+
     // ── Cold data (visual) ──
 
     /// <summary>Lifecycle state of the vehicle.</summary>
@@ -188,6 +213,17 @@ public class VehicleStore
         DesiredLane[i] = byte.MaxValue;
         MergeUrgency[i] = 0f;
         MergeSpeedBias[i] = 0f;
+        Aggressiveness[i] = 0.4f;
+        SpeedBias[i] = 1.0f;
+        ReactionTime[i] = 0.6f;
+        SteeringSharpness[i] = 1.0f;
+        BrakingComfort[i] = 2.5f;
+        LaneChangeBias[i] = 0.5f;
+        PatienceTimer[i] = 30f;
+        PreferredVehicle[i] = 0;
+        Archetype[i] = (byte)DriverArchetype.Commuter;
+        SmoothedThrottle[i] = 0f;
+        SmoothedBrake[i] = 0f;
         State[i] = VehicleState.Driving;
         var (cr, cg, cb) = RandomCarColor();
         ColorR[i] = cr;
@@ -232,6 +268,17 @@ public class VehicleStore
             DesiredLane[index] = DesiredLane[last];
             MergeUrgency[index] = MergeUrgency[last];
             MergeSpeedBias[index] = MergeSpeedBias[last];
+            Aggressiveness[index] = Aggressiveness[last];
+            SpeedBias[index] = SpeedBias[last];
+            ReactionTime[index] = ReactionTime[last];
+            SteeringSharpness[index] = SteeringSharpness[last];
+            BrakingComfort[index] = BrakingComfort[last];
+            LaneChangeBias[index] = LaneChangeBias[last];
+            PatienceTimer[index] = PatienceTimer[last];
+            PreferredVehicle[index] = PreferredVehicle[last];
+            Archetype[index] = Archetype[last];
+            SmoothedThrottle[index] = SmoothedThrottle[last];
+            SmoothedBrake[index] = SmoothedBrake[last];
             State[index] = State[last];
             ColorR[index] = ColorR[last];
             ColorG[index] = ColorG[last];
@@ -268,6 +315,17 @@ public class VehicleStore
         Array.Resize(ref DesiredLane, newCapacity);
         Array.Resize(ref MergeUrgency, newCapacity);
         Array.Resize(ref MergeSpeedBias, newCapacity);
+        Array.Resize(ref Aggressiveness, newCapacity);
+        Array.Resize(ref SpeedBias, newCapacity);
+        Array.Resize(ref ReactionTime, newCapacity);
+        Array.Resize(ref SteeringSharpness, newCapacity);
+        Array.Resize(ref BrakingComfort, newCapacity);
+        Array.Resize(ref LaneChangeBias, newCapacity);
+        Array.Resize(ref PatienceTimer, newCapacity);
+        Array.Resize(ref PreferredVehicle, newCapacity);
+        Array.Resize(ref Archetype, newCapacity);
+        Array.Resize(ref SmoothedThrottle, newCapacity);
+        Array.Resize(ref SmoothedBrake, newCapacity);
         Array.Resize(ref State, newCapacity);
         Array.Resize(ref ColorR, newCapacity);
         Array.Resize(ref ColorG, newCapacity);

@@ -32,7 +32,6 @@ public class MainForm : Form
     private readonly DestinationTool _destinationTool = new();
     private readonly SignalTool _signalTool = new();
     private readonly LaneRestrictionTool _laneRestrictionTool = new();
-    private readonly MarkerRenderer _destinationRenderer = new(new SkiaSharp.SKColor(200, 60, 40, 200));
     private readonly SpatialGrid _vehicleGrid = new();
     private readonly StopLineCache _stopLineCache = new();
     private readonly EdgeSpatialGrid _edgeSpatialGrid = new();
@@ -50,6 +49,14 @@ public class MainForm : Form
     private Point _currentMousePos;
     private bool _isPanning;
 
+    /// <summary>Screen position where a drag-candidate click occurred.</summary>
+    private Point _dragStartScreenPos;
+    /// <summary>World-space offset from the cursor to the dragged item's position at click time.</summary>
+    private Vector2 _dragOffset;
+    /// <summary>Whether the drag dead zone (5 px) has been exceeded.</summary>
+    private bool _dragActive;
+    private const int DragDeadZone = 5;
+
     public MainForm()
     {
         Text = "ROADS - Traffic Simulation";
@@ -62,7 +69,7 @@ public class MainForm : Form
         _spawner = new VehicleSpawner(_roadGraph, _vehicles, _vehicleGrid);
         _graphChangeHandler = new GraphChangeHandler(_roadGraph, _editorState, _vehicles, _edgeSpatialGrid, _spawner);
         _simLoop = new SimulationLoop(_roadGraph, _vehicles, _vehicleGrid, _stopLineCache, _intersectionArcs, _edgeSpatialGrid, _trafficSignals, _stopSigns, _yieldSigns, _spawner, _editorState);
-        _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _spawnPointRenderer, _destinationRenderer, _uiRenderer, _sliderPanel, _vehicleInfoPanel, _laneRestrictionTool);
+        _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _spawnPointRenderer, _uiRenderer, _sliderPanel, _vehicleInfoPanel, _laneRestrictionTool);
 
         _sliderPanel.AddSlider("Kp", 0.5f, 10f, () => SteeringController.Kp, v => SteeringController.Kp = v);
         _sliderPanel.AddSlider("Kd", 0f, 5f, () => SteeringController.Kd, v => SteeringController.Kd = v);
@@ -350,6 +357,17 @@ public class MainForm : Form
             if (_sliderPanel.OnMouseDown(e.X, e.Y))
                 return;
 
+            // Check POI submenu (only visible when Destination tool active)
+            if (_editorState.ActiveTool == EditorTool.Destination)
+            {
+                var hitPOI = _uiRenderer.HitTestPOI(e.X, e.Y);
+                if (hitPOI.HasValue)
+                {
+                    _editorState.SelectedPOIType = hitPOI.Value;
+                    return;
+                }
+            }
+
             // Check toolbar
             var hitTool = _uiRenderer.HitTest(e.X, e.Y);
             if (hitTool.HasValue)
@@ -399,9 +417,47 @@ public class MainForm : Form
 
                     _editorState.SelectedVehicle = -1;
 
-                    // Find nearest node and control point, pick whichever is closer
-                    int nearNode = _roadGraph.FindNearestNode(worldVec, EditorState.SnapDistance);
-                    var (cpEdgeIdx, cpIdx) = _roadGraph.FindNearestControlPoint(worldVec, EditorState.SnapDistance);
+                    // Find nearest node (hit radius matches the visual highlight)
+                    int nearNode = _roadGraph.FindNearestNode(worldVec, 5f);
+
+                    // Only hit-test control points whose handles are currently visible:
+                    // on the selected edge, or on edges adjacent to the selected node.
+                    int cpEdgeIdx = -1, cpIdx = -1;
+                    if (_editorState.SelectedEdge >= 0 || _editorState.SelectedNode >= 0)
+                    {
+                        var (ce, ci) = _roadGraph.FindNearestControlPoint(worldVec, EditorState.SnapDistance);
+                        if (ce >= 0)
+                        {
+                            bool accept = false;
+                            var cePrimary = ce;
+                            int ceReverse = _roadGraph.FindReverseEdge(ce);
+                            if (ceReverse >= 0 && ceReverse < ce) cePrimary = ceReverse;
+
+                            // Accept if CP belongs to the selected edge
+                            if (_editorState.SelectedEdge >= 0)
+                            {
+                                int selPrimary = _editorState.SelectedEdge;
+                                int selReverse = _roadGraph.FindReverseEdge(selPrimary);
+                                if (selReverse >= 0 && selReverse < selPrimary) selPrimary = selReverse;
+                                if (cePrimary == selPrimary) accept = true;
+                            }
+
+                            // Accept if CP belongs to an edge adjacent to the selected node
+                            if (!accept && _editorState.SelectedNode >= 0)
+                            {
+                                var edge = _roadGraph.Edges[ce];
+                                if (edge.FromNode == _editorState.SelectedNode
+                                    || edge.ToNode == _editorState.SelectedNode)
+                                    accept = true;
+                            }
+
+                            if (accept)
+                            {
+                                cpEdgeIdx = ce;
+                                cpIdx = ci;
+                            }
+                        }
+                    }
 
                     float nodeDist = nearNode >= 0
                         ? Vector2.Distance(worldVec, _roadGraph.Nodes[nearNode].Position)
@@ -417,14 +473,31 @@ public class MainForm : Form
                         _editorState.SelectedNode = nearNode;
                         _editorState.SelectedEdge = -1;
                         _editorState.DragNodeIndex = nearNode;
+                        _dragStartScreenPos = e.Location;
+                        _dragOffset = _roadGraph.Nodes[nearNode].Position - worldVec;
+                        _dragActive = false;
                         _canvas.Cursor = Cursors.Hand;
                     }
                     else if (cpEdgeIdx >= 0)
                     {
-                        _editorState.SelectedNode = -1;
+                        // If the CP is adjacent to the selected node, keep the node selected
+                        var cpEdge = _roadGraph.Edges[cpEdgeIdx];
+                        bool adjacentToSelectedNode = _editorState.SelectedNode >= 0
+                            && (cpEdge.FromNode == _editorState.SelectedNode
+                                || cpEdge.ToNode == _editorState.SelectedNode);
+                        if (!adjacentToSelectedNode)
+                        {
+                            _editorState.SelectedNode = -1;
+                            _editorState.SelectedEdge = cpEdgeIdx;
+                        }
                         _editorState.DragEdgeIndex = cpEdgeIdx;
                         _editorState.DragControlPointIndex = cpIdx;
-                        _editorState.SelectedEdge = cpEdgeIdx;
+                        var cpPos = cpIdx == 1
+                            ? cpEdge.ControlPoint1
+                            : cpEdge.ControlPoint2;
+                        _dragStartScreenPos = e.Location;
+                        _dragOffset = cpPos - worldVec;
+                        _dragActive = false;
                         _canvas.Cursor = Cursors.Hand;
                     }
                     else
@@ -448,7 +521,7 @@ public class MainForm : Form
                     _spawnPointTool.OnClick(worldVec, _roadGraph);
                     break;
                 case EditorTool.Destination:
-                    _destinationTool.OnClick(worldVec, _roadGraph);
+                    _destinationTool.OnClick(worldVec, _roadGraph, _editorState.SelectedPOIType);
                     break;
                 case EditorTool.Signal:
                     _signalTool.OnClick(worldVec, _roadGraph);
@@ -469,7 +542,7 @@ public class MainForm : Form
                     RemoveNearestFlag(rWorldVec, NodeFlags.Spawn);
                     break;
                 case EditorTool.Destination:
-                    RemoveNearestFlag(rWorldVec, NodeFlags.Destination);
+                    RemoveNearestDestination(rWorldVec);
                     break;
                 case EditorTool.Signal:
                     _signalTool.OnRightClick(rWorldVec, _roadGraph, _edgeSpatialGrid,
@@ -546,8 +619,16 @@ public class MainForm : Form
         }
         else if (_editorState.IsDraggingNode)
         {
+            if (!_dragActive)
+            {
+                int dx = e.X - _dragStartScreenPos.X;
+                int dy = e.Y - _dragStartScreenPos.Y;
+                if (dx * dx + dy * dy < DragDeadZone * DragDeadZone) return;
+                _dragActive = true;
+            }
             var worldPos = _camera.ScreenToWorld(e.X, e.Y, _canvas.Width, _canvas.Height);
-            _roadGraph.MoveNode(_editorState.DragNodeIndex, new Vector2(worldPos.X, worldPos.Y));
+            _roadGraph.MoveNode(_editorState.DragNodeIndex,
+                new Vector2(worldPos.X, worldPos.Y) + _dragOffset);
 
             // Detect crossing previews for edges connected to the dragged node
             _editorState.DragCrossingPreviews.Clear();
@@ -557,11 +638,69 @@ public class MainForm : Form
         }
         else if (_editorState.IsDraggingControlPoint)
         {
+            if (!_dragActive)
+            {
+                int dx = e.X - _dragStartScreenPos.X;
+                int dy = e.Y - _dragStartScreenPos.Y;
+                if (dx * dx + dy * dy < DragDeadZone * DragDeadZone) return;
+                _dragActive = true;
+            }
             var worldPos = _camera.ScreenToWorld(e.X, e.Y, _canvas.Width, _canvas.Height);
             _roadGraph.SetControlPoint(
                 _editorState.DragEdgeIndex,
                 _editorState.DragControlPointIndex,
-                new Vector2(worldPos.X, worldPos.Y));
+                new Vector2(worldPos.X, worldPos.Y) + _dragOffset);
+        }
+        else
+        {
+            var worldPos = _camera.ScreenToWorld(e.X, e.Y, _canvas.Width, _canvas.Height);
+            var worldVec = new Vector2(worldPos.X, worldPos.Y);
+
+            switch (_editorState.ActiveTool)
+            {
+                case EditorTool.Select:
+                {
+                    int nearNode = _roadGraph.FindNearestNode(worldVec, 5f);
+                    if (nearNode >= 0)
+                    {
+                        _editorState.HoveredNode = nearNode;
+                        _editorState.HoveredEdge = -1;
+                    }
+                    else
+                    {
+                        _editorState.HoveredNode = -1;
+                        _editorState.HoveredEdge = _edgeSpatialGrid.FindNearestEdge(_roadGraph, worldVec, EditorState.SnapDistance);
+                    }
+                    break;
+                }
+                case EditorTool.Delete:
+                {
+                    int nearNode = _roadGraph.FindNearestNode(worldVec, 5f);
+                    if (nearNode >= 0)
+                    {
+                        _editorState.HoveredNode = nearNode;
+                        _editorState.HoveredEdge = -1;
+                    }
+                    else
+                    {
+                        _editorState.HoveredNode = -1;
+                        _editorState.HoveredEdge = _edgeSpatialGrid.FindNearestEdge(_roadGraph, worldVec, EditorState.SnapDistance);
+                    }
+                    break;
+                }
+                case EditorTool.SpawnPoint:
+                case EditorTool.Destination:
+                case EditorTool.Signal:
+                {
+                    _editorState.HoveredEdge = -1;
+                    _editorState.HoveredNode = _roadGraph.FindNearestNode(worldVec, EditorState.SnapDistance);
+                    break;
+                }
+                default:
+                    _editorState.HoveredNode = -1;
+                    _editorState.HoveredEdge = -1;
+                    break;
+            }
         }
     }
 
@@ -595,6 +734,32 @@ public class MainForm : Form
         }
         if (bestNode >= 0)
             _roadGraph.SetNodeFlags(bestNode, _roadGraph.Nodes[bestNode].Flags & ~flag);
+    }
+
+    /// <summary>
+    /// Right-click removal for destination nodes: clears both the Destination flag and POI type.
+    /// </summary>
+    private void RemoveNearestDestination(Vector2 worldPos)
+    {
+        int bestNode = -1;
+        float bestDist = EditorState.SnapDistance * EditorState.SnapDistance;
+        for (int i = 0; i < _roadGraph.Nodes.Count; i++)
+        {
+            var node = _roadGraph.Nodes[i];
+            if (float.IsNaN(node.Position.X)) continue;
+            if (!node.Flags.HasFlag(NodeFlags.Destination)) continue;
+            float d = Vector2.DistanceSquared(worldPos, node.Position);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                bestNode = i;
+            }
+        }
+        if (bestNode >= 0)
+        {
+            _roadGraph.SetNodeFlags(bestNode, _roadGraph.Nodes[bestNode].Flags & ~NodeFlags.Destination);
+            _roadGraph.SetNodePOIType(bestNode, POIType.None);
+        }
     }
 
 }

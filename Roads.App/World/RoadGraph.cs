@@ -64,6 +64,17 @@ public class RoadGraph
     }
 
     /// <summary>
+    /// Sets the Point of Interest type on a node.
+    /// </summary>
+    public void SetNodePOIType(int index, POIType type)
+    {
+        var node = _nodes[index];
+        node.PointOfInterest = type;
+        _nodes[index] = node;
+        Version++;
+    }
+
+    /// <summary>
     /// Adds a new node at the given world position.
     /// </summary>
     /// <param name="position">World-space position in meters.</param>
@@ -175,6 +186,7 @@ public class RoadGraph
         var node = _nodes[nodeIndex];
         node.Position = new System.Numerics.Vector2(float.NaN, float.NaN);
         node.Flags &= ~(NodeFlags.Spawn | NodeFlags.Destination);
+        node.PointOfInterest = POIType.None;
         _nodes[nodeIndex] = node;
         _turnMatrix.Remove(nodeIndex);
     }
@@ -906,6 +918,7 @@ public class RoadGraph
             if (node.EdgeCount > 2 && (node.Flags & (NodeFlags.Spawn | NodeFlags.Destination)) != 0)
             {
                 node.Flags &= ~(NodeFlags.Spawn | NodeFlags.Destination);
+                node.PointOfInterest = POIType.None;
                 _nodes[i] = node;
             }
         }

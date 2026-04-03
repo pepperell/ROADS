@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Roads.App.Core;
 using Roads.App.Editor;
 using Roads.App.Vehicles;
 using Roads.App.World;
@@ -32,6 +33,9 @@ public class SimulationLoop
 
     /// <summary>Fixed simulation timestep in seconds (30 Hz).</summary>
     public const float SimDt = 1f / 30f;
+
+    /// <summary>Game clock tracking time of day (0–24 hours).</summary>
+    public SimulationClock Clock { get; } = new();
 
     /// <summary>Maximum number of vehicles allowed in the simulation.</summary>
     public const int MaxVehicles = 200;
@@ -120,6 +124,7 @@ public class SimulationLoop
 
             _spawner.RerouteFinished();
             _spawner.AutoSpawn(SimDt, MaxVehicles);
+            Clock.Advance(SimDt);
 
             _simAccumulator -= SimDt;
             steps++;

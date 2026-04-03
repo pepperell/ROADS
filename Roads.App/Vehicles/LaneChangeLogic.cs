@@ -89,15 +89,17 @@ public static class LaneChangeLogic
             // If currently executing a lane change, advance progress
             if (store.CurrentLane[i] != store.TargetLane[i])
             {
-                store.LaneChangeProgress[i] += dt / LaneChangeDuration;
+                float lcDuration = LaneChangeDuration / (0.5f + store.LaneChangeBias[i]);
+                store.LaneChangeProgress[i] += dt / lcDuration;
                 if (store.LaneChangeProgress[i] >= 1f)
                 {
                     // Complete the lane change
                     store.CurrentLane[i] = store.TargetLane[i];
                     store.LaneChangeProgress[i] = 0f;
+                    float aggrCooldownFactor = 1.5f - store.Aggressiveness[i];
                     store.LaneChangeCooldown[i] = store.MergeUrgency[i] > 0f
-                        ? CooldownAfterChange
-                        : CongestionCooldownAfterChange;
+                        ? CooldownAfterChange * aggrCooldownFactor
+                        : CongestionCooldownAfterChange * aggrCooldownFactor;
                 }
                 continue; // don't evaluate new changes during an active one
             }
@@ -179,7 +181,8 @@ public static class LaneChangeLogic
         // (only if no turn prep needed AND target lane is measurably better)
         float speed = store.Speed[index];
         float desiredSpeed = edge.SpeedLimit > 0f ? edge.SpeedLimit : 13.4f;
-        if (speed < desiredSpeed * CongestionSpeedRatio && speed > 0.5f)
+        float congestionRatio = CongestionSpeedRatio + (store.LaneChangeBias[index] - 0.5f) * 0.2f;
+        if (speed < desiredSpeed * congestionRatio && speed > 0.5f)
         {
             // Prefer passing lane (lower index), but verify it's actually better
             if (currentLane > 0 && IsLaneBetter(store, index, (byte)(currentLane - 1), grid))
@@ -281,8 +284,12 @@ public static class LaneChangeLogic
         byte currentLane = store.CurrentLane[index];
         byte maxLane = (byte)(currentEdge.LaneCount - 1);
 
+        // Cautious drivers (low aggression) prepare earlier; aggressive drivers wait longer
+        float aggrPrepFactor = 1.5f - store.Aggressiveness[index];
+        float adjustedPrepBase = TurnPrepBaseDistance * aggrPrepFactor;
+
         // Maximum prep distance for scanning (use max lanes for upper bound)
-        float maxPrepDistance = TurnPrepBaseDistance + TurnPrepPerLane * maxLane;
+        float maxPrepDistance = adjustedPrepBase + TurnPrepPerLane * maxLane;
 
         // Accumulate distance from current position, scanning ahead through path edges
         float accumulatedDist = (1f - progress) * edgeLength;
@@ -341,7 +348,7 @@ public static class LaneChangeLogic
                 if (requiredLane != byte.MaxValue)
                 {
                     int lanesToCross = Math.Abs(requiredLane - currentLane);
-                    float prepDistance = TurnPrepBaseDistance + TurnPrepPerLane * lanesToCross;
+                    float prepDistance = adjustedPrepBase + TurnPrepPerLane * lanesToCross;
                     if (accumulatedDist <= prepDistance)
                     {
                         urgency = 1f - Math.Clamp(accumulatedDist / prepDistance, 0f, 1f);
@@ -371,7 +378,7 @@ public static class LaneChangeLogic
                     }
 
                     int lanesToCross = Math.Abs(requiredLane - currentLane);
-                    float prepDistance = TurnPrepBaseDistance + TurnPrepPerLane * lanesToCross;
+                    float prepDistance = adjustedPrepBase + TurnPrepPerLane * lanesToCross;
                     if (accumulatedDist <= prepDistance)
                     {
                         urgency = 1f - Math.Clamp(accumulatedDist / prepDistance, 0f, 1f);
@@ -521,7 +528,8 @@ public static class LaneChangeLogic
         var (nearestAhead, nearestBehind) = ScanTargetLaneGaps(store, index, targetLane, graph, grid, arcCache, stopLines);
 
         float speed = store.Speed[index];
-        float urgencyFactor = 1f - urgency * MaxUrgencyGapReduction;
+        float maxReduction = MaxUrgencyGapReduction + store.Aggressiveness[index] * 0.2f;
+        float urgencyFactor = 1f - urgency * maxReduction;
         float safeGapAhead = (SafeGapMinDistance + speed * SafeGapTimeBuffer) * urgencyFactor;
         float safeGapBehind = (SafeGapMinDistance + speed * 0.8f) * urgencyFactor;
 

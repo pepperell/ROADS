@@ -1,5 +1,6 @@
 using SkiaSharp;
 using Roads.App.Editor;
+using Roads.App.World;
 
 namespace Roads.App.Rendering;
 
@@ -30,6 +31,24 @@ public class UIRenderer
 
     private readonly ToolbarButton[] _buttons;
 
+    // POI submenu constants and state
+    private const float POIButtonWidth = 55f;
+    private const float POIButtonHeight = 24f;
+    private const float POIButtonSpacing = 3f;
+    private readonly SKRect[] _poiButtons;
+    private static readonly string[] POILabels = { "Home", "Work", "Shop", "Leisure", "School", "Parking" };
+
+    /// <summary>POI type colors, indexed by (POIType - 1). Used for both submenu buttons and map markers.</summary>
+    public static readonly SKColor[] POIColors =
+    {
+        new SKColor(60, 130, 220, 200),   // Home — blue
+        new SKColor(140, 140, 150, 200),  // Work — gray
+        new SKColor(220, 150, 40, 200),   // Shop — orange
+        new SKColor(60, 180, 80, 200),    // Leisure — green
+        new SKColor(200, 190, 50, 200),   // School — yellow
+        new SKColor(60, 180, 200, 200),   // Parking — cyan
+    };
+
     // Reusable paints for button rendering (Color updated per button per frame)
     private readonly SKPaint _btnPaint = new() { Style = SKPaintStyle.Fill, IsAntialias = true };
     private readonly SKPaint _btnTextPaint = new() { IsAntialias = true };
@@ -55,6 +74,16 @@ public class UIRenderer
                 Tool = tools[i].tool,
                 Bounds = new SKRect(x, ToolbarY, x + ButtonWidth, ToolbarY + ButtonHeight),
             };
+        }
+
+        // POI submenu positioned below the "Dest Pt" button (index 4)
+        float poiStartX = _buttons[4].Bounds.Left;
+        float poiY = ToolbarY + ButtonHeight + 8f;
+        _poiButtons = new SKRect[POILabels.Length];
+        for (int i = 0; i < POILabels.Length; i++)
+        {
+            float px = poiStartX + i * (POIButtonWidth + POIButtonSpacing);
+            _poiButtons[i] = new SKRect(px, poiY, px + POIButtonWidth, poiY + POIButtonHeight);
         }
     }
 
@@ -113,6 +142,10 @@ public class UIRenderer
             canvas.DrawText(btn.Label, textX, textY, SKTextAlign.Center, font, _btnTextPaint);
         }
 
+        // POI type submenu (only when Destination tool active)
+        if (editorState.ActiveTool == EditorTool.Destination)
+            DrawPOISubmenu(canvas, editorState);
+
         // Keyboard shortcut legend (bottom-right)
         if (canvasWidth > 0 && canvasHeight > 0)
         {
@@ -157,5 +190,55 @@ public class UIRenderer
                 return _buttons[i].Tool;
         }
         return null;
+    }
+
+    /// <summary>
+    /// Tests if a screen position hits a POI submenu button.
+    /// </summary>
+    /// <returns>The POI type if a button was clicked; otherwise <c>null</c>.</returns>
+    public POIType? HitTestPOI(float screenX, float screenY)
+    {
+        for (int i = 0; i < _poiButtons.Length; i++)
+        {
+            if (_poiButtons[i].Contains(screenX, screenY))
+                return (POIType)(i + 1); // POIType.Home = 1, Work = 2, etc.
+        }
+        return null;
+    }
+
+    private void DrawPOISubmenu(SKCanvas canvas, EditorState editorState)
+    {
+        // Background panel
+        float bgLeft = _poiButtons[0].Left - 4f;
+        float bgTop = _poiButtons[0].Top - 4f;
+        float bgRight = _poiButtons[^1].Right + 4f;
+        float bgBottom = _poiButtons[0].Bottom + 4f;
+
+        using var bgPaint = new SKPaint
+        {
+            Color = new SKColor(30, 32, 38, 220),
+            Style = SKPaintStyle.Fill,
+        };
+        canvas.DrawRoundRect(bgLeft, bgTop, bgRight - bgLeft, bgBottom - bgTop, 4f, 4f, bgPaint);
+
+        using var font = new SKFont { Size = 11 };
+
+        for (int i = 0; i < _poiButtons.Length; i++)
+        {
+            var poiType = (POIType)(i + 1);
+            bool active = editorState.SelectedPOIType == poiType;
+
+            var color = POIColors[i];
+            _btnPaint.Color = active
+                ? new SKColor(color.Red, color.Green, color.Blue, 255)
+                : new SKColor((byte)(color.Red / 2), (byte)(color.Green / 2), (byte)(color.Blue / 2), 200);
+
+            canvas.DrawRoundRect(_poiButtons[i], 3f, 3f, _btnPaint);
+
+            _btnTextPaint.Color = active ? SKColors.White : new SKColor(160, 160, 160);
+            float textX = _poiButtons[i].MidX;
+            float textY = _poiButtons[i].MidY + 4f;
+            canvas.DrawText(POILabels[i], textX, textY, SKTextAlign.Center, font, _btnTextPaint);
+        }
     }
 }

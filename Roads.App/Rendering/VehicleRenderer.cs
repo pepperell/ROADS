@@ -20,22 +20,40 @@ public class VehicleRenderer
     /// <summary>When true, draws red circles on vehicles stuck on arcs and magenta lines between pairs at the same node.</summary>
     public static bool ShowArcConflicts { get; set; }
 
+    // Pre-allocated headlight cone paths (reused every frame, same shape in local vehicle space)
+    private readonly SKPath _leftBeam;
+    private readonly SKPath _rightBeam;
+
+    public VehicleRenderer()
+    {
+        float halfL = VehicleLength * 0.5f;
+        float beamLength = 15f;
+
+        _leftBeam = new SKPath();
+        _leftBeam.MoveTo(halfL, -0.4f);
+        _leftBeam.LineTo(halfL + beamLength, -3.5f);
+        _leftBeam.LineTo(halfL + beamLength, 0f);
+        _leftBeam.Close();
+
+        _rightBeam = new SKPath();
+        _rightBeam.MoveTo(halfL, 0.4f);
+        _rightBeam.LineTo(halfL + beamLength, 0f);
+        _rightBeam.LineTo(halfL + beamLength, 3.5f);
+        _rightBeam.Close();
+    }
+
     /// <summary>
-    /// Draws all active vehicles as colored rounded rectangles with a translucent windshield.
+    /// Draws all active vehicles as colored rounded rectangles with windshield,
+    /// headlight beams at night, brake lights when braking, and tail lights at night.
     /// </summary>
-    /// <param name="canvas">SkiaSharp canvas in world-space coordinates.</param>
-    /// <param name="store">Vehicle data store.</param>
-    /// <param name="zoom">Current camera zoom level (unused but kept for interface consistency).</param>
-    public void Draw(SKCanvas canvas, VehicleStore store, float zoom)
+    public void Draw(SKCanvas canvas, VehicleStore store, float zoom, float darkness)
     {
         if (store.Count == 0) return;
 
-        using var bodyPaint = new SKPaint
-        {
-            Style = SKPaintStyle.Fill,
-            IsAntialias = true,
-        };
+        bool drawHeadlights = darkness > 0.05f;
+        float ambient = 1f - darkness * 0.4f; // darken vehicle bodies at night
 
+        using var bodyPaint = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = true };
         using var windshieldPaint = new SKPaint
         {
             Color = new SKColor(140, 200, 255, 180),
@@ -43,7 +61,46 @@ public class VehicleRenderer
             IsAntialias = true,
         };
 
+        // Headlight beam paint (additive blending + gradient fade with distance)
         float halfL = VehicleLength * 0.5f;
+        byte beamAlpha = (byte)(darkness * 35);
+        using var beamShader = drawHeadlights ? SKShader.CreateLinearGradient(
+            new SKPoint(halfL, 0),
+            new SKPoint(halfL + 15f, 0),
+            new SKColor[] { new SKColor(255, 245, 210, beamAlpha), new SKColor(255, 245, 210, 0) },
+            new float[] { 0f, 1f },
+            SKShaderTileMode.Clamp) : null;
+        using var beamPaint = drawHeadlights ? new SKPaint
+        {
+            Style = SKPaintStyle.Fill,
+            IsAntialias = true,
+            BlendMode = SKBlendMode.Plus,
+            Shader = beamShader,
+        } : null;
+
+        // Headlight dot paint (bright point sources)
+        using var headlightDotPaint = drawHeadlights ? new SKPaint
+        {
+            Color = new SKColor(255, 250, 220, (byte)(120 + darkness * 135)),
+            Style = SKPaintStyle.Fill,
+            IsAntialias = true,
+        } : null;
+
+        // Tail light paint (dim red, always on at night)
+        using var tailPaint = drawHeadlights ? new SKPaint
+        {
+            Color = new SKColor(180, 20, 10, (byte)(darkness * 60)),
+            Style = SKPaintStyle.Fill,
+            IsAntialias = true,
+        } : null;
+
+        // Brake light paint (bright red, intensity varies)
+        using var brakePaint = new SKPaint
+        {
+            Style = SKPaintStyle.Fill,
+            IsAntialias = true,
+        };
+
         float halfW = VehicleWidth * 0.5f;
 
         for (int i = 0; i < store.Count; i++)
@@ -54,12 +111,43 @@ public class VehicleRenderer
             canvas.Translate(store.PosX[i], store.PosY[i]);
             canvas.RotateRadians(store.Heading[i]);
 
-            // Car body with per-vehicle color
-            bodyPaint.Color = new SKColor(store.ColorR[i], store.ColorG[i], store.ColorB[i]);
+            // 1. Headlight beams (behind body so car sits on top)
+            if (drawHeadlights)
+            {
+                canvas.DrawPath(_leftBeam, beamPaint!);
+                canvas.DrawPath(_rightBeam, beamPaint!);
+            }
+
+            // 2. Car body with per-vehicle color (darkened at night)
+            bodyPaint.Color = new SKColor(
+                (byte)(store.ColorR[i] * ambient),
+                (byte)(store.ColorG[i] * ambient),
+                (byte)(store.ColorB[i] * ambient));
             canvas.DrawRoundRect(-halfL, -halfW, VehicleLength, VehicleWidth, 0.6f, 0.6f, bodyPaint);
 
-            // Windshield (front quarter)
+            // 3. Windshield (front quarter)
             canvas.DrawRect(halfL * 0.3f, -halfW + 0.3f, halfL * 0.5f, VehicleWidth - 0.6f, windshieldPaint);
+
+            // 4. Headlight dots at front corners
+            if (drawHeadlights)
+            {
+                canvas.DrawCircle(halfL, -halfW * 0.4f, 0.25f, headlightDotPaint!);
+                canvas.DrawCircle(halfL, halfW * 0.4f, 0.25f, headlightDotPaint!);
+            }
+
+            // 5. Brake lights at rear corners (when braking)
+            if (store.Brake[i] > 0.1f)
+            {
+                brakePaint.Color = new SKColor(255, 30, 20, 230);
+                canvas.DrawRect(-halfL, -halfW * 0.7f - 0.15f, 0.3f, 0.3f, brakePaint);
+                canvas.DrawRect(-halfL, halfW * 0.7f - 0.15f, 0.3f, 0.3f, brakePaint);
+            }
+            // 6. Tail lights (dim red at night, even when not braking)
+            else if (drawHeadlights)
+            {
+                canvas.DrawRect(-halfL, -halfW * 0.7f - 0.15f, 0.3f, 0.3f, tailPaint!);
+                canvas.DrawRect(-halfL, halfW * 0.7f - 0.15f, 0.3f, 0.3f, tailPaint!);
+            }
 
             canvas.Restore();
         }
