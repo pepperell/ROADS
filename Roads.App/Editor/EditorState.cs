@@ -48,6 +48,9 @@ public class EditorState
     /// <summary>Index of the currently selected node, or -1 if none.</summary>
     public int SelectedNode { get; set; } = -1;
 
+    /// <summary>Index of the vehicle under the mouse cursor, or -1 if none.</summary>
+    public int HoveredVehicle { get; set; } = -1;
+
     /// <summary>Index of the currently selected vehicle, or -1 if none.</summary>
     public int SelectedVehicle { get; set; } = -1;
 
@@ -86,6 +89,7 @@ public class EditorState
         HoveredEdge = -1;
         HoveredNode = -1;
         SelectedNode = -1;
+        HoveredVehicle = -1;
         SelectedVehicle = -1;
         DragNodeIndex = -1;
         DragEdgeIndex = -1;

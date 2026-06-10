@@ -104,6 +104,11 @@ public class VehicleStore
     /// <summary>Smoothed brake input after reaction-time lag filter.</summary>
     public float[] SmoothedBrake = Array.Empty<float>();
 
+    // ── Schedule data (cold, set at spawn) ──
+
+    /// <summary>Index into PopulationManager's resident list, or -1 for legacy (unscheduled) vehicles.</summary>
+    public int[] ResidentId = Array.Empty<int>();
+
     // ── Cold data (visual) ──
 
     /// <summary>Lifecycle state of the vehicle.</summary>
@@ -224,6 +229,7 @@ public class VehicleStore
         Archetype[i] = (byte)DriverArchetype.Commuter;
         SmoothedThrottle[i] = 0f;
         SmoothedBrake[i] = 0f;
+        ResidentId[i] = -1;
         State[i] = VehicleState.Driving;
         var (cr, cg, cb) = RandomCarColor();
         ColorR[i] = cr;
@@ -279,6 +285,7 @@ public class VehicleStore
             Archetype[index] = Archetype[last];
             SmoothedThrottle[index] = SmoothedThrottle[last];
             SmoothedBrake[index] = SmoothedBrake[last];
+            ResidentId[index] = ResidentId[last];
             State[index] = State[last];
             ColorR[index] = ColorR[last];
             ColorG[index] = ColorG[last];
@@ -287,6 +294,22 @@ public class VehicleStore
 
         Count--;
         return index < last ? index : -1;
+    }
+
+    /// <summary>Removes all vehicles and resets count to zero.</summary>
+    public void ClearAll()
+    {
+        Count = 0;
+    }
+
+    /// <summary>
+    /// Ensures backing arrays have at least the given capacity and sets Count directly.
+    /// Used during deserialization to pre-allocate before writing SoA data.
+    /// </summary>
+    public void SetCount(int count)
+    {
+        if (count > Capacity) Grow(count);
+        Count = count;
     }
 
     /// <summary>Resizes all backing arrays to the new capacity.</summary>
@@ -326,6 +349,7 @@ public class VehicleStore
         Array.Resize(ref Archetype, newCapacity);
         Array.Resize(ref SmoothedThrottle, newCapacity);
         Array.Resize(ref SmoothedBrake, newCapacity);
+        Array.Resize(ref ResidentId, newCapacity);
         Array.Resize(ref State, newCapacity);
         Array.Resize(ref ColorR, newCapacity);
         Array.Resize(ref ColorG, newCapacity);

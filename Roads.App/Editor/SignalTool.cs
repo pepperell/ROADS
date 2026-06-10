@@ -23,6 +23,9 @@ public class SignalTool
         int node = graph.FindNearestNode(worldPos, EditorState.SnapDistance);
         if (node < 0) return false;
 
+        // Only allow signals at real intersections (3+ incoming edges)
+        if (graph.GetIncomingEdges(node).Count < 3) return false;
+
         var flags = graph.Nodes[node].Flags;
 
         if (flags.HasFlag(NodeFlags.TrafficLight))

@@ -149,7 +149,7 @@ public class StopSignSystem
             Array.Copy(oldExempt, _edgeExempt, Math.Min(oldExempt.Length, edgeCount));
         }
 
-        // Auto-assign stop signs: nodes with 2+ incoming edges that aren't traffic lights
+        // Auto-assign stop signs: nodes with 3+ incoming edges that aren't traffic lights
         for (int n = 0; n < nodeCount; n++)
         {
             var node = graph.Nodes[n];
@@ -161,7 +161,7 @@ public class StopSignSystem
             bool isManual = node.Flags.HasFlag(NodeFlags.ManualSignal);
             bool shouldBeStop = isManual
                 ? node.Flags.HasFlag(NodeFlags.StopSign)
-                : (incoming.Count >= 2
+                : (incoming.Count >= 3
                     && !node.Flags.HasFlag(NodeFlags.TrafficLight)
                     && !node.Flags.HasFlag(NodeFlags.Yield)
                     && HasAngularSpread(graph, incoming));
@@ -357,39 +357,66 @@ public class StopSignSystem
     /// <summary>
     /// Check if incoming edges approach from genuinely different directions (not collinear).
     /// Two roads meeting end-to-end approach from opposite directions (folded angles ≈ same).
-    /// A real intersection has angular spread in folded [0, π) space.
+    /// A real intersection has at least one pair of incoming edges whose folded angles differ
+    /// by more than 30°, accounting for wrap-around at π.
     /// </summary>
     private static bool HasAngularSpread(RoadGraph graph, ArraySegment<int> incoming)
     {
         const float minSpread = MathF.PI / 6f; // 30° threshold
+        const int maxEdges = 16;
 
-        float minFolded = float.MaxValue;
-        float maxFolded = float.MinValue;
+        Span<float> folded = stackalloc float[maxEdges];
         int count = 0;
 
         foreach (int edgeIdx in incoming)
         {
+            if (count >= maxEdges) break;
             var edge = graph.Edges[edgeIdx];
             if (edge.FromNode < 0) continue;
 
             var tangent = graph.EvaluateBezierTangent(edgeIdx, 1.0f);
             float angle = MathF.Atan2(tangent.Y, tangent.X);
             // Fold mod π: opposing directions map to same value
-            float folded = angle % MathF.PI;
-            if (folded < 0) folded += MathF.PI;
-
-            if (folded < minFolded) minFolded = folded;
-            if (folded > maxFolded) maxFolded = folded;
-            count++;
+            float f = angle % MathF.PI;
+            if (f < 0) f += MathF.PI;
+            folded[count++] = f;
         }
 
         if (count < 2) return false;
 
-        // Check spread, accounting for wrap-around at π
-        float spread = maxFolded - minFolded;
-        float wrapSpread = MathF.PI - spread; // the gap going the other way
-        float actualSpread = MathF.Min(spread, wrapSpread);
+        // Check all pairs: if any pair differs by more than the threshold, it's a real intersection.
+        // Uses wrap-aware distance in [0, π) space.
+        for (int i = 0; i < count; i++)
+        {
+            for (int j = i + 1; j < count; j++)
+            {
+                float diff = MathF.Abs(folded[i] - folded[j]);
+                float wrapDiff = MathF.PI - diff;
+                if (MathF.Min(diff, wrapDiff) > minSpread)
+                    return true;
+            }
+        }
 
-        return actualSpread > minSpread;
+        return false;
+    }
+
+    // ── Serialization helpers ──────────────────────────────────────────
+
+    /// <summary>Returns indices of all edges marked exempt from stop sign enforcement.</summary>
+    public List<int> GetExemptEdges()
+    {
+        var result = new List<int>();
+        for (int i = 0; i < _edgeExempt.Length; i++)
+            if (_edgeExempt[i]) result.Add(i);
+        return result;
+    }
+
+    /// <summary>Restores edge exemptions from a saved list of edge indices.</summary>
+    public void SetExemptEdges(List<int> edges)
+    {
+        Array.Clear(_edgeExempt, 0, _edgeExempt.Length);
+        foreach (int e in edges)
+            if (e >= 0 && e < _edgeExempt.Length) _edgeExempt[e] = true;
+        _dirty = true;
     }
 }

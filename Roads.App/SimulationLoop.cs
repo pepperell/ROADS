@@ -24,6 +24,7 @@ public class SimulationLoop
     private readonly StopSignSystem _stopSigns;
     private readonly YieldSignSystem _yieldSigns;
     private readonly VehicleSpawner _spawner;
+    private readonly PopulationManager _populationManager;
     private readonly EditorState _editorState;
 
     private double _lastSimTime;
@@ -53,11 +54,15 @@ public class SimulationLoop
     /// <summary>Gets the current time scale multiplier.</summary>
     public int TimeScale => _paused ? 0 : (1 << _timeScaleExponent);
 
+    /// <summary>Gets the population manager for resident/schedule info.</summary>
+    public PopulationManager Population => _populationManager;
+
     public SimulationLoop(RoadGraph graph, VehicleStore vehicles,
         SpatialGrid vehicleGrid, StopLineCache stopLineCache,
         IntersectionArcCache intersectionArcs, EdgeSpatialGrid edgeSpatialGrid,
         TrafficSignalSystem trafficSignals, StopSignSystem stopSigns,
-        YieldSignSystem yieldSigns, VehicleSpawner spawner, EditorState editorState)
+        YieldSignSystem yieldSigns, VehicleSpawner spawner,
+        PopulationManager populationManager, EditorState editorState)
     {
         _graph = graph;
         _vehicles = vehicles;
@@ -69,6 +74,7 @@ public class SimulationLoop
         _stopSigns = stopSigns;
         _yieldSigns = yieldSigns;
         _spawner = spawner;
+        _populationManager = populationManager;
         _editorState = editorState;
         _lastSimTime = _stopwatch.Elapsed.TotalSeconds;
     }
@@ -123,6 +129,8 @@ public class SimulationLoop
             VehiclePhysics.UpdateAll(_vehicles, SimDt);
 
             _spawner.RerouteFinished();
+            _populationManager.Update(SimDt, Clock.TimeOfDay, Clock.DayNumber);
+            _spawner.ScheduleModeActive = _populationManager.ScheduleModeEnabled;
             _spawner.AutoSpawn(SimDt, MaxVehicles);
             Clock.Advance(SimDt);
 

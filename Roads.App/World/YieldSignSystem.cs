@@ -365,4 +365,24 @@ public class YieldSignSystem
                     / (inLen * otherLen);
         return dot < OncomingDotThreshold;
     }
+
+    // ── Serialization helpers ──────────────────────────────────────────
+
+    /// <summary>Returns indices of all edges marked exempt from yield enforcement.</summary>
+    public List<int> GetExemptEdges()
+    {
+        var result = new List<int>();
+        for (int i = 0; i < _edgeExempt.Length; i++)
+            if (_edgeExempt[i]) result.Add(i);
+        return result;
+    }
+
+    /// <summary>Restores edge exemptions from a saved list of edge indices.</summary>
+    public void SetExemptEdges(List<int> edges)
+    {
+        Array.Clear(_edgeExempt, 0, _edgeExempt.Length);
+        foreach (int e in edges)
+            if (e >= 0 && e < _edgeExempt.Length) _edgeExempt[e] = true;
+        _dirty = true;
+    }
 }

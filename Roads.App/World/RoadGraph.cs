@@ -906,19 +906,31 @@ public class RoadGraph
     }
 
     /// <summary>
-    /// Strips Spawn/Destination flags from any node that now has more than 2 outgoing edges.
+    /// Strips Spawn/Destination flags from any node that now has more than 2 outgoing edges,
+    /// and strips signal flags (TrafficLight/StopSign/Yield/ManualSignal) from nodes with fewer
+    /// than 3 incoming edges (bends/dead-ends that aren't real intersections).
     /// Called after graph mutations that change adjacency.
     /// </summary>
     public void StripMarkerFlagsFromIntersections()
     {
+        const NodeFlags signalMask = NodeFlags.TrafficLight | NodeFlags.StopSign | NodeFlags.Yield | NodeFlags.ManualSignal;
+
         for (int i = 0; i < _nodes.Count; i++)
         {
             var node = _nodes[i];
             if (float.IsNaN(node.Position.X)) continue;
+
             if (node.EdgeCount > 2 && (node.Flags & (NodeFlags.Spawn | NodeFlags.Destination)) != 0)
             {
                 node.Flags &= ~(NodeFlags.Spawn | NodeFlags.Destination);
                 node.PointOfInterest = POIType.None;
+                _nodes[i] = node;
+            }
+
+            // Strip signal flags from non-intersections (< 3 incoming edges)
+            if (GetIncomingEdges(i).Count < 3 && (node.Flags & signalMask) != 0)
+            {
+                node.Flags &= ~signalMask;
                 _nodes[i] = node;
             }
         }
@@ -1302,4 +1314,45 @@ public class RoadGraph
     /// </summary>
     private static float EstimateBezierLength(Vector2 p0, Vector2 p1, Vector2 p2, Vector2 p3)
         => GeometryUtil.EstimateBezierLength(p0, p1, p2, p3);
+
+    // ── Serialization helpers ──────────────────────────────────────────
+
+    /// <summary>
+    /// Returns all manually-set lane restrictions for serialization.
+    /// Auto-generated defaults are excluded (they are rebuilt on load).
+    /// </summary>
+    public IEnumerable<((int inEdge, byte inLane) key, HashSet<(int outEdge, byte outLane)> pairs)> GetAllLaneRestrictions()
+    {
+        foreach (var kvp in _laneRestrictions)
+            yield return (kvp.Key, kvp.Value);
+    }
+
+    /// <summary>
+    /// Sets a lane restriction entry during deserialization.
+    /// </summary>
+    public void SetLaneRestriction(int inEdge, byte inLane, HashSet<(int outEdge, byte outLane)> pairs)
+    {
+        _laneRestrictions[(inEdge, inLane)] = pairs;
+    }
+
+    /// <summary>
+    /// Replaces the entire graph with the given nodes and edges, then rebuilds
+    /// adjacency, reverse edge cache, and turn matrix. Used during map load.
+    /// </summary>
+    public void LoadFromData(List<RoadNode> nodes, List<RoadEdge> edges)
+    {
+        _nodes.Clear();
+        _edges.Clear();
+        _laneRestrictions.Clear();
+        _turnMatrix.Clear();
+
+        _nodes.AddRange(nodes);
+        _edges.AddRange(edges);
+
+        ActiveEdgeCount = _edges.Count(e => e.FromNode >= 0);
+        RebuildAdjacency();
+        for (int i = 0; i < _nodes.Count; i++)
+            RebuildTurnMatrix(i);
+        Version++;
+    }
 }

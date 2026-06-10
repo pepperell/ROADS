@@ -154,6 +154,33 @@ public class VehicleRenderer
     }
 
     /// <summary>
+    /// Draws a hover highlight around the vehicle under the cursor.
+    /// </summary>
+    public void DrawHoverOverlay(SKCanvas canvas, VehicleStore store, int index)
+    {
+        if (index < 0 || index >= store.Count) return;
+        if (store.State[index] != VehicleState.Driving) return;
+
+        float halfL = VehicleLength * 0.5f;
+        float halfW = VehicleWidth * 0.5f;
+
+        canvas.Save();
+        canvas.Translate(store.PosX[index], store.PosY[index]);
+        canvas.RotateRadians(store.Heading[index]);
+
+        using var hoverPaint = new SKPaint
+        {
+            Color = new SKColor(255, 255, 100, 120),
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 0.35f,
+            IsAntialias = true,
+        };
+        canvas.DrawRoundRect(-halfL - 0.3f, -halfW - 0.3f,
+            VehicleLength + 0.6f, VehicleWidth + 0.6f, 0.8f, 0.8f, hoverPaint);
+        canvas.Restore();
+    }
+
+    /// <summary>
     /// Draws a selection highlight around the selected vehicle, a lookahead target dot,
     /// and a preview of the remaining path edges.
     /// </summary>

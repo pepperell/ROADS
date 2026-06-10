@@ -14,14 +14,24 @@ public class SimulationClock
     /// <summary>Current time of day in fractional hours (0.0 = midnight, 12.0 = noon).</summary>
     public double TimeOfDay { get; set; } = 8.0;
 
-    /// <summary>Advances the clock by one simulation timestep.</summary>
-    public void Advance(float simDt)
+    /// <summary>Day counter, incremented each midnight rollover.</summary>
+    public int DayNumber { get; set; }
+
+    /// <summary>Advances the clock by one simulation timestep. Returns true on midnight rollover.</summary>
+    public bool Advance(float simDt)
     {
         // Each tick advances by simDt real-seconds worth of game time.
         // GameMinutesPerRealSecond / 60 converts to hours.
         TimeOfDay += simDt * GameMinutesPerRealSecond / 60.0;
-        if (TimeOfDay >= 24.0) TimeOfDay -= 24.0;
+        bool rolledOver = false;
+        if (TimeOfDay >= 24.0)
+        {
+            TimeOfDay -= 24.0;
+            DayNumber++;
+            rolledOver = true;
+        }
         if (TimeOfDay < 0.0) TimeOfDay += 24.0;
+        return rolledOver;
     }
 
     /// <summary>Returns "HH:MM" formatted game time.</summary>

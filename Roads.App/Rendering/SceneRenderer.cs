@@ -79,6 +79,8 @@ public class SceneRenderer
         // Draw vehicles
         _vehicleRenderer.Draw(canvas, vehicles, camera.Zoom, darkness);
         _vehicleRenderer.DrawArcConflictOverlay(canvas, vehicles, intersectionArcs);
+        if (editorState.HoveredVehicle >= 0 && editorState.HoveredVehicle != editorState.SelectedVehicle)
+            _vehicleRenderer.DrawHoverOverlay(canvas, vehicles, editorState.HoveredVehicle);
         if (editorState.SelectedVehicle >= 0)
             _vehicleRenderer.DrawSelectionOverlay(canvas, vehicles, editorState.SelectedVehicle, graph, stopLineCache, intersectionArcs);
 
@@ -97,7 +99,8 @@ public class SceneRenderer
         canvas.ResetMatrix();
 
         string statusText = BuildStatusText(graph, vehicles, editorState, spawnNodeCount, simLoop, camera);
-        _uiRenderer.Draw(canvas, editorState, statusText, info.Width, info.Height);
+        _uiRenderer.Draw(canvas, editorState, statusText,
+            simLoop.Paused, simLoop.TimeScaleExponent, info.Width, info.Height);
         _sliderPanel.Draw(canvas, info.Width);
         if (editorState.SelectedVehicle >= 0)
             _vehicleInfoPanel.Draw(canvas, vehicles, editorState.SelectedVehicle, graph, info.Height, intersectionArcs);
@@ -475,7 +478,10 @@ public class SceneRenderer
         string clockDisplay = simLoop.Clock.GetDisplayTime();
         string timeInfo = simLoop.Paused ? $"{clockDisplay} PAUSED" : $"{clockDisplay} {simLoop.TimeScale}x";
         string debugInfo = VehicleRenderer.ShowArcConflicts ? "  |  [G] ARC DEBUG" : "";
-        return $"Zoom: {camera.Zoom:F2}x  |  Speed: {timeInfo}  |  Edges: {graph.ActiveEdgeCount}  |  Vehicles: {vehicles.Count}  |  {spawnInfo}{status}{selInfo}{debugInfo}";
+        string popInfo = simLoop.Population.ScheduleModeEnabled
+            ? $"  |  Residents: {simLoop.Population.TotalResidents}  Active: {simLoop.Population.ActiveDrivers}"
+            : "";
+        return $"Zoom: {camera.Zoom:F2}x  |  Speed: {timeInfo}  |  Edges: {graph.ActiveEdgeCount}  |  Vehicles: {vehicles.Count}{popInfo}  |  {spawnInfo}{status}{selInfo}{debugInfo}";
     }
 
     private static (SKColor bg, SKColor grid) GetEnvironmentColors(float darkness)

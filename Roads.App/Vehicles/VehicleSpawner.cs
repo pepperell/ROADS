@@ -20,6 +20,9 @@ public class VehicleSpawner
     private int _cacheGraphVersion = -1;
     private float _spawnTimer;
 
+    /// <summary>When true, AutoSpawn is suppressed (PopulationManager handles spawning).</summary>
+    public bool ScheduleModeActive { get; set; }
+
     public VehicleSpawner(RoadGraph graph, VehicleStore vehicles, SpatialGrid vehicleGrid)
     {
         _graph = graph;
@@ -92,6 +95,8 @@ public class VehicleSpawner
     /// </summary>
     public void AutoSpawn(float dt, int maxVehicles)
     {
+        if (ScheduleModeActive) return;
+
         EnsureCache();
         if (_spawnNodeCache.Count == 0 || _destNodeCache.Count == 0 || _vehicles.Count >= maxVehicles)
             return;
@@ -120,6 +125,9 @@ public class VehicleSpawner
 
         for (int i = _vehicles.Count - 1; i >= 0; i--)
         {
+            // Skip resident vehicles — PopulationManager handles their arrivals
+            if (_vehicles.ResidentId[i] >= 0) continue;
+
             if (_vehicles.CurrentArc[i] >= 0) continue;
             if (_vehicles.Speed[i] > 0.01f) continue;
             if (_vehicles.EdgeProgress[i] < 0.99f) continue;

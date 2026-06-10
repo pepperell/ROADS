@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using SkiaSharp;
 using Roads.App.Core;
@@ -40,7 +41,11 @@ public class MainForm : Form
     private readonly YieldSignSystem _yieldSigns = new();
     private readonly IntersectionArcCache _intersectionArcs = new();
     private readonly VehicleInfoPanel _vehicleInfoPanel = new();
+    private readonly PerformanceHud _perfHud = new();
+    private readonly Stopwatch _perfStopwatch = new();
+    private readonly POIRegistry _poiRegistry = new();
     private readonly VehicleSpawner _spawner;
+    private readonly PopulationManager _populationManager;
     private readonly GraphChangeHandler _graphChangeHandler;
     private readonly SimulationLoop _simLoop;
     private readonly SceneRenderer _sceneRenderer;
@@ -67,8 +72,9 @@ public class MainForm : Form
 
         _editorState.ActiveTool = EditorTool.Road;
         _spawner = new VehicleSpawner(_roadGraph, _vehicles, _vehicleGrid);
+        _populationManager = new PopulationManager(_roadGraph, _vehicles, _vehicleGrid, _poiRegistry, SimulationLoop.MaxVehicles);
         _graphChangeHandler = new GraphChangeHandler(_roadGraph, _editorState, _vehicles, _edgeSpatialGrid, _spawner);
-        _simLoop = new SimulationLoop(_roadGraph, _vehicles, _vehicleGrid, _stopLineCache, _intersectionArcs, _edgeSpatialGrid, _trafficSignals, _stopSigns, _yieldSigns, _spawner, _editorState);
+        _simLoop = new SimulationLoop(_roadGraph, _vehicles, _vehicleGrid, _stopLineCache, _intersectionArcs, _edgeSpatialGrid, _trafficSignals, _stopSigns, _yieldSigns, _spawner, _populationManager, _editorState);
         _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _spawnPointRenderer, _uiRenderer, _sliderPanel, _vehicleInfoPanel, _laneRestrictionTool);
 
         _sliderPanel.AddSlider("Kp", 0.5f, 10f, () => SteeringController.Kp, v => SteeringController.Kp = v);
@@ -100,7 +106,9 @@ public class MainForm : Form
 
     private void OnTick(object? sender, EventArgs e)
     {
+        _perfStopwatch.Restart();
         _simLoop.Tick();
+        _perfHud.RecordSimTime(_perfStopwatch.Elapsed.TotalMilliseconds);
         _canvas.Invalidate();
     }
 
@@ -268,6 +276,12 @@ public class MainForm : Form
             e.Handled = true;
         }
 
+        if (e.KeyCode == Keys.P)
+        {
+            _perfHud.Visible = !_perfHud.Visible;
+            e.Handled = true;
+        }
+
         // Time scale controls: Space=pause, >=faster, <=slower
         if (e.KeyCode == Keys.Space)
         {
@@ -319,6 +333,146 @@ public class MainForm : Form
             }
             e.Handled = true;
         }
+
+        // Ctrl+S: Save map
+        if (e.KeyCode == Keys.S && e.Control)
+        {
+            SaveMap();
+            e.Handled = true;
+        }
+
+        // Ctrl+O: Load map
+        if (e.KeyCode == Keys.O && e.Control)
+        {
+            LoadMap();
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// Clears all map data and resets the editor to a blank state, as if the app just opened.
+    /// </summary>
+    private void NewMap()
+    {
+        var result = MessageBox.Show("Create a new map? All unsaved changes will be lost.",
+            "New Map", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
+        if (result != DialogResult.OK) return;
+
+        _vehicles.ClearAll();
+        _roadGraph.LoadFromData(new List<World.RoadNode>(), new List<World.RoadEdge>());
+        _edgeSpatialGrid.RebuildIfNeeded(_roadGraph);
+
+        _camera.CenterX = 0;
+        _camera.CenterY = 0;
+        _camera.Zoom = 5.0f;
+        _simLoop.Clock.TimeOfDay = 8.0;
+        _simLoop.Paused = false;
+        _simLoop.TimeScaleExponent = 0;
+
+        _editorState.SelectedEdge = -1;
+        _editorState.SelectedNode = -1;
+        _editorState.SelectedVehicle = -1;
+        _editorState.LaneRestrictionMode = false;
+        _editorState.LaneRestrictionEdge = -1;
+        _editorState.RoadStartNode = null;
+        _editorState.ActiveTool = Editor.EditorTool.Select;
+    }
+
+    /// <summary>
+    /// Prompts for a file path and saves the current map. Asks whether to include vehicles.
+    /// </summary>
+    private void SaveMap()
+    {
+        bool wasPaused = _simLoop.Paused;
+        _simLoop.Paused = true;
+
+        using var dlg = new SaveFileDialog
+        {
+            Title = "Save Map",
+            Filter = "ROADS Map (*.roads)|*.roads",
+            DefaultExt = "roads"
+        };
+        if (dlg.ShowDialog() != DialogResult.OK)
+        {
+            _simLoop.Paused = wasPaused;
+            return;
+        }
+
+        var result = MessageBox.Show("Include vehicles in save?",
+            "Save Options", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        bool includeVehicles = result == DialogResult.Yes;
+
+        try
+        {
+            Persistence.MapSerializer.Save(dlg.FileName, _roadGraph, _vehicles,
+                _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
+                includeVehicles);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Save failed: {ex.Message}", "Error",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        _simLoop.Paused = wasPaused;
+    }
+
+    /// <summary>
+    /// Prompts for a file path and loads a map. If the file contains vehicles,
+    /// asks whether to load them.
+    /// </summary>
+    private void LoadMap()
+    {
+        using var dlg = new OpenFileDialog
+        {
+            Title = "Load Map",
+            Filter = "ROADS Map (*.roads)|*.roads",
+            DefaultExt = "roads"
+        };
+        if (dlg.ShowDialog() != DialogResult.OK) return;
+
+        bool loadVehicles = false;
+
+        try
+        {
+            // Peek at file to check for vehicle data before prompting
+            using (var peek = File.OpenRead(dlg.FileName))
+            using (var pr = new BinaryReader(peek))
+            {
+                pr.ReadBytes(4); // magic
+                pr.ReadUInt16(); // version
+                byte flags = pr.ReadByte();
+                bool hasVehicles = (flags & 1) != 0;
+
+                if (hasVehicles)
+                {
+                    var result = MessageBox.Show("This map contains vehicles. Load them?",
+                        "Load Options", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    loadVehicles = result == DialogResult.Yes;
+                }
+            }
+
+            Persistence.MapSerializer.Load(dlg.FileName, _roadGraph, _vehicles,
+                _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
+                loadVehicles);
+            _edgeSpatialGrid.RebuildIfNeeded(_roadGraph);
+
+            // Start paused after loading
+            _simLoop.Paused = true;
+
+            // Reset editor state
+            _editorState.SelectedEdge = -1;
+            _editorState.SelectedNode = -1;
+            _editorState.SelectedVehicle = -1;
+            _editorState.LaneRestrictionMode = false;
+            _editorState.LaneRestrictionEdge = -1;
+            _editorState.RoadStartNode = null;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Load failed: {ex.Message}", "Error",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     /// <summary>
@@ -328,10 +482,13 @@ public class MainForm : Form
     /// </summary>
     private void OnPaintSurface(object? sender, SKCanvas canvas, SKImageInfo info)
     {
+        _perfStopwatch.Restart();
         _sceneRenderer.Render(canvas, info, _camera, _roadGraph, _vehicles, _editorState,
             _stopLineCache, _intersectionArcs,
             _trafficSignals, _stopSigns, _yieldSigns, _simLoop,
             _spawner.SpawnNodeCount, _currentMousePos);
+        _perfHud.RecordDrawTime(_perfStopwatch.Elapsed.TotalMilliseconds);
+        _perfHud.Draw(canvas, _vehicles.Count, info.Width, info.Height);
     }
 
     /// <summary>
@@ -374,6 +531,29 @@ public class MainForm : Form
             {
                 _editorState.ResetToolState();
                 _editorState.ActiveTool = hitTool.Value;
+                return;
+            }
+
+            // Check action buttons
+            var hitAction = _uiRenderer.HitTestAction(e.X, e.Y);
+            if (hitAction.HasValue)
+            {
+                switch (hitAction.Value)
+                {
+                    case Rendering.UIAction.New: NewMap(); break;
+                    case Rendering.UIAction.Save: SaveMap(); break;
+                    case Rendering.UIAction.Load: LoadMap(); break;
+                    case Rendering.UIAction.Pause:
+                        _simLoop.Paused = !_simLoop.Paused;
+                        break;
+                    case Rendering.UIAction.SpeedDown:
+                        if (_simLoop.TimeScaleExponent > 0) _simLoop.TimeScaleExponent--;
+                        break;
+                    case Rendering.UIAction.SpeedUp:
+                        _simLoop.TimeScaleExponent++;
+                        _simLoop.Paused = false;
+                        break;
+                }
                 return;
             }
 
@@ -480,25 +660,44 @@ public class MainForm : Form
                     }
                     else if (cpEdgeIdx >= 0)
                     {
-                        // If the CP is adjacent to the selected node, keep the node selected
-                        var cpEdge = _roadGraph.Edges[cpEdgeIdx];
-                        bool adjacentToSelectedNode = _editorState.SelectedNode >= 0
-                            && (cpEdge.FromNode == _editorState.SelectedNode
-                                || cpEdge.ToNode == _editorState.SelectedNode);
-                        if (!adjacentToSelectedNode)
+                        // Check if the click is actually closer to an edge curve than to the CP handle.
+                        // If so, prefer edge selection (the user clicked the road, not the handle).
+                        var (nearEdgeForCp, nearEdgeT) = _edgeSpatialGrid.FindNearestEdgeWithT(_roadGraph, worldVec, EditorState.SnapDistance);
+                        float edgeDist = float.MaxValue;
+                        if (nearEdgeForCp >= 0)
                         {
-                            _editorState.SelectedNode = -1;
-                            _editorState.SelectedEdge = cpEdgeIdx;
+                            var edgePt = _roadGraph.EvaluateBezier(nearEdgeForCp, nearEdgeT);
+                            edgeDist = Vector2.Distance(worldVec, edgePt);
                         }
-                        _editorState.DragEdgeIndex = cpEdgeIdx;
-                        _editorState.DragControlPointIndex = cpIdx;
-                        var cpPos = cpIdx == 1
-                            ? cpEdge.ControlPoint1
-                            : cpEdge.ControlPoint2;
-                        _dragStartScreenPos = e.Location;
-                        _dragOffset = cpPos - worldVec;
-                        _dragActive = false;
-                        _canvas.Cursor = Cursors.Hand;
+
+                        if (nearEdgeForCp >= 0 && edgeDist < cpDist)
+                        {
+                            // Click is closer to the edge curve — select the edge
+                            _editorState.SelectedNode = -1;
+                            _editorState.SelectedEdge = nearEdgeForCp;
+                        }
+                        else
+                        {
+                            // Click is closer to the CP handle — start CP drag
+                            var cpEdge = _roadGraph.Edges[cpEdgeIdx];
+                            bool adjacentToSelectedNode = _editorState.SelectedNode >= 0
+                                && (cpEdge.FromNode == _editorState.SelectedNode
+                                    || cpEdge.ToNode == _editorState.SelectedNode);
+                            if (!adjacentToSelectedNode)
+                            {
+                                _editorState.SelectedNode = -1;
+                                _editorState.SelectedEdge = cpEdgeIdx;
+                            }
+                            _editorState.DragEdgeIndex = cpEdgeIdx;
+                            _editorState.DragControlPointIndex = cpIdx;
+                            var cpPos = cpIdx == 1
+                                ? cpEdge.ControlPoint1
+                                : cpEdge.ControlPoint2;
+                            _dragStartScreenPos = e.Location;
+                            _dragOffset = cpPos - worldVec;
+                            _dragActive = false;
+                            _canvas.Cursor = Cursors.Hand;
+                        }
                     }
                     else
                     {
@@ -607,6 +806,15 @@ public class MainForm : Form
     {
         _currentMousePos = e.Location;
 
+        // Update button hover state; suppress map hovers when over UI
+        if (_uiRenderer.UpdateHover(e.X, e.Y))
+        {
+            _editorState.HoveredNode = -1;
+            _editorState.HoveredEdge = -1;
+            _editorState.HoveredVehicle = -1;
+            return;
+        }
+
         if (_sliderPanel.OnMouseMove(e.X, e.Y))
             return;
 
@@ -660,16 +868,39 @@ public class MainForm : Form
             {
                 case EditorTool.Select:
                 {
-                    int nearNode = _roadGraph.FindNearestNode(worldVec, 5f);
-                    if (nearNode >= 0)
+                    // Check for vehicle under cursor first
+                    var vehHits = new List<int>();
+                    _vehicleGrid.QueryFiltered(worldVec.X, worldVec.Y, 5f,
+                        _vehicles.PosX, _vehicles.PosY, vehHits);
+                    int closestVeh = -1;
+                    float closestVehDist = float.MaxValue;
+                    foreach (int vi in vehHits)
                     {
-                        _editorState.HoveredNode = nearNode;
+                        if (_vehicles.State[vi] != VehicleState.Driving) continue;
+                        float d = Vector2.Distance(worldVec, new Vector2(_vehicles.PosX[vi], _vehicles.PosY[vi]));
+                        if (d < closestVehDist) { closestVehDist = d; closestVeh = vi; }
+                    }
+
+                    if (closestVeh >= 0 && closestVehDist < 5f)
+                    {
+                        _editorState.HoveredVehicle = closestVeh;
+                        _editorState.HoveredNode = -1;
                         _editorState.HoveredEdge = -1;
                     }
                     else
                     {
-                        _editorState.HoveredNode = -1;
-                        _editorState.HoveredEdge = _edgeSpatialGrid.FindNearestEdge(_roadGraph, worldVec, EditorState.SnapDistance);
+                        _editorState.HoveredVehicle = -1;
+                        int nearNode = _roadGraph.FindNearestNode(worldVec, 5f);
+                        if (nearNode >= 0)
+                        {
+                            _editorState.HoveredNode = nearNode;
+                            _editorState.HoveredEdge = -1;
+                        }
+                        else
+                        {
+                            _editorState.HoveredNode = -1;
+                            _editorState.HoveredEdge = _edgeSpatialGrid.FindNearestEdge(_roadGraph, worldVec, EditorState.SnapDistance);
+                        }
                     }
                     break;
                 }

@@ -75,6 +75,7 @@ RoadGraph:
 ```
 
 **Node (intersection):**
+
 ```csharp
 struct RoadNode          // 48 bytes
 {
@@ -88,6 +89,7 @@ struct RoadNode          // 48 bytes
 ```
 
 **Edge (road segment):**
+
 ```csharp
 struct RoadEdge          // 64 bytes
 {
@@ -379,10 +381,10 @@ struct PointOfInterest      // 24 bytes
 
 ### 7.3 Spawn / Despawn / Parking
 
-- **Spawn:** vehicle appears at a spawn point (residential area, city edge entry point) with a slight fade-in; immediately begins pathfinding to first destination
+- **Spawn:** vehicle appears at spawn points (residential area, city edge entry point) with a slight fade-in; immediately begins pathfinding to first destination
 - **Despawn:** vehicle reaches city edge exit point and fades out; removed from simulation
 - **Park:** vehicle arrives at destination POI, decelerates to stop in nearest parking area, state changes to Parked (removed from physics sim but retained in schedule system); when departure time arrives, vehicle re-enters road
-- **Population control:** a target vehicle count can be set; spawner adjusts spawn rate to approach target over time
+- **Population control:** a maximum vehicle count can be set; spawners adjust spawn rates to never exceed the maximum
 
 ---
 
@@ -508,7 +510,7 @@ Section 2: POI list
 Section 3: Spawn points
 Section 4: Simulation state (vehicle positions, paths, driver states)
 Section 5: Editor state (camera, selected tool)
-Section 6: Settings (time scale, target population, etc.)
+Section 6: Settings (time scale, maximum population, etc.)
 ```
 
 - Also support JSON export for interop / debugging
@@ -541,6 +543,7 @@ Section 6: Settings (time scale, target population, etc.)
 ## 13. Development Phases
 
 ### Phase 1: Foundation (Core Infrastructure)
+
 **Goal:** Window with a pannable/zoomable canvas, basic road drawing, and a single vehicle driving along a road.
 
 - [X] Project setup (.NET 8, SkiaSharp, WinForms host window)
@@ -558,6 +561,7 @@ Section 6: Settings (time scale, target population, etc.)
 ---
 
 ### Phase 2: Road Network & Pathfinding
+
 **Goal:** Connected road graph with intersections, A* pathfinding, and multiple vehicles navigating the network.
 
 - [X] Intersection nodes (auto-created when roads cross or connect)
@@ -578,6 +582,7 @@ Section 6: Settings (time scale, target population, etc.)
 ---
 
 ### Phase 3: Traffic Rules & Signals
+
 **Goal:** Vehicles obey traffic signals, stop signs, speed limits, and intersection right-of-way rules.
 
 - [X] Traffic light system (phase cycling, green/yellow/red per approach)
@@ -595,6 +600,7 @@ Section 6: Settings (time scale, target population, etc.)
 ---
 
 ### Phase 4: Driver Personalities & Daily Routines
+
 **Goal:** Each driver has unique traits affecting driving style, and follows a daily schedule.
 
 - [X] DriverPersonality struct with trait generation (normal distributions)
@@ -603,10 +609,10 @@ Section 6: Settings (time scale, target population, etc.)
 - [X] Simulation clock (0-24 hour cycle, displayed on UI)
 - [X] Time scale controls (pause, 1x-64x, keyboard shortcuts)
 - [X] Points of Interest (POI) data structure and editor placement
-- [ ] Daily schedule system (departure times, destination types)
-- [ ] Schedule-driven spawning (morning rush, evening rush, etc.)
-- [ ] Vehicle parking (arrive at POI → state change to parked → depart later)
-- [ ] Population manager (target vehicle count, spawn rate control)
+- [X] Daily schedule system (departure times, destination types)
+- [X] Schedule-driven spawning (morning rush, evening rush, etc.)
+- [X] Vehicle parking (arrive at POI → state change to parked → depart later)
+- [X] Population manager (maximum vehicle count, spawn rate control)
 - [X] Day/night visual changes (background color, headlights at night)
 
 **Deliverable:** Full day/night cycle with drivers commuting on schedules, each with unique driving behavior.
@@ -614,6 +620,7 @@ Section 6: Settings (time scale, target population, etc.)
 ---
 
 ### Phase 5: Performance & Scale
+
 **Goal:** Optimize to handle 10,000+ vehicles at interactive frame rates.
 
 - [ ] Contraction Hierarchies (replace A* for long-distance paths)
@@ -621,20 +628,21 @@ Section 6: Settings (time scale, target population, etc.)
 - [ ] Double-buffered simulation state (sim thread decoupled from render)
 - [ ] LOD rendering (dots at far zoom, full detail up close)
 - [ ] Frustum culling via spatial grid (don't draw off-screen entities)
-- [ ] Parked vehicle optimization (remove from physics loop)
+- [X] Parked vehicle optimization (remove from physics loop)
 - [ ] Profile and optimize hot loops (SIMD where beneficial)
 - [ ] Memory pooling for paths and temporary allocations
 - [ ] Stress testing: 10K vehicles on large road network
-- [ ] Performance HUD (FPS, vehicle count, sim step time)
+- [X] Performance HUD (FPS, vehicle count, sim step time)
 
 **Deliverable:** Simulation runs smoothly with 10,000+ vehicles at 30+ FPS.
 
 ---
 
 ### Phase 6: Polish & Features
+
 **Goal:** Complete editor, visual polish, save/load, quality-of-life features.
 
-- [ ] Save/Load (binary format)
+- [X] Save/Load (binary format)
 - [ ] JSON export
 - [ ] Auto-save with rotating backups
 - [ ] Undo/Redo system (command pattern)

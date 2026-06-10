@@ -316,4 +316,24 @@ public class TrafficSignalSystem
             _edgePhaseGroup[approaches[idx].edgeIdx] = (byte)(i < (count + 1) / 2 ? 0 : 1);
         }
     }
+
+    // ── Serialization helpers ──────────────────────────────────────────
+
+    /// <summary>Returns all non-zero phase rotations for serialization.</summary>
+    public List<(int nodeIndex, byte rotation)> GetPhaseRotations()
+    {
+        var result = new List<(int, byte)>();
+        for (int i = 0; i < _nodePhaseRotation.Length; i++)
+            if (_nodePhaseRotation[i] != 0) result.Add((i, _nodePhaseRotation[i]));
+        return result;
+    }
+
+    /// <summary>Restores phase rotations from a saved list.</summary>
+    public void SetPhaseRotations(List<(int nodeIndex, byte rotation)> rotations)
+    {
+        Array.Clear(_nodePhaseRotation, 0, _nodePhaseRotation.Length);
+        foreach (var (node, rot) in rotations)
+            if (node >= 0 && node < _nodePhaseRotation.Length) _nodePhaseRotation[node] = rot;
+        _dirty = true;
+    }
 }
