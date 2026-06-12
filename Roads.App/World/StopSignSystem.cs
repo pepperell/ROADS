@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Roads.App.Vehicles;
 
 namespace Roads.App.World;
@@ -5,8 +6,9 @@ namespace Roads.App.World;
 /// <summary>
 /// Manages all-way stop sign behavior at intersection nodes. Vehicles must come to a full
 /// stop, wait a minimum time, then are granted right-of-way in first-come-first-served order.
-/// Auto-assigns stop signs to nodes with 2+ incoming edges that have angular spread and no
-/// traffic light or yield (unless manually overridden).
+/// <see cref="AutoAssign"/> normalizes the StopSign flag on nodes with 3+ incoming edges
+/// that have angular spread and no traffic light or yield (unless manually overridden);
+/// <see cref="RebuildIfNeeded"/> then projects node flags into internal arrays.
 /// </summary>
 public class StopSignSystem
 {
@@ -43,6 +45,9 @@ public class StopSignSystem
     private int _cachedVersion = -1;
     /// <summary>Set when per-edge exempt flags change, forcing a rebuild even if graph version hasn't changed.</summary>
     private bool _dirty;
+    /// <summary>Protocol tracking for debug asserts: true once <see cref="Update"/> has run
+    /// after the most recent real rebuild. See <see cref="CanQuery"/>.</summary>
+    private bool _updatedSinceRebuild;
 
     /// <summary>Seconds a vehicle must be stopped before it's eligible to proceed.</summary>
     private const float MinWaitTime = 1.0f;
@@ -69,12 +74,26 @@ public class StopSignSystem
 
     /// <summary>
     /// Sets whether an edge is exempt from its node's stop sign (toggled off by the user).
+    /// Grows the exempt array on demand, so the write is never dropped and the call is
+    /// safe in any order relative to <see cref="RebuildIfNeeded"/>.
     /// </summary>
     public void SetEdgeExempt(int edgeIndex, bool exempt)
     {
-        if (edgeIndex < 0 || edgeIndex >= _edgeExempt.Length) return;
+        if (edgeIndex < 0) return;
+        EnsureExemptCapacity(edgeIndex);
         _edgeExempt[edgeIndex] = exempt;
         _dirty = true;
+    }
+
+    /// <summary>
+    /// Grows the exempt array to include <paramref name="edgeIndex"/> so setters are
+    /// order-independent (callers need not rebuild first); RebuildIfNeeded re-normalizes
+    /// array sizes on the next pass.
+    /// </summary>
+    private void EnsureExemptCapacity(int edgeIndex)
+    {
+        if (edgeIndex >= _edgeExempt.Length)
+            Array.Resize(ref _edgeExempt, edgeIndex + 1);
     }
 
     /// <summary>
@@ -87,15 +106,66 @@ public class StopSignSystem
     }
 
     /// <summary>
-    /// Rebuilds stop sign node/edge flags and auto-assigns stop signs when the graph changes.
-    /// Must be called before <see cref="Update"/> and <see cref="GetSignal"/> each frame.
+    /// True when right-of-way data is current: rebuilt at the graph's version, no pending
+    /// dirty toggle, and <see cref="Update"/> has run since the last real rebuild.
+    /// <see cref="GetSignal"/> debug-asserts exactly this predicate; diagnostic callers
+    /// (e.g. the vehicle dump) gate on it to avoid reading stale tracking data.
     /// </summary>
-    /// <param name="graph">Road graph to analyze for stop sign assignment.</param>
+    public bool CanQuery(RoadGraph graph) =>
+        _cachedVersion == graph.Version && !_dirty && _updatedSinceRebuild;
+
+    /// <summary>
+    /// Normalizes auto-assigned stop-sign flags to the current graph topology:
+    /// non-manual nodes get NodeFlags.StopSign iff they have 3+ incoming edges, are not
+    /// a traffic light or yield node, and their approaches have angular spread (a real
+    /// intersection, not a bend). Manual nodes (NodeFlags.ManualSignal) are never
+    /// touched — their flags are the truth. Reads and writes only graph node flags
+    /// (bumping Version on change), touches no system state, and is idempotent. Runs
+    /// in the normalize phase of SimulationLoop.RebuildWorldCaches, AFTER
+    /// <see cref="TrafficSignalSystem.AutoAssign"/> (this policy reads the TrafficLight
+    /// flag) and before the pure RebuildIfNeeded calls.
+    /// </summary>
+    /// <param name="graph">Road graph whose flags to normalize.</param>
+    public static void AutoAssign(RoadGraph graph)
+    {
+        int nodeCount = graph.Nodes.Count;
+        for (int n = 0; n < nodeCount; n++)
+        {
+            var node = graph.Nodes[n];
+            if (float.IsNaN(node.Position.X)) continue;               // defunct
+            if (node.Flags.HasFlag(NodeFlags.ManualSignal)) continue; // manual = truth
+
+            var incoming = graph.GetIncomingEdges(n);
+            bool shouldBeStop = incoming.Count >= 3
+                && !node.Flags.HasFlag(NodeFlags.TrafficLight)
+                && !node.Flags.HasFlag(NodeFlags.Yield)
+                && HasAngularSpread(graph, incoming);
+
+            if (shouldBeStop && !node.Flags.HasFlag(NodeFlags.StopSign))
+                graph.SetNodeFlags(n, node.Flags | NodeFlags.StopSign);
+            else if (!shouldBeStop && node.Flags.HasFlag(NodeFlags.StopSign))
+                graph.SetNodeFlags(n, node.Flags & ~NodeFlags.StopSign);
+        }
+    }
+
+    /// <summary>
+    /// Projects node flags into stop-sign arrays when the graph changes or an exemption
+    /// marked the system dirty: sizes arrays (preserving FCFS queue state), derives the
+    /// stop-sign set from NodeFlags.StopSign, and marks which edges lead to stop-sign
+    /// nodes (honoring exemptions). Pure read of the graph — performs no mutation.
+    /// <see cref="AutoAssign"/> must have normalized flags first whenever the graph
+    /// changed (the ordering inside SimulationLoop.RebuildWorldCaches enforces this).
+    /// Must be called before <see cref="Update"/> and <see cref="GetSignal"/> each frame.
+    /// A real (non-early-out) rebuild invalidates right-of-way queries until the next
+    /// <see cref="Update"/> — see <see cref="CanQuery"/>.
+    /// </summary>
+    /// <param name="graph">Road graph to read stop sign flags from.</param>
     public void RebuildIfNeeded(RoadGraph graph)
     {
         if (_cachedVersion == graph.Version && !_dirty) return;
         _cachedVersion = graph.Version;
         _dirty = false;
+        _updatedSinceRebuild = false; // right-of-way queries are stale until the next Update
 
         int nodeCount = graph.Nodes.Count;
         int edgeCount = graph.Edges.Count;
@@ -149,34 +219,15 @@ public class StopSignSystem
             Array.Copy(oldExempt, _edgeExempt, Math.Min(oldExempt.Length, edgeCount));
         }
 
-        // Auto-assign stop signs: nodes with 3+ incoming edges that aren't traffic lights
+        // Derive the stop-sign set from node flags (normalized by AutoAssign)
         for (int n = 0; n < nodeCount; n++)
         {
             var node = graph.Nodes[n];
-            if (float.IsNaN(node.Position.X)) { _isStopSign[n] = false; continue; }
+            bool isStop = !float.IsNaN(node.Position.X)
+                && node.Flags.HasFlag(NodeFlags.StopSign);
+            _isStopSign[n] = isStop;
 
-            var incoming = graph.GetIncomingEdges(n);
-
-            // Respect manual overrides; only auto-assign for non-manual nodes
-            bool isManual = node.Flags.HasFlag(NodeFlags.ManualSignal);
-            bool shouldBeStop = isManual
-                ? node.Flags.HasFlag(NodeFlags.StopSign)
-                : (incoming.Count >= 3
-                    && !node.Flags.HasFlag(NodeFlags.TrafficLight)
-                    && !node.Flags.HasFlag(NodeFlags.Yield)
-                    && HasAngularSpread(graph, incoming));
-
-            _isStopSign[n] = shouldBeStop;
-
-            if (!isManual)
-            {
-                if (shouldBeStop && !node.Flags.HasFlag(NodeFlags.StopSign))
-                    graph.SetNodeFlags(n, node.Flags | NodeFlags.StopSign);
-                else if (!shouldBeStop && node.Flags.HasFlag(NodeFlags.StopSign))
-                    graph.SetNodeFlags(n, node.Flags & ~NodeFlags.StopSign);
-            }
-
-            if (!shouldBeStop)
+            if (!isStop)
                 _currentlyServingEdge[n] = -1;
         }
 
@@ -196,7 +247,8 @@ public class StopSignSystem
     /// <summary>
     /// Updates lead-vehicle tracking, detects stopped vehicles at stop lines, and resolves
     /// right-of-way on a first-come-first-served basis.
-    /// <see cref="RebuildIfNeeded"/> must be called before this method each frame.
+    /// <see cref="RebuildIfNeeded"/> must be called before this method each frame
+    /// (debug-asserted).
     /// </summary>
     /// <param name="graph">Road graph for edge/node data.</param>
     /// <param name="vehicles">Vehicle store with current positions and speeds.</param>
@@ -204,6 +256,9 @@ public class StopSignSystem
     /// <param name="dt">Delta time in seconds.</param>
     public void Update(RoadGraph graph, VehicleStore vehicles, StopLineCache stopLines, float dt)
     {
+        Debug.Assert(_cachedVersion == graph.Version && !_dirty,
+            "StopSignSystem.Update: RebuildIfNeeded must run first — system is stale relative to the graph.");
+
         _simTime += dt;
 
         int edgeCount = Math.Min(graph.Edges.Count, _edgeLeadProgress.Length);
@@ -323,11 +378,13 @@ public class StopSignSystem
             }
         }
 
+        _updatedSinceRebuild = true;
     }
 
     /// <summary>
     /// Gets the signal state for a vehicle approaching a stop-sign intersection.
-    /// <see cref="Update"/> must be called before this method each frame.
+    /// <see cref="Update"/> must be called before this method each frame — debug-asserted
+    /// via <see cref="CanQuery"/>; diagnostic callers should gate on that predicate.
     /// </summary>
     /// <param name="edgeIndex">Index of the edge the vehicle is on.</param>
     /// <param name="graph">Road graph for edge data.</param>
@@ -335,6 +392,9 @@ public class StopSignSystem
     /// <returns><see cref="SignalState.Green"/> if the edge has right-of-way; otherwise <see cref="SignalState.Red"/>.</returns>
     public SignalState GetSignal(int edgeIndex, RoadGraph graph, int vehicleIndex = -1)
     {
+        Debug.Assert(CanQuery(graph),
+            "StopSignSystem.GetSignal: right-of-way data is stale — RebuildIfNeeded then Update must run before queries.");
+
         if (edgeIndex < 0 || edgeIndex >= _isStopSignEdge.Length)
             return SignalState.Green;
         if (!_isStopSignEdge[edgeIndex])
@@ -411,12 +471,21 @@ public class StopSignSystem
         return result;
     }
 
-    /// <summary>Restores edge exemptions from a saved list of edge indices.</summary>
+    /// <summary>
+    /// Restores edge exemptions from a saved list of edge indices, replacing any existing
+    /// exemptions. Grows the exempt array on demand, so no entry is dropped regardless of
+    /// call order relative to <see cref="RebuildIfNeeded"/>.
+    /// </summary>
     public void SetExemptEdges(List<int> edges)
     {
         Array.Clear(_edgeExempt, 0, _edgeExempt.Length);
+        int maxIndex = -1;
         foreach (int e in edges)
-            if (e >= 0 && e < _edgeExempt.Length) _edgeExempt[e] = true;
+            if (e > maxIndex) maxIndex = e;
+        if (maxIndex >= 0)
+            EnsureExemptCapacity(maxIndex);
+        foreach (int e in edges)
+            if (e >= 0) _edgeExempt[e] = true;
         _dirty = true;
     }
 }

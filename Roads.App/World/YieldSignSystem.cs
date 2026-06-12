@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using Roads.App;
 using Roads.App.Vehicles;
@@ -34,6 +35,9 @@ public class YieldSignSystem
     private int _cachedVersion = -1;
     /// <summary>Set when per-edge exempt flags change, forcing a rebuild even if graph version hasn't changed.</summary>
     private bool _dirty;
+    /// <summary>Protocol tracking for debug asserts: true once <see cref="Update"/> has run
+    /// after the most recent real rebuild. See <see cref="CanQuery"/>.</summary>
+    private bool _updatedSinceRebuild;
 
     /// <summary>Cross-product threshold for classifying a turn as left or right (vs straight).</summary>
     private const float TurnThreshold = SimConstants.TurnThreshold;
@@ -61,12 +65,26 @@ public class YieldSignSystem
 
     /// <summary>
     /// Sets whether an edge is exempt from its node's yield sign (toggled off by the user).
+    /// Grows the exempt array on demand, so the write is never dropped and the call is
+    /// safe in any order relative to <see cref="RebuildIfNeeded"/>.
     /// </summary>
     public void SetEdgeExempt(int edgeIndex, bool exempt)
     {
-        if (edgeIndex < 0 || edgeIndex >= _edgeExempt.Length) return;
+        if (edgeIndex < 0) return;
+        EnsureExemptCapacity(edgeIndex);
         _edgeExempt[edgeIndex] = exempt;
         _dirty = true;
+    }
+
+    /// <summary>
+    /// Grows the exempt array to include <paramref name="edgeIndex"/> so setters are
+    /// order-independent (callers need not rebuild first); RebuildIfNeeded re-normalizes
+    /// array sizes on the next pass.
+    /// </summary>
+    private void EnsureExemptCapacity(int edgeIndex)
+    {
+        if (edgeIndex >= _edgeExempt.Length)
+            Array.Resize(ref _edgeExempt, edgeIndex + 1);
     }
 
     /// <summary>
@@ -79,8 +97,19 @@ public class YieldSignSystem
     }
 
     /// <summary>
+    /// True when right-of-way data is current: rebuilt at the graph's version, no pending
+    /// dirty toggle, and <see cref="Update"/> has run since the last real rebuild.
+    /// Both <see cref="GetSignal(int, RoadGraph)"/> overloads debug-assert exactly this
+    /// predicate; diagnostic callers (e.g. the vehicle dump) gate on it.
+    /// </summary>
+    public bool CanQuery(RoadGraph graph) =>
+        _cachedVersion == graph.Version && !_dirty && _updatedSinceRebuild;
+
+    /// <summary>
     /// Rebuilds yield node and edge flags when the graph changes.
     /// Must be called before <see cref="Update"/> and <see cref="GetSignal"/> each frame.
+    /// A real (non-early-out) rebuild invalidates right-of-way queries until the next
+    /// <see cref="Update"/> — see <see cref="CanQuery"/>.
     /// </summary>
     /// <param name="graph">Road graph to analyze for yield sign assignment.</param>
     public void RebuildIfNeeded(RoadGraph graph)
@@ -88,6 +117,7 @@ public class YieldSignSystem
         if (_cachedVersion == graph.Version && !_dirty) return;
         _cachedVersion = graph.Version;
         _dirty = false;
+        _updatedSinceRebuild = false; // right-of-way queries are stale until the next Update
 
         int nodeCount = graph.Nodes.Count;
         int edgeCount = graph.Edges.Count;
@@ -132,7 +162,8 @@ public class YieldSignSystem
 
     /// <summary>
     /// Scans all driving vehicles to find the lead vehicle on each yield-bound edge.
-    /// <see cref="RebuildIfNeeded"/> must be called before this method each frame.
+    /// <see cref="RebuildIfNeeded"/> must be called before this method each frame
+    /// (debug-asserted).
     /// </summary>
     /// <param name="graph">Road graph for edge length lookups.</param>
     /// <param name="vehicles">Vehicle store with current positions and speeds.</param>
@@ -140,6 +171,9 @@ public class YieldSignSystem
     /// <param name="dt">Delta time in seconds (unused but kept for interface consistency).</param>
     public void Update(RoadGraph graph, VehicleStore vehicles, StopLineCache stopLines, IntersectionArcCache arcCache, float dt)
     {
+        Debug.Assert(_cachedVersion == graph.Version && !_dirty,
+            "YieldSignSystem.Update: RebuildIfNeeded must run first — system is stale relative to the graph.");
+
         int edgeCount = Math.Min(graph.Edges.Count, _edgeLeadProgress.Length);
 
         // Reset lead vehicle tracking
@@ -184,11 +218,14 @@ public class YieldSignSystem
             if (inEdge >= 0 && inEdge < edgeCount && _isAtYieldNode[inEdge])
                 _edgeHasArcVehicle[inEdge] = true;
         }
+
+        _updatedSinceRebuild = true;
     }
 
     /// <summary>
     /// Gets the signal for a vehicle approaching a yield intersection.
-    /// <see cref="Update"/> must be called before this method each frame.
+    /// <see cref="Update"/> must be called before this method each frame — debug-asserted
+    /// via <see cref="CanQuery"/>; diagnostic callers should gate on that predicate.
     /// </summary>
     /// <param name="edgeIndex">Index of the edge the vehicle is on.</param>
     /// <param name="graph">Road graph for incoming-edge lookups.</param>
@@ -199,6 +236,9 @@ public class YieldSignSystem
     /// </returns>
     public SignalState GetSignal(int edgeIndex, RoadGraph graph)
     {
+        Debug.Assert(CanQuery(graph),
+            "YieldSignSystem.GetSignal: right-of-way data is stale — RebuildIfNeeded then Update must run before queries.");
+
         if (edgeIndex < 0 || edgeIndex >= _isYieldEdge.Length)
             return SignalState.Green;
         if (!_isYieldEdge[edgeIndex])
@@ -255,9 +295,10 @@ public class YieldSignSystem
 
     /// <summary>
     /// Turn-aware yield signal. Determines right-of-way based on the vehicle's intended
-    /// turn direction: straight-through traffic has priority, left turns yield to oncoming
-    /// through traffic, right turns yield to cross traffic from the left.
-    /// Falls back to the turn-unaware overload when turn classification fails.
+    /// turn direction: straight-through traffic has priority (Green), left turns yield to
+    /// oncoming through traffic, right turns yield to cross traffic from the left.
+    /// <see cref="Update"/> must be called before this method each frame — debug-asserted
+    /// via <see cref="CanQuery"/>.
     /// </summary>
     /// <param name="edgeIndex">Index of the edge the vehicle is on.</param>
     /// <param name="outgoingEdge">Index of the next edge the vehicle will take (turn destination).</param>
@@ -265,6 +306,9 @@ public class YieldSignSystem
     /// <returns>Signal state reflecting turn-specific right-of-way.</returns>
     public SignalState GetSignal(int edgeIndex, int outgoingEdge, RoadGraph graph)
     {
+        Debug.Assert(CanQuery(graph),
+            "YieldSignSystem.GetSignal: right-of-way data is stale — RebuildIfNeeded then Update must run before queries.");
+
         if (edgeIndex < 0 || edgeIndex >= _isYieldEdge.Length)
             return SignalState.Green;
         if (!_isYieldEdge[edgeIndex])
@@ -377,12 +421,21 @@ public class YieldSignSystem
         return result;
     }
 
-    /// <summary>Restores edge exemptions from a saved list of edge indices.</summary>
+    /// <summary>
+    /// Restores edge exemptions from a saved list of edge indices, replacing any existing
+    /// exemptions. Grows the exempt array on demand, so no entry is dropped regardless of
+    /// call order relative to <see cref="RebuildIfNeeded"/>.
+    /// </summary>
     public void SetExemptEdges(List<int> edges)
     {
         Array.Clear(_edgeExempt, 0, _edgeExempt.Length);
+        int maxIndex = -1;
         foreach (int e in edges)
-            if (e >= 0 && e < _edgeExempt.Length) _edgeExempt[e] = true;
+            if (e > maxIndex) maxIndex = e;
+        if (maxIndex >= 0)
+            EnsureExemptCapacity(maxIndex);
+        foreach (int e in edges)
+            if (e >= 0) _edgeExempt[e] = true;
         _dirty = true;
     }
 }

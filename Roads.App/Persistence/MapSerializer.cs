@@ -249,12 +249,10 @@ public static class MapSerializer
         for (int i = 0; i < phaseCount; i++)
             phaseRotations.Add((r.ReadInt32(), r.ReadByte()));
 
-        // Traffic systems need to rebuild before we can set exemptions/rotations
-        // (arrays are sized during RebuildIfNeeded). Force rebuild by invalidating.
-        stopSigns.RebuildIfNeeded(graph);
-        yieldSigns.RebuildIfNeeded(graph);
-        signals.RebuildIfNeeded(graph);
-
+        // Apply traffic-control overrides directly — the setters grow their own storage
+        // on demand and mark the systems dirty, so no sizing rebuild is needed first.
+        // The caller's RebuildWorldCaches after Load returns re-derives all dependent
+        // state (and normalizes flags).
         stopSigns.SetExemptEdges(stopExempt);
         yieldSigns.SetExemptEdges(yieldExempt);
         signals.SetPhaseRotations(phaseRotations);

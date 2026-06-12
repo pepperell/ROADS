@@ -47,7 +47,26 @@ public class RoadGraph
     /// <summary>Count of active (non-defunct) edges.</summary>
     public int ActiveEdgeCount { get; private set; }
 
-    /// <summary>Incremented on every graph mutation. Used to invalidate render caches.</summary>
+    /// <summary>
+    /// Monotonic counter incremented on every observable graph mutation: nodes (position,
+    /// flags, POI type, defunct marking), edges (add/remove, lane count, speed limit,
+    /// control points), lane restrictions, and the derived adjacency/turn matrices that
+    /// change with them. This is the invalidation bus for all graph-derived state —
+    /// geometry caches (StopLineCache, IntersectionArcCache, EdgeSpatialGrid), the render
+    /// path cache, the three traffic-control systems, vehicle spawn/destination caches,
+    /// the POI/population layer, and GraphChangeHandler all hold a cached copy and lazily
+    /// rebuild when it differs. The contract:
+    /// (1) every public mutator increments it before returning — unconditionally if the
+    ///     mutation always changes state, conditionally if the call may be a no-op
+    ///     (ClearLaneRestrictions, StripMarkerFlagsFromIntersections);
+    /// (2) consumers compare for equality only, so multiple bumps within one operation
+    ///     (e.g. SplitEdge's internal AddNode plus its own final bump) are harmless;
+    /// (3) private surgery helpers (MarkNodeDefunct, SplitEdgeSingle) deliberately do not
+    ///     bump — their public callers bump once at the end of the whole operation;
+    /// (4) normalize steps (signal AutoAssign, ApplyDefaultLaneRestrictions) bump like any
+    ///     mutator — SimulationLoop.RebuildWorldCaches confines them to its normalize
+    ///     phase, so cache rebuilds remain pure reads.
+    /// </summary>
     public int Version { get; private set; }
 
     /// <summary>
@@ -75,7 +94,9 @@ public class RoadGraph
     }
 
     /// <summary>
-    /// Adds a new node at the given world position.
+    /// Adds a new node at the given world position and increments the graph version.
+    /// SplitEdge also calls this, producing two version bumps in one operation —
+    /// harmless, since version consumers compare for equality only.
     /// </summary>
     /// <param name="position">World-space position in meters.</param>
     /// <returns>Index of the newly created node.</returns>
@@ -83,6 +104,21 @@ public class RoadGraph
     {
         int index = _nodes.Count;
         _nodes.Add(new RoadNode { Position = position });
+
+        // A new node has no incoming edges yet: grow the incoming-adjacency arrays if
+        // needed and zero this slot, which may hold stale data from a previous, larger
+        // graph (the arrays are grow-only and RebuildAdjacency writes only the active
+        // range). Consumers rebuild on the version bump below and must see a
+        // consistent graph.
+        if (_incomingStartIdx.Length < _nodes.Count)
+        {
+            Array.Resize(ref _incomingStartIdx, _nodes.Count);
+            Array.Resize(ref _incomingCount, _nodes.Count);
+        }
+        _incomingStartIdx[index] = 0;
+        _incomingCount[index] = 0;
+
+        Version++;
         return index;
     }
 
@@ -180,7 +216,11 @@ public class RoadGraph
         return _nodes[nodeIndex].EdgeCount == 0 && _incomingCount[nodeIndex] == 0;
     }
 
-    /// <summary>Marks a node as defunct by setting its position to NaN, clearing marker flags, and removing its turn matrix.</summary>
+    /// <summary>
+    /// Marks a node as defunct by setting its position to NaN, clearing marker flags, and
+    /// removing its turn matrix. Does NOT increment Version — public callers (RemoveEdge,
+    /// RemoveNode) bump once at the end of the full operation.
+    /// </summary>
     private void MarkNodeDefunct(int nodeIndex)
     {
         var node = _nodes[nodeIndex];
@@ -240,6 +280,15 @@ public class RoadGraph
 
             outPos += outCount[n];
             inPos += inCount[n];
+        }
+
+        // Clear stale entries beyond the active range — the arrays are grow-only, so a
+        // smaller graph replacing a larger one (e.g. New Map after a load) would
+        // otherwise leave old counts reachable through node indices added later.
+        if (_incomingCount.Length > nodeCount)
+        {
+            Array.Clear(_incomingStartIdx, nodeCount, _incomingStartIdx.Length - nodeCount);
+            Array.Clear(_incomingCount, nodeCount, _incomingCount.Length - nodeCount);
         }
 
         // Fill flat arrays (reuse outCount/inCount as placement cursors, reset to 0)
@@ -411,13 +460,12 @@ public class RoadGraph
     }
 
     /// <summary>
-    /// Sets explicit per-lane restrictions at a node to match the geometry-based defaults
-    /// (the same lane pairing logic used by <see cref="IntersectionArcCache"/>).
-    /// <summary>
     /// Auto-applies default lane restrictions at all multi-lane intersection nodes that don't
-    /// already have manual restrictions. Left lanes turn left, right lanes turn right, etc.
-    /// Must be called after StopLineCache is rebuilt and before IntersectionArcCache rebuilds,
-    /// so the version bump happens predictably before any cache reads.
+    /// already have restrictions. Left lanes turn left, right lanes turn right, etc.
+    /// Runs in the normalize phase of SimulationLoop.RebuildWorldCaches; requires a current
+    /// StopLineCache (reads tangent directions at stop-line positions). Bumps Version for
+    /// each node where defaults are applied; idempotent via the HasAnyLaneRestrictionsAtNode
+    /// guard, so a follow-up pass applies nothing and does not bump.
     /// </summary>
     /// <param name="stopLines">Stop-line cache (must be up to date).</param>
     public void ApplyDefaultLaneRestrictions(StopLineCache stopLines)
@@ -446,7 +494,13 @@ public class RoadGraph
         }
     }
 
-    /// Requires <paramref name="stopLines"/> to compute tangent directions at stop-line positions.
+    /// <summary>
+    /// Sets explicit per-lane restrictions at a node to match the geometry-based defaults
+    /// (the same lane pairing logic used by <see cref="IntersectionArcCache"/>), replacing
+    /// any existing restrictions on the node's incoming edges, and increments the graph
+    /// version. Requires <paramref name="stopLines"/> to compute tangent directions at
+    /// stop-line positions. Called by <see cref="ApplyDefaultLaneRestrictions"/> and by
+    /// the editor's reset-to-defaults action.
     /// </summary>
     /// <param name="nodeIndex">The intersection node index.</param>
     /// <param name="stopLines">Stop-line cache (must be up to date).</param>
@@ -909,12 +963,18 @@ public class RoadGraph
     /// Strips Spawn/Destination flags from any node that now has more than 2 outgoing edges,
     /// and strips signal flags (TrafficLight/StopSign/Yield/ManualSignal) from nodes with fewer
     /// than 3 incoming edges (bends/dead-ends that aren't real intersections).
-    /// Called after graph mutations that change adjacency.
+    /// Runs once per tick via GraphChangeHandler whenever the graph version changed.
+    /// Increments the graph version only if any flags were actually stripped (same
+    /// conditional pattern as ClearLaneRestrictions). Because GraphChangeHandler caches
+    /// its handled version before calling this, a strip leaves the graph one version
+    /// ahead — the next tick's run strips nothing, does not bump, and converges (same
+    /// pattern as signal auto-assignment).
     /// </summary>
     public void StripMarkerFlagsFromIntersections()
     {
         const NodeFlags signalMask = NodeFlags.TrafficLight | NodeFlags.StopSign | NodeFlags.Yield | NodeFlags.ManualSignal;
 
+        bool stripped = false;
         for (int i = 0; i < _nodes.Count; i++)
         {
             var node = _nodes[i];
@@ -925,6 +985,7 @@ public class RoadGraph
                 node.Flags &= ~(NodeFlags.Spawn | NodeFlags.Destination);
                 node.PointOfInterest = POIType.None;
                 _nodes[i] = node;
+                stripped = true;
             }
 
             // Strip signal flags from non-intersections (< 3 incoming edges)
@@ -932,8 +993,11 @@ public class RoadGraph
             {
                 node.Flags &= ~signalMask;
                 _nodes[i] = node;
+                stripped = true;
             }
         }
+
+        if (stripped) Version++;
     }
 
     /// <summary>
@@ -1328,11 +1392,16 @@ public class RoadGraph
     }
 
     /// <summary>
-    /// Sets a lane restriction entry during deserialization.
+    /// Replaces the entire restriction set for one (inEdge, inLane) key and increments
+    /// the graph version. Unlike ToggleLaneConnection, this overwrites rather than
+    /// toggles. Called in a loop by MapSerializer.Load after LoadFromData — the per-call
+    /// bumps coalesce into the single lazy rebuild cascade that follows the load — but
+    /// the method is a safe general-purpose mutator callable at any time.
     /// </summary>
     public void SetLaneRestriction(int inEdge, byte inLane, HashSet<(int outEdge, byte outLane)> pairs)
     {
         _laneRestrictions[(inEdge, inLane)] = pairs;
+        Version++;
     }
 
     /// <summary>

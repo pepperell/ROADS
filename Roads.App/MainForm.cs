@@ -74,7 +74,7 @@ public class MainForm : Form
         _spawner = new VehicleSpawner(_roadGraph, _vehicles, _vehicleGrid);
         _populationManager = new PopulationManager(_roadGraph, _vehicles, _vehicleGrid, _poiRegistry, SimulationLoop.MaxVehicles);
         _graphChangeHandler = new GraphChangeHandler(_roadGraph, _editorState, _vehicles, _edgeSpatialGrid, _spawner);
-        _simLoop = new SimulationLoop(_roadGraph, _vehicles, _vehicleGrid, _stopLineCache, _intersectionArcs, _edgeSpatialGrid, _trafficSignals, _stopSigns, _yieldSigns, _spawner, _populationManager, _editorState);
+        _simLoop = new SimulationLoop(_roadGraph, _vehicles, _vehicleGrid, _stopLineCache, _intersectionArcs, _edgeSpatialGrid, _trafficSignals, _stopSigns, _yieldSigns, _spawner, _populationManager, _editorState, _graphChangeHandler);
         _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _spawnPointRenderer, _uiRenderer, _sliderPanel, _vehicleInfoPanel, _laneRestrictionTool);
 
         _sliderPanel.AddSlider("Kp", 0.5f, 10f, () => SteeringController.Kp, v => SteeringController.Kp = v);
@@ -133,9 +133,16 @@ public class MainForm : Form
             sb.AppendLine($"    StopT: fromNode={fromT:F4} toNode={stopT:F4}");
 
             var signal = _trafficSignals.GetSignal(edgeIdx);
-            var stopSignal = _stopSigns.GetSignal(edgeIdx, _roadGraph, i);
-            var yieldSignal = _yieldSigns.GetSignal(edgeIdx, _roadGraph);
-            sb.AppendLine($"    Signals: traffic={signal} stopSign={stopSignal} yield={yieldSignal}");
+            if (_stopSigns.CanQuery(_roadGraph) && _yieldSigns.CanQuery(_roadGraph))
+            {
+                var stopSignal = _stopSigns.GetSignal(edgeIdx, _roadGraph, i);
+                var yieldSignal = _yieldSigns.GetSignal(edgeIdx, _roadGraph);
+                sb.AppendLine($"    Signals: traffic={signal} stopSign={stopSignal} yield={yieldSignal}");
+            }
+            else
+            {
+                sb.AppendLine($"    Signals: traffic={signal} stopSign=n/a yield=n/a (right-of-way tracking stale)");
+            }
 
             var node = _roadGraph.Nodes[edge.ToNode];
             sb.AppendLine($"    ToNode {edge.ToNode}: flags={node.Flags}");
@@ -360,7 +367,16 @@ public class MainForm : Form
 
         _vehicles.ClearAll();
         _roadGraph.LoadFromData(new List<World.RoadNode>(), new List<World.RoadEdge>());
-        _edgeSpatialGrid.RebuildIfNeeded(_roadGraph);
+
+        // Reset per-map traffic-control overrides (exemptions, phase rotations). They
+        // survive graph edits by design, so replacing the whole map must clear them
+        // explicitly — mirrors MapSerializer.Load's clear-then-set semantics; otherwise
+        // the old map's overrides silently apply to reused node/edge indices.
+        _stopSigns.SetExemptEdges(new List<int>());
+        _yieldSigns.SetExemptEdges(new List<int>());
+        _trafficSignals.SetPhaseRotations(new List<(int, byte)>());
+
+        _simLoop.RebuildWorldCaches();
 
         _camera.CenterX = 0;
         _camera.CenterY = 0;
@@ -455,7 +471,7 @@ public class MainForm : Form
             Persistence.MapSerializer.Load(dlg.FileName, _roadGraph, _vehicles,
                 _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
                 loadVehicles);
-            _edgeSpatialGrid.RebuildIfNeeded(_roadGraph);
+            _simLoop.RebuildWorldCaches();
 
             // Start paused after loading
             _simLoop.Paused = true;
@@ -710,11 +726,9 @@ public class MainForm : Form
                 }
                 case EditorTool.Road:
                     _roadTool.OnClick(worldVec, _roadGraph, _editorState, _edgeSpatialGrid);
-                    _graphChangeHandler.HandleIfNeeded();
                     break;
                 case EditorTool.Delete:
                     _deleteTool.OnClick(worldVec, _roadGraph, _edgeSpatialGrid);
-                    _graphChangeHandler.HandleIfNeeded();
                     break;
                 case EditorTool.SpawnPoint:
                     _spawnPointTool.OnClick(worldVec, _roadGraph);
@@ -756,7 +770,6 @@ public class MainForm : Form
                     {
                         nearT = Math.Clamp(nearT, 0.05f, 0.95f);
                         _roadGraph.SplitEdge(nearEdge, nearT);
-                        _graphChangeHandler.HandleIfNeeded();
                     }
                     break;
                 }
@@ -786,14 +799,12 @@ public class MainForm : Form
                 _editorState.DragCrossingPreviews.Clear();
                 _editorState.DragNodeIndex = -1;
                 _canvas.Cursor = Cursors.Default;
-                _graphChangeHandler.HandleIfNeeded();
             }
             else if (_editorState.IsDraggingControlPoint)
             {
                 _editorState.DragEdgeIndex = -1;
                 _editorState.DragControlPointIndex = -1;
                 _canvas.Cursor = Cursors.Default;
-                _graphChangeHandler.HandleIfNeeded();
             }
         }
     }

@@ -619,6 +619,24 @@ Section 6: Settings (time scale, maximum population, etc.)
 
 ---
 
+### Phase 4.5: Dependency Hardening
+
+**Goal:** Make the implicit ordering contracts catalogued in [HIDDEN_DEPENDENCIES.md](HIDDEN_DEPENDENCIES.md) explicit, self-enforcing, or structurally unnecessary, so future changes can't silently violate them.
+
+- [X] Single rebuild pipeline: extract the duplicated cache-rebuild chain (SimulationLoop paused + active branches) into one method, including signal-system rebuilds so paused-mode toggles (exemptions, phase rotations) apply immediately
+- [X] Version-bump audit: every RoadGraph mutator bumps Version consistently (AddNode and SetLaneRestriction currently don't); document the invalidation-bus contract on the Version property
+- [X] Eliminate mid-rebuild graph mutation: signal auto-assignment (SetNodeFlags) and ApplyDefaultLaneRestrictions bump Version inside the rebuild chain, forcing a second full cascade next tick
+- [X] Automatic graph-change handling: invoke GraphChangeHandler.HandleIfNeeded once per frame instead of relying on each editor call site to remember it
+- [X] Frame-protocol guards: debug assertions enforcing RebuildIfNeeded → Update → GetSignal order in TrafficSignalSystem, StopSignSystem, and YieldSignSystem
+- [X] Robust load sequence: exemption/rotation setters auto-size their arrays so MapSerializer.Load no longer requires forced rebuilds before applying overrides
+- [ ] Centralized vehicle removal: single removal path that fixes all index holders on swap-and-pop (resident mappings, EditorState.SelectedVehicle identity)
+- [ ] VehicleStore field-sync guard: document the array/Add/Remove/Grow/serializer sync requirement in VehicleStore and make it hard to miss when adding fields
+- [ ] Sweep remaining minor contracts from HIDDEN_DEPENDENCIES.md (SplitEdge internal trio, PopulationManager dual version tracking, ScheduleModeActive handoff)
+
+**Deliverable:** Ordering mistakes fail fast (debug asserts) or can't happen at all (structure); HIDDEN_DEPENDENCIES.md updated to reflect the hardened state.
+
+---
+
 ### Phase 5: Performance & Scale
 
 **Goal:** Optimize to handle 10,000+ vehicles at interactive frame rates.

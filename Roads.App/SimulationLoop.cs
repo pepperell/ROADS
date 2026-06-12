@@ -26,6 +26,7 @@ public class SimulationLoop
     private readonly VehicleSpawner _spawner;
     private readonly PopulationManager _populationManager;
     private readonly EditorState _editorState;
+    private readonly GraphChangeHandler _graphChangeHandler;
 
     private double _lastSimTime;
     private double _simAccumulator;
@@ -62,7 +63,8 @@ public class SimulationLoop
         IntersectionArcCache intersectionArcs, EdgeSpatialGrid edgeSpatialGrid,
         TrafficSignalSystem trafficSignals, StopSignSystem stopSigns,
         YieldSignSystem yieldSigns, VehicleSpawner spawner,
-        PopulationManager populationManager, EditorState editorState)
+        PopulationManager populationManager, EditorState editorState,
+        GraphChangeHandler graphChangeHandler)
     {
         _graph = graph;
         _vehicles = vehicles;
@@ -76,18 +78,24 @@ public class SimulationLoop
         _spawner = spawner;
         _populationManager = populationManager;
         _editorState = editorState;
+        _graphChangeHandler = graphChangeHandler;
         _lastSimTime = _stopwatch.Elapsed.TotalSeconds;
     }
 
     /// <summary>
     /// Advances the simulation by one or more fixed timesteps based on elapsed wall time.
+    /// Step 0, every call (paused or not): GraphChangeHandler.HandleIfNeeded converges
+    /// graph-change fix-ups — editor call sites do not invoke it manually.
     /// Update order within each timestep:
-    /// 1. Rebuild spatial indices and traffic systems
+    /// 1. Rebuild the vehicle spatial grid and all world caches (see <see cref="RebuildWorldCaches"/>)
     /// 2. Update traffic systems (signals, stop signs, yield signs)
     /// 3. Lane change logic (must precede steering)
     /// 4. Steering controller (depends on all of the above)
     /// 5. Vehicle physics (applies steering/throttle/brake computed in step 4)
     /// 6. Reroute finished vehicles and auto-spawn new ones
+    /// While paused, only HandleIfNeeded and <see cref="RebuildWorldCaches"/> run, so
+    /// editor changes take effect immediately but simulation time and signal timers do
+    /// not advance.
     /// </summary>
     public void Tick()
     {
@@ -95,14 +103,17 @@ public class SimulationLoop
         double wallElapsed = now - _lastSimTime;
         _lastSimTime = now;
 
+        // Step 0: converge graph-change fix-ups (stale selections, marker flags,
+        // vehicles on defunct edges) before any cache rebuild or vehicle update.
+        // Runs in both paused and active modes; O(1) when the graph is unchanged.
+        _graphChangeHandler.HandleIfNeeded();
+
         if (_paused)
         {
-            // Keep caches current so arcs/stop-lines render correctly
-            // while the user drags nodes or control points.
-            _stopLineCache.RebuildIfNeeded(_graph);
-            _graph.ApplyDefaultLaneRestrictions(_stopLineCache);
-            _intersectionArcs.RebuildIfNeeded(_graph, _stopLineCache);
-            _edgeSpatialGrid.RebuildIfNeeded(_graph);
+            // Keep caches and traffic-control systems current so geometry drags
+            // and signal-type/exemption/phase toggles take effect immediately
+            // while paused. Signal timers do not advance (Update is not called).
+            RebuildWorldCaches();
             return;
         }
 
@@ -113,13 +124,7 @@ public class SimulationLoop
         while (_simAccumulator >= SimDt && steps < MaxStepsPerFrame)
         {
             _vehicleGrid.Rebuild(_vehicles.PosX, _vehicles.PosY, _vehicles.Count);
-            _stopLineCache.RebuildIfNeeded(_graph);
-            _graph.ApplyDefaultLaneRestrictions(_stopLineCache);
-            _intersectionArcs.RebuildIfNeeded(_graph, _stopLineCache);
-            _edgeSpatialGrid.RebuildIfNeeded(_graph);
-            _trafficSignals.RebuildIfNeeded(_graph);
-            _stopSigns.RebuildIfNeeded(_graph);
-            _yieldSigns.RebuildIfNeeded(_graph);
+            RebuildWorldCaches();
             _trafficSignals.Update(_graph, SimDt);
             _stopSigns.Update(_graph, _vehicles, _stopLineCache, SimDt);
             _yieldSigns.Update(_graph, _vehicles, _stopLineCache, _intersectionArcs, SimDt);
@@ -142,5 +147,58 @@ public class SimulationLoop
         int selVeh = _editorState.SelectedVehicle;
         if (selVeh >= 0 && (selVeh >= _vehicles.Count || _vehicles.State[selVeh] != VehicleState.Driving))
             _editorState.SelectedVehicle = -1;
+    }
+
+    /// <summary>Graph version after the last normalize pass; phase 1 of
+    /// <see cref="RebuildWorldCaches"/> is skipped while it matches.</summary>
+    private int _lastNormalizedVersion = -1;
+
+    /// <summary>
+    /// Maintains all graph-derived state in two phases.
+    /// Phase 1 (normalize) is the ONLY place graph mutation is permitted during cache
+    /// maintenance; it runs only when the graph version changed and may bump Version:
+    /// signal auto-assignment (lights before stop signs — the stop policy reads the
+    /// TrafficLight flag), then the stop-line rebuild, then default lane restrictions
+    /// (which read stop-line tangents). No normalize step reads what a later step
+    /// writes, so a single pass converges (verified by a debug-only second pass).
+    /// Phase 2 (rebuild) is a pure projection of the settled graph into caches —
+    /// asserted mutation-free in debug builds. After this method returns, every cache
+    /// is current with graph.Version; no follow-up cascade occurs on the next call.
+    /// Safe to call every frame: each step early-outs in O(1) when the graph version
+    /// and its dirty flag are unchanged. Does not rebuild the vehicle spatial grid
+    /// (position-based, rebuilt per simulation step) and does not call the signal
+    /// systems' Update methods (signal timers must not advance while paused).
+    /// </summary>
+    public void RebuildWorldCaches()
+    {
+        // Phase 1 — Normalize derived graph state.
+        if (_graph.Version != _lastNormalizedVersion)
+        {
+            TrafficSignalSystem.AutoAssign(_graph);
+            StopSignSystem.AutoAssign(_graph);
+            _stopLineCache.RebuildIfNeeded(_graph);
+            _graph.ApplyDefaultLaneRestrictions(_stopLineCache);
+#if DEBUG
+            // Empirically verify single-pass convergence: a second pass must not bump.
+            int converged = _graph.Version;
+            TrafficSignalSystem.AutoAssign(_graph);
+            StopSignSystem.AutoAssign(_graph);
+            _graph.ApplyDefaultLaneRestrictions(_stopLineCache);
+            Debug.Assert(_graph.Version == converged,
+                "Normalize did not converge in one pass.");
+#endif
+            _lastNormalizedVersion = _graph.Version; // post-mutation: settled
+        }
+
+        // Phase 2 — Pure rebuilds at the settled version.
+        int settled = _graph.Version;
+        _stopLineCache.RebuildIfNeeded(_graph);
+        _intersectionArcs.RebuildIfNeeded(_graph, _stopLineCache);
+        _edgeSpatialGrid.RebuildIfNeeded(_graph);
+        _trafficSignals.RebuildIfNeeded(_graph);
+        _stopSigns.RebuildIfNeeded(_graph);
+        _yieldSigns.RebuildIfNeeded(_graph);
+        Debug.Assert(_graph.Version == settled,
+            "Rebuild phase mutated the graph — RebuildIfNeeded steps must be pure reads.");
     }
 }

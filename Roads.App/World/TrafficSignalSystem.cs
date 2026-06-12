@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 
 namespace Roads.App.World;
@@ -17,10 +18,11 @@ public enum SignalState : byte
 }
 
 /// <summary>
-/// Manages traffic light cycling for intersection nodes. Auto-assigns traffic lights
-/// to nodes with 4+ incoming edges (unless manually overridden). Groups incoming edges
-/// into two opposing phase groups by approach angle, then cycles Green/Yellow/Red
-/// on a fixed timer.
+/// Manages traffic light cycling for intersection nodes. <see cref="AutoAssign"/>
+/// normalizes the TrafficLight flag on nodes with 4+ incoming edges (unless manually
+/// overridden); <see cref="RebuildIfNeeded"/> then projects node flags into internal
+/// arrays, groups incoming edges into two opposing phase groups by approach angle,
+/// and cycles Green/Yellow/Red on a fixed timer.
 /// </summary>
 public class TrafficSignalSystem
 {
@@ -52,11 +54,18 @@ public class TrafficSignalSystem
 
     /// <summary>
     /// Gets the signal state for an edge approaching its ToNode.
+    /// Debug-asserts that <see cref="RebuildIfNeeded"/> has run at least once (arrays are
+    /// sized there). Version currency is deliberately NOT asserted: the renderer reads
+    /// signals every frame including while paused, where data may legitimately be one
+    /// frame stale.
     /// </summary>
     /// <param name="edgeIndex">Index of the edge to query.</param>
     /// <returns>The current signal state, or <see cref="SignalState.Green"/> if the ToNode has no traffic light.</returns>
     public SignalState GetSignal(int edgeIndex)
     {
+        Debug.Assert(_cachedVersion != -1,
+            "TrafficSignalSystem.GetSignal called before any RebuildIfNeeded — signal arrays are unsized.");
+
         if (edgeIndex < 0 || edgeIndex >= _edgeSignal.Length)
             return SignalState.Green;
         return _edgeSignal[edgeIndex];
@@ -75,14 +84,31 @@ public class TrafficSignalSystem
     }
 
     /// <summary>
-    /// Rotates the traffic light phase grouping at a node, cycling which pair of
-    /// opposing approaches share a green phase.
+    /// Rotates the traffic light phase grouping at a node. At 4-way intersections this
+    /// cycles through the three canonical 2+2 pairings (opposite pairs, then each of the
+    /// two adjacent pairings); at other intersections it shifts the folded-angle split
+    /// point. The stored counter accumulates per click and is interpreted modulo the
+    /// pairing count inside ComputePhaseGroups.
+    /// Grows the rotation array on demand, so the write is never dropped and the call is
+    /// safe in any order relative to <see cref="RebuildIfNeeded"/>.
     /// </summary>
     public void RotatePhase(int nodeIndex)
     {
-        if (nodeIndex < 0 || nodeIndex >= _nodePhaseRotation.Length) return;
+        if (nodeIndex < 0) return;
+        EnsureRotationCapacity(nodeIndex);
         _nodePhaseRotation[nodeIndex]++;
         _dirty = true;
+    }
+
+    /// <summary>
+    /// Grows the rotation array to include <paramref name="nodeIndex"/> so setters are
+    /// order-independent (callers need not rebuild first); RebuildIfNeeded re-normalizes
+    /// array sizes on the next pass.
+    /// </summary>
+    private void EnsureRotationCapacity(int nodeIndex)
+    {
+        if (nodeIndex >= _nodePhaseRotation.Length)
+            Array.Resize(ref _nodePhaseRotation, nodeIndex + 1);
     }
 
     /// <summary>
@@ -95,11 +121,43 @@ public class TrafficSignalSystem
     }
 
     /// <summary>
-    /// Rebuilds signal data when the graph changes. Auto-assigns traffic lights
-    /// to intersections with 4+ incoming edges (unless manually overridden).
+    /// Normalizes auto-assigned traffic-light flags to the current graph topology:
+    /// non-manual nodes get NodeFlags.TrafficLight iff they have 4+ incoming edges.
+    /// Manual nodes (NodeFlags.ManualSignal) are never touched — their flags are the
+    /// truth. Reads and writes only graph node flags (bumping Version on change),
+    /// touches no system state, and is idempotent. Runs in the normalize phase of
+    /// SimulationLoop.RebuildWorldCaches, BEFORE <see cref="StopSignSystem.AutoAssign"/>
+    /// (whose policy reads the TrafficLight flag) and before the pure RebuildIfNeeded calls.
+    /// </summary>
+    /// <param name="graph">Road graph whose flags to normalize.</param>
+    public static void AutoAssign(RoadGraph graph)
+    {
+        int nodeCount = graph.Nodes.Count;
+        for (int n = 0; n < nodeCount; n++)
+        {
+            var node = graph.Nodes[n];
+            if (float.IsNaN(node.Position.X)) continue;               // defunct
+            if (node.Flags.HasFlag(NodeFlags.ManualSignal)) continue; // manual = truth
+
+            bool shouldBeLight = graph.GetIncomingEdges(n).Count >= 4;
+            if (shouldBeLight && !node.Flags.HasFlag(NodeFlags.TrafficLight))
+                graph.SetNodeFlags(n, node.Flags | NodeFlags.TrafficLight);
+            else if (!shouldBeLight && node.Flags.HasFlag(NodeFlags.TrafficLight))
+                graph.SetNodeFlags(n, node.Flags & ~NodeFlags.TrafficLight);
+        }
+    }
+
+    /// <summary>
+    /// Projects node flags into signal arrays when the graph changes or a phase
+    /// rotation marked the system dirty: sizes arrays, derives the traffic-light set
+    /// from NodeFlags.TrafficLight, preserves timers for existing lights (randomizing
+    /// new ones), recomputes phase groups, and initializes per-edge signal states.
+    /// Pure read of the graph — performs no mutation. <see cref="AutoAssign"/> must
+    /// have normalized flags first whenever the graph changed (the ordering inside
+    /// SimulationLoop.RebuildWorldCaches enforces this).
     /// Must be called before <see cref="Update"/> and <see cref="GetSignal"/> each frame.
     /// </summary>
-    /// <param name="graph">Road graph to analyze for traffic light assignment.</param>
+    /// <param name="graph">Road graph to read traffic light flags from.</param>
     public void RebuildIfNeeded(RoadGraph graph)
     {
         if (_cachedVersion == graph.Version && !_dirty) return;
@@ -132,42 +190,22 @@ public class TrafficSignalSystem
         // Clear all edge signals to Green — non-traffic-light edges must not retain stale Red
         Array.Clear(_edgeSignal, 0, Math.Min(edgeCount, _edgeSignal.Length));
 
-        // Auto-assign traffic lights to nodes with 3+ incoming edges
+        // Derive the traffic-light set from node flags (normalized by AutoAssign)
         for (int n = 0; n < nodeCount; n++)
         {
             var node = graph.Nodes[n];
-            if (float.IsNaN(node.Position.X)) continue; // defunct
+            bool isLight = !float.IsNaN(node.Position.X)
+                && node.Flags.HasFlag(NodeFlags.TrafficLight);
+            _isTrafficLight[n] = isLight;
+            if (!isLight) continue;
 
-            var incoming = graph.GetIncomingEdges(n);
+            // Preserve existing timer, or randomize for new lights
+            if (n < oldIsTrafficLight.Length && oldIsTrafficLight[n])
+                _nodeTimer[n] = oldTimer[n];
+            else if (_nodeTimer[n] == 0f)
+                _nodeTimer[n] = Random.Shared.NextSingle() * CycleDuration;
 
-            // Respect manual overrides; only auto-assign for non-manual nodes
-            bool isManual = node.Flags.HasFlag(NodeFlags.ManualSignal);
-            bool shouldBeLight = isManual
-                ? node.Flags.HasFlag(NodeFlags.TrafficLight)
-                : incoming.Count >= 4;
-
-            _isTrafficLight[n] = shouldBeLight;
-
-            if (shouldBeLight)
-            {
-                // Set flag on node if not already set
-                if (!node.Flags.HasFlag(NodeFlags.TrafficLight))
-                    graph.SetNodeFlags(n, node.Flags | NodeFlags.TrafficLight);
-
-                // Preserve existing timer, or randomize for new lights
-                if (n < oldIsTrafficLight.Length && oldIsTrafficLight[n])
-                    _nodeTimer[n] = oldTimer[n];
-                else if (_nodeTimer[n] == 0f)
-                    _nodeTimer[n] = Random.Shared.NextSingle() * CycleDuration;
-
-                ComputePhaseGroups(graph, n, incoming);
-            }
-            else if (!isManual)
-            {
-                // Clear flag if it was auto-set (don't touch manual nodes)
-                if (node.Flags.HasFlag(NodeFlags.TrafficLight))
-                    graph.SetNodeFlags(n, node.Flags & ~NodeFlags.TrafficLight);
-            }
+            ComputePhaseGroups(graph, n, graph.GetIncomingEdges(n));
         }
 
         // Initialize signal states from current timers
@@ -180,12 +218,16 @@ public class TrafficSignalSystem
 
     /// <summary>
     /// Advances signal timers and updates per-edge signal states.
-    /// <see cref="RebuildIfNeeded"/> must be called before this method each frame.
+    /// <see cref="RebuildIfNeeded"/> must be called before this method each frame
+    /// (debug-asserted).
     /// </summary>
     /// <param name="graph">Road graph for incoming-edge lookups.</param>
     /// <param name="dt">Delta time in seconds since last update.</param>
     public void Update(RoadGraph graph, float dt)
     {
+        Debug.Assert(_cachedVersion == graph.Version && !_dirty,
+            "TrafficSignalSystem.Update: RebuildIfNeeded must run first — signal data is stale relative to the graph.");
+
         int nodeCount = Math.Min(graph.Nodes.Count, _isTrafficLight.Length);
         for (int n = 0; n < nodeCount; n++)
         {
@@ -248,8 +290,13 @@ public class TrafficSignalSystem
     /// <summary>
     /// Groups incoming edges into two phase groups by approach angle.
     /// Opposing approaches (~180 degrees apart) get the same phase so they're green together.
-    /// Uses angle folding (mod pi) so opposite directions map to the same value,
-    /// then splits at the largest gap in folded space.
+    /// For 4-way intersections, the user rotation selects among the three canonical 2+2
+    /// pairings derived from the circular (unfolded) angle order — opposite pairs, then
+    /// each of the two adjacent pairings — so every configuration is reachable and the
+    /// result is independent of the direction the roads were drawn.
+    /// For other approach counts, uses angle folding (mod pi) so opposite directions map
+    /// to the same value, splits at the largest gap in folded space, and the rotation
+    /// shifts the split point.
     /// </summary>
     /// <param name="graph">Road graph for tangent evaluation.</param>
     /// <param name="nodeIndex">Index of the traffic-light node.</param>
@@ -282,6 +329,36 @@ public class TrafficSignalSystem
             return;
         }
 
+        byte rotation = _nodePhaseRotation[nodeIndex];
+
+        if (count == 4)
+        {
+            // Sort by unfolded angle — the circular order of approaches around the
+            // intersection is purely geometric, unlike the folded order, whose
+            // within-pair ordering depends on sub-degree tangent noise (draw direction).
+            for (int i = 0; i < count - 1; i++)
+                for (int j = i + 1; j < count; j++)
+                    if (approaches[j].angle < approaches[i].angle)
+                        (approaches[i], approaches[j]) = (approaches[j], approaches[i]);
+
+            // The three distinct 2+2 pairings of [a0,a1,a2,a3] in circular order:
+            //   pairing 0: {a0,a2} vs {a1,a3} — opposite pairs (the default)
+            //   pairing 1: {a0,a1} vs {a2,a3}
+            //   pairing 2: {a1,a2} vs {a3,a0}
+            int pairing = rotation % 3;
+            for (int i = 0; i < count; i++)
+            {
+                byte group = pairing switch
+                {
+                    0 => (byte)(i % 2),
+                    1 => (byte)(i / 2),
+                    _ => (byte)(((i + 3) % 4) / 2),
+                };
+                _edgePhaseGroup[approaches[i].edgeIdx] = group;
+            }
+            return;
+        }
+
         // Sort by folded angle
         for (int i = 0; i < count - 1; i++)
             for (int j = i + 1; j < count; j++)
@@ -305,7 +382,6 @@ public class TrafficSignalSystem
         }
 
         // Apply user-configured phase rotation to shift the split point
-        byte rotation = _nodePhaseRotation[nodeIndex];
         if (rotation > 0 && count > 2)
             splitAfter = (splitAfter + rotation) % count;
 
@@ -328,12 +404,21 @@ public class TrafficSignalSystem
         return result;
     }
 
-    /// <summary>Restores phase rotations from a saved list.</summary>
+    /// <summary>
+    /// Restores phase rotations from a saved list, replacing any existing rotations.
+    /// Grows the rotation array on demand, so no entry is dropped regardless of call
+    /// order relative to <see cref="RebuildIfNeeded"/>.
+    /// </summary>
     public void SetPhaseRotations(List<(int nodeIndex, byte rotation)> rotations)
     {
         Array.Clear(_nodePhaseRotation, 0, _nodePhaseRotation.Length);
+        int maxIndex = -1;
+        foreach (var (node, _) in rotations)
+            if (node > maxIndex) maxIndex = node;
+        if (maxIndex >= 0)
+            EnsureRotationCapacity(maxIndex);
         foreach (var (node, rot) in rotations)
-            if (node >= 0 && node < _nodePhaseRotation.Length) _nodePhaseRotation[node] = rot;
+            if (node >= 0) _nodePhaseRotation[node] = rot;
         _dirty = true;
     }
 }

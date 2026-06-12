@@ -141,9 +141,9 @@ public class IntersectionArcCache
             Array.Clear(_nodeArcCount, 0, nodeCount);
         }
 
-        // Note: default lane restrictions are now applied by RoadGraph.ApplyDefaultLaneRestrictions()
-        // before this cache rebuilds, so the version bump happens predictably and this method
-        // remains a pure read of the graph.
+        // Note: default lane restrictions are applied during the normalize phase of
+        // SimulationLoop.RebuildWorldCaches before this cache rebuilds. This method must
+        // remain a pure read of the graph (enforced by the rebuild-phase debug assert).
 
         // First pass: count arcs per node to size arrays
         var arcList = new List<IntersectionArc>();

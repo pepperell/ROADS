@@ -6,9 +6,12 @@ using Roads.App.World;
 namespace Roads.App;
 
 /// <summary>
-/// Central handler for all graph mutations. Idempotent — safe to call multiple times;
-/// only runs fix-ups when the graph version has actually changed. Fixes stale state in:
-/// editor selection, node marker flags, and active vehicles.
+/// Central handler for all graph mutations. Invoked automatically once per frame at the
+/// top of SimulationLoop.Tick, in both paused and active modes — no editor call site
+/// needs to invoke it manually (manual calls are harmless: idempotent, version-keyed
+/// early-out). Fixes stale state in: editor selection, node marker flags, and active
+/// vehicles. Fix-ups therefore land at most one frame (~16 ms) after a mutation, and
+/// always before any cache rebuild or vehicle update within the tick.
 /// </summary>
 public class GraphChangeHandler
 {
@@ -33,7 +36,7 @@ public class GraphChangeHandler
     /// <summary>
     /// Checks if the graph version has changed and, if so, fixes stale editor selections,
     /// strips marker flags from nodes that now have too many edges, and reroutes vehicles
-    /// on defunct edges.
+    /// on defunct edges. Called once per tick by SimulationLoop; O(1) when unchanged.
     /// </summary>
     public void HandleIfNeeded()
     {
