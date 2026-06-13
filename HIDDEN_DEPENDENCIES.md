@@ -54,12 +54,18 @@ One lifecycle contract to know: exemption/rotation override state **deliberately
 
 ## 6. Swap-and-pop removal invalidates vehicle indices
 
-[VehicleStore.Remove](Roads.App/Vehicles/VehicleStore.cs#L241-L297) moves the last vehicle into the removed slot. Three hidden contracts follow:
+[VehicleStore.Remove](Roads.App/Vehicles/VehicleStore.cs) moves the last vehicle into the removed slot, invalidating any externally-held index of either slot. The per-call-site fixup contract is gone (Phase 4.5): index fixup is **centralized on the store itself**. `Remove` raises `VehicleStore.VehicleRemoving(removedIndex, swappedFromIndex)` before any mutation, and `ClearAll` (new map / load) raises `VehiclesCleared`; every index holder subscribes once:
 
-- Removal loops must iterate **backward** (as [GraphChangeHandler does](Roads.App/GraphChangeHandler.cs#L61)) or they skip the swapped-in vehicle.
-- Anything holding a vehicle index must do fixup using the return value. [PopulationManager.RemoveVehicle](Roads.App/Vehicles/PopulationManager.cs#L467-L489) is the canonical dance — and even the order of its dictionary removals matters (old index key removed *after* the swap).
-- `EditorState.SelectedVehicle` is only cleared when out of range ([SimulationLoop.cs:149](Roads.App/SimulationLoop.cs#L149)) — after a swap the same index silently refers to a *different* car.
-- Maintenance hazard: adding any per-vehicle field requires updating **four places in sync** (array declaration, `Add`, the swap block in `Remove`, `Grow`) plus MapSerializer Save/Load. Missing the swap block makes the field silently leak between vehicles whenever a removal happens — the nastiest failure mode here.
+- **PopulationManager** redirects the swapped vehicle's resident links (`Resident.VehicleIndex`, the `_vehicleToResident` dict) and detaches the removed vehicle's resident — an externally-removed mid-trip resident goes home dormant and departs again on its next schedule entry. On `VehiclesCleared` the population resets entirely, so a map swap while residents are driving can no longer hijack the new map's vehicles.
+- **MainForm** retargets `EditorState.SelectedVehicle`/`HoveredVehicle` (clear if removed, follow if swapped); the store retargets its own `DiagVehicle` the same way.
+- **SpatialGrid** (the vehicle grid) unlinks the removed index and re-links the swapped one in place, so editor-time hit-tests between per-step rebuilds never see a removed or relocated index. (The grid also rebuilds every paused tick, so hit-tests work on a freshly loaded, still-paused map.)
+
+Any removal call site — including raw `_vehicles.Remove(i)` calls in GraphChangeHandler and VehicleSpawner, and any future ones — is therefore automatically safe; none carries fixup code. Watchdogs: a per-tick debug assert in SimulationLoop that the selection is in range, a reentrancy assert in `Remove` (handlers must not remove vehicles), and PopulationManager's per-tick mapping validation.
+
+What remains:
+
+- Removal loops must iterate **backward** (as [GraphChangeHandler does](Roads.App/GraphChangeHandler.cs#L64)) or they skip the swapped-in vehicle — this is about the loop's own iteration, not index fixup.
+- Maintenance hazard: adding any per-vehicle field requires updating **five places in sync** (array declaration, `Add`, the swap block in `Remove`, `Grow`, and MapSerializer Save/Load + load-skip — or re-init in Load if the field is derived/transient). Missing the swap block makes the field silently leak between vehicles whenever a removal happens — the nastiest failure mode here. Phase 4.5 mitigates this with a co-located **five-step checklist banner at the top of [VehicleStore](Roads.App/Vehicles/VehicleStore.cs)**, cross-referenced from the `Add`/`Remove`/`Grow` docs and the MapSerializer vehicle Save loop; there is no automated guard, so the checklist is the enforcement.
 
 ## 7. Smaller contracts
 
@@ -71,4 +77,4 @@ One lifecycle contract to know: exemption/rotation override state **deliberately
 
 ## Common thread
 
-`graph.Version` works well as a lazy invalidation signal, but the system's correctness hangs on (a) every mutator bumping it (audited and fixed in Phase 4.5 — see §1) and (b) graph mutation during cache maintenance staying confined to the pipeline's normalize phase (debug-asserted — see §2). The old class of "remember to call X after Y" contracts is gone: graph-change fix-ups run automatically per tick (§4) and the load-path setters size their own storage (§5). The phase contracts in (b) and the signal systems' per-frame protocol (§3) are enforced by debug asserts; the remaining doc-only contracts are (a)'s forgotten-bump risk, ApplyMergeSpeedBias ordering, and SpatialGrid rebuild-before-queries.
+`graph.Version` works well as a lazy invalidation signal, but the system's correctness hangs on (a) every mutator bumping it (audited and fixed in Phase 4.5 — see §1) and (b) graph mutation during cache maintenance staying confined to the pipeline's normalize phase (debug-asserted — see §2). The old class of "remember to call X after Y" contracts is gone: graph-change fix-ups run automatically per tick (§4), the load-path setters size their own storage (§5), and vehicle-removal index fixup hangs off the store's own events (§6). The phase contracts in (b) and the signal systems' per-frame protocol (§3) are enforced by debug asserts; the remaining doc-only contracts are (a)'s forgotten-bump risk, backward iteration in removal loops (§6), the VehicleStore five-place field-sync requirement (§6, mitigated by a co-located checklist), ApplyMergeSpeedBias ordering, and SpatialGrid rebuild-before-queries.

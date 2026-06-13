@@ -108,11 +108,19 @@ public class SimulationLoop
         // Runs in both paused and active modes; O(1) when the graph is unchanged.
         _graphChangeHandler.HandleIfNeeded();
 
+        // Watchdog: assert the vehicle↔resident index mappings are internally consistent
+        // (debug-only). Runs after HandleIfNeeded so it is armed while paused too.
+        _populationManager.ValidateMappings();
+
         if (_paused)
         {
             // Keep caches and traffic-control systems current so geometry drags
             // and signal-type/exemption/phase toggles take effect immediately
             // while paused. Signal timers do not advance (Update is not called).
+            // The vehicle grid rebuilds too so editor hit-tests (hover/click
+            // selection) work while paused — e.g. right after a map load, when the
+            // grid was bulk-cleared and no sim step has indexed the new vehicles.
+            _vehicleGrid.Rebuild(_vehicles.PosX, _vehicles.PosY, _vehicles.Count);
             RebuildWorldCaches();
             return;
         }
@@ -143,10 +151,14 @@ public class SimulationLoop
             steps++;
         }
 
-        // Clear stale vehicle selection
+        // Watchdog: centralized removal fixup (VehicleStore.VehicleRemoving /
+        // VehiclesCleared) keeps the selection in range; out of range here means a
+        // removal path bypassed the store's notification.
         int selVeh = _editorState.SelectedVehicle;
-        if (selVeh >= 0 && (selVeh >= _vehicles.Count || _vehicles.State[selVeh] != VehicleState.Driving))
-            _editorState.SelectedVehicle = -1;
+        Debug.Assert(selVeh < _vehicles.Count,
+            "SelectedVehicle out of range — a vehicle removal bypassed centralized fixup.");
+        if (selVeh >= _vehicles.Count)
+            _editorState.SelectedVehicle = -1; // release-mode self-heal
     }
 
     /// <summary>Graph version after the last normalize pass; phase 1 of

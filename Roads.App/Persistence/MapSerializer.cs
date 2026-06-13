@@ -64,8 +64,8 @@ public static class MapSerializer
             w.Write(e.ControlPoint2.Y);
         }
 
-        // Section 3 — Lane Restrictions
-        var restrictions = graph.GetAllLaneRestrictions().ToList();
+        // Section 3 — Lane Restrictions (user-customized only; auto defaults rebuilt on load)
+        var restrictions = graph.GetUserLaneRestrictions().ToList();
         w.Write(restrictions.Count);
         foreach (var (key, pairs) in restrictions)
         {
@@ -102,6 +102,13 @@ public static class MapSerializer
         w.Write(camera.Zoom);
 
         // Section 6 — Vehicles (optional)
+        //
+        // Persist only DURABLE per-vehicle fields. Derived/transient fields (Throttle,
+        // Brake, PrevHeadingError, DistToRoadSq, LaneChangeCooldown, DesiredLane,
+        // MergeUrgency, MergeSpeedBias, SmoothedThrottle, SmoothedBrake, ResidentId,
+        // State) are deliberately NOT written — Load re-initializes them. This Save loop,
+        // the Load loop, and the load-skip branch must stay in sync and in the same field
+        // order. See the field-sync checklist at the top of VehicleStore (step 5).
         if (includeVehicles)
         {
             w.Write(vehicles.Count);

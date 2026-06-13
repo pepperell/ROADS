@@ -345,17 +345,28 @@ public class IntersectionArcCache
         byte inLaneCount = inEdgeData.LaneCount;
         byte outLaneCount = outEdgeData.LaneCount;
 
-        // Generate lane-to-lane arcs, respecting per-lane restrictions
-        var lanePairs = GetLanePairs(inLaneCount, outLaneCount, cross);
-
-        // Filter by per-lane restrictions: if a lane has explicit restrictions,
-        // only generate arcs for allowed (outEdge, outLane) pairs
-        for (int i = lanePairs.Count - 1; i >= 0; i--)
+        // Decide which (inLane, outLane) arcs to generate. Explicit per-lane restrictions
+        // are AUTHORITATIVE: a user-allowed pair is realized as a real, drivable arc even
+        // when it is not a geometry default (e.g. a left turn from the right lane). A lane
+        // with no explicit restriction falls back to the geometry default pairing. (The
+        // arc geometry itself comes from the lane offsets below, so any pairing is valid.)
+        var geo = GetLanePairs(inLaneCount, outLaneCount, cross);
+        var lanePairs = new List<(byte inLane, byte outLane)>();
+        for (byte inLane = 0; inLane < inLaneCount; inLane++)
         {
-            var (inLane, outLane) = lanePairs[i];
             var restrictions = graph.GetLaneRestrictions(inEdge, inLane);
-            if (restrictions != null && !restrictions.Contains((outEdge, outLane)))
-                lanePairs.RemoveAt(i);
+            if (restrictions != null)
+            {
+                foreach (var (ro, rl) in restrictions)
+                    if (ro == outEdge && rl < outLaneCount)
+                        lanePairs.Add((inLane, rl));
+            }
+            else
+            {
+                foreach (var (gi, gl) in geo)
+                    if (gi == inLane)
+                        lanePairs.Add((inLane, gl));
+            }
         }
 
         foreach (var (inLane, outLane) in lanePairs)

@@ -39,6 +39,17 @@ public class RoadGraph
     /// </summary>
     private readonly Dictionary<(int inEdge, byte inLane), HashSet<(int outEdge, byte outLane)>> _laneRestrictions = new();
 
+    /// <summary>
+    /// Nodes whose lane restrictions were set by the user (via the lane-restriction tool
+    /// or loaded from a saved map), as opposed to auto-derived geometry defaults. The
+    /// normalize-phase <see cref="ApplyDefaultLaneRestrictions"/> skips these and refreshes
+    /// every other multi-lane intersection, so a node that gains an edge (e.g. a branch
+    /// added by a later split) re-derives its defaults instead of keeping stale ones, while
+    /// genuine user customizations are preserved. Only user-node restrictions are saved;
+    /// auto defaults are rebuilt on load.
+    /// </summary>
+    private readonly HashSet<int> _userLaneRestrictionNodes = new();
+
     /// <summary>Read-only view of all nodes in the graph.</summary>
     public IReadOnlyList<RoadNode> Nodes => _nodes;
     /// <summary>Read-only view of all edges in the graph (includes defunct entries).</summary>
@@ -229,6 +240,7 @@ public class RoadGraph
         node.PointOfInterest = POIType.None;
         _nodes[nodeIndex] = node;
         _turnMatrix.Remove(nodeIndex);
+        _userLaneRestrictionNodes.Remove(nodeIndex);
     }
 
     /// <summary>
@@ -440,6 +452,10 @@ public class RoadGraph
         var pair = (outEdge, outLane);
         if (!set.Remove(pair))
             set.Add(pair);
+        // User customization: this node's restrictions are now manual, so the normalize
+        // phase must preserve them instead of re-deriving geometry defaults.
+        if (inEdge >= 0 && inEdge < _edges.Count)
+            _userLaneRestrictionNodes.Add(_edges[inEdge].ToNode);
         Version++;
     }
 
@@ -460,12 +476,15 @@ public class RoadGraph
     }
 
     /// <summary>
-    /// Auto-applies default lane restrictions at all multi-lane intersection nodes that don't
-    /// already have restrictions. Left lanes turn left, right lanes turn right, etc.
-    /// Runs in the normalize phase of SimulationLoop.RebuildWorldCaches; requires a current
-    /// StopLineCache (reads tangent directions at stop-line positions). Bumps Version for
-    /// each node where defaults are applied; idempotent via the HasAnyLaneRestrictionsAtNode
-    /// guard, so a follow-up pass applies nothing and does not bump.
+    /// (Re)derives default lane restrictions at every multi-lane intersection node that is
+    /// not user-customized (see <see cref="_userLaneRestrictionNodes"/>). Left lanes turn
+    /// left, right lanes turn right, etc. Re-deriving auto nodes — rather than skipping any
+    /// node that already has restrictions — ensures a node that gained an edge after its
+    /// first auto-default (e.g. a branch added by a later split) refreshes instead of
+    /// keeping a stale set. Runs in the normalize phase of SimulationLoop.RebuildWorldCaches;
+    /// requires a current StopLineCache (reads tangent directions at stop-line positions).
+    /// Idempotent: <see cref="SetGeometryDefaultRestrictionsAtNode"/> bumps Version only when
+    /// the derived restrictions actually change, so a settled graph converges in one pass.
     /// </summary>
     /// <param name="stopLines">Stop-line cache (must be up to date).</param>
     public void ApplyDefaultLaneRestrictions(StopLineCache stopLines)
@@ -476,7 +495,10 @@ public class RoadGraph
             var node = _nodes[n];
             if (float.IsNaN(node.Position.X)) continue;
 
-            if (HasAnyLaneRestrictionsAtNode(n)) continue;
+            // Skip only user-customized nodes; auto nodes are re-derived so that a node
+            // which gained an edge (e.g. a branch added by a later split) refreshes its
+            // defaults instead of keeping the stale set from its earlier topology.
+            if (_userLaneRestrictionNodes.Contains(n)) continue;
 
             var outgoing = GetOutgoingEdges(n);
             if (outgoing.Count < 2) continue;
@@ -506,7 +528,17 @@ public class RoadGraph
     /// <param name="stopLines">Stop-line cache (must be up to date).</param>
     public void SetGeometryDefaultRestrictionsAtNode(int nodeIndex, StopLineCache stopLines)
     {
+        // (Re)deriving from geometry makes this node auto, not user-customized.
+        _userLaneRestrictionNodes.Remove(nodeIndex);
+
         var incoming = GetIncomingEdges(nodeIndex);
+
+        // Build the geometry defaults into a temp map first. Apply them only if they differ
+        // from what is already stored, so this is idempotent: ApplyDefaultLaneRestrictions
+        // re-derives every auto node on each graph change and must converge without bumping
+        // Version (else the normalize phase fails its single-pass convergence assert).
+        var computed = new Dictionary<(int inEdge, byte inLane), HashSet<(int, byte)>>();
+        var processed = new List<int>(); // non-degenerate incoming edges actually handled
         foreach (int inEdge in incoming)
         {
             var inEdgeData = _edges[inEdge];
@@ -518,12 +550,8 @@ public class RoadGraph
             float inTanLen = inTangent.Length();
             if (inTanLen < 0.001f) continue;
             var inDir = inTangent / inTanLen;
+            processed.Add(inEdge);
 
-            // Clear existing restrictions for all lanes on this edge
-            for (byte lane = 0; lane < inLaneCount; lane++)
-                _laneRestrictions.Remove((inEdge, lane));
-
-            // Build per-lane restriction sets from geometry defaults
             var allowedTurns = GetAllowedTurns(nodeIndex, inEdge);
             foreach (int outEdge in allowedTurns)
             {
@@ -544,15 +572,44 @@ public class RoadGraph
                 foreach (var (inLane, outLane) in lanePairs)
                 {
                     var key = (inEdge, inLane);
-                    if (!_laneRestrictions.TryGetValue(key, out var set))
+                    if (!computed.TryGetValue(key, out var set))
                     {
                         set = new HashSet<(int, byte)>();
-                        _laneRestrictions[key] = set;
+                        computed[key] = set;
                     }
                     set.Add((outEdge, outLane));
                 }
             }
         }
+
+        // Does the computed default differ from what's stored on the processed edges?
+        bool changed = false;
+        foreach (int inEdge in processed)
+        {
+            byte inLaneCount = _edges[inEdge].LaneCount;
+            for (byte lane = 0; lane < inLaneCount && !changed; lane++)
+            {
+                var key = (inEdge, lane);
+                bool hasOld = _laneRestrictions.TryGetValue(key, out var oldSet);
+                bool hasNew = computed.TryGetValue(key, out var newSet);
+                if (hasOld != hasNew || (hasOld && !oldSet!.SetEquals(newSet!)))
+                    changed = true;
+            }
+            if (changed) break;
+        }
+
+        if (!changed) return;
+
+        // Replace the processed edges' restrictions with the computed defaults.
+        foreach (int inEdge in processed)
+        {
+            byte inLaneCount = _edges[inEdge].LaneCount;
+            for (byte lane = 0; lane < inLaneCount; lane++)
+                _laneRestrictions.Remove((inEdge, lane));
+        }
+        foreach (var kvp in computed)
+            _laneRestrictions[kvp.Key] = kvp.Value;
+
         Version++;
     }
 
@@ -1072,11 +1129,15 @@ public class RoadGraph
 
         // Split the primary edge
         var (fwdFirst, fwdSecond) = SplitEdgeSingle(edgeIndex, t, midNode);
+        // Carry any lane restrictions from the old edge onto its two halves so a split
+        // incident to a restricted node doesn't silently revert that approach to allow-all.
+        MigrateLaneRestrictionsForSplit(edgeIndex, fwdFirst, fwdSecond);
 
         // If reverse exists, split it at (1-t) using the same midNode
         if (reverseEdge >= 0 && _edges[reverseEdge].FromNode >= 0)
         {
-            SplitEdgeSingle(reverseEdge, 1f - t, midNode);
+            var (revFirst, revSecond) = SplitEdgeSingle(reverseEdge, 1f - t, midNode);
+            MigrateLaneRestrictionsForSplit(reverseEdge, revFirst, revSecond);
             ActiveEdgeCount++; // net +1 for the reverse split too
         }
 
@@ -1162,6 +1223,42 @@ public class RoadGraph
         ActiveEdgeCount++; // net +1: removed 1 defunct, added 2 new
 
         return (idx1, idx2);
+    }
+
+    /// <summary>
+    /// Re-keys lane restrictions from a just-split edge onto its two halves, so a split
+    /// incident to a restricted node keeps that node's turn customization (lane restrictions
+    /// are keyed by edge index, which changes on a split). For old edge <c>F→T</c> split into
+    /// <c>firstHalf = F→Mid</c> and <c>secondHalf = Mid→T</c>:
+    /// the restriction KEYS (the old edge as an incoming edge at T) move to <c>secondHalf</c>
+    /// (the new incoming edge at T); restriction TARGETS pointing at the old edge (as an
+    /// outgoing edge from F) retarget to <c>firstHalf</c> (the new outgoing edge from F).
+    /// Called for both the primary and reverse split.
+    /// </summary>
+    private void MigrateLaneRestrictionsForSplit(int oldEdge, int firstHalf, int secondHalf)
+    {
+        // KEYS: old edge was an incoming edge at its ToNode → secondHalf is now that incoming edge.
+        byte laneCount = _edges[secondHalf].LaneCount;
+        for (byte lane = 0; lane < laneCount; lane++)
+        {
+            if (_laneRestrictions.Remove((oldEdge, lane), out var set))
+                _laneRestrictions[(secondHalf, lane)] = set;
+        }
+
+        // TARGETS: old edge was an outgoing edge from its FromNode → firstHalf is now that
+        // outgoing edge. Retarget any (oldEdge, outLane) entry in every restriction set.
+        foreach (var set in _laneRestrictions.Values)
+        {
+            if (set.Count == 0) continue;
+            var retarget = new List<(int, byte)>();
+            foreach (var (outEdge, outLane) in set)
+                if (outEdge == oldEdge) retarget.Add((outEdge, outLane));
+            foreach (var (outEdge, outLane) in retarget)
+            {
+                set.Remove((outEdge, outLane));
+                set.Add((firstHalf, outLane));
+            }
+        }
     }
 
     /// <summary>
@@ -1382,13 +1479,29 @@ public class RoadGraph
     // ── Serialization helpers ──────────────────────────────────────────
 
     /// <summary>
-    /// Returns all manually-set lane restrictions for serialization.
-    /// Auto-generated defaults are excluded (they are rebuilt on load).
+    /// Returns every stored lane restriction, including auto-derived geometry defaults.
+    /// For serialization use <see cref="GetUserLaneRestrictions"/> instead.
     /// </summary>
     public IEnumerable<((int inEdge, byte inLane) key, HashSet<(int outEdge, byte outLane)> pairs)> GetAllLaneRestrictions()
     {
         foreach (var kvp in _laneRestrictions)
             yield return (kvp.Key, kvp.Value);
+    }
+
+    /// <summary>
+    /// Returns only user-customized lane restrictions for serialization (restrictions on
+    /// nodes in <see cref="_userLaneRestrictionNodes"/>). Auto-derived geometry defaults are
+    /// excluded — they are rebuilt on load by the post-load <c>RebuildWorldCaches</c>.
+    /// </summary>
+    public IEnumerable<((int inEdge, byte inLane) key, HashSet<(int outEdge, byte outLane)> pairs)> GetUserLaneRestrictions()
+    {
+        foreach (var kvp in _laneRestrictions)
+        {
+            int inEdge = kvp.Key.inEdge;
+            if (inEdge >= 0 && inEdge < _edges.Count
+                && _userLaneRestrictionNodes.Contains(_edges[inEdge].ToNode))
+                yield return (kvp.Key, kvp.Value);
+        }
     }
 
     /// <summary>
@@ -1401,6 +1514,10 @@ public class RoadGraph
     public void SetLaneRestriction(int inEdge, byte inLane, HashSet<(int outEdge, byte outLane)> pairs)
     {
         _laneRestrictions[(inEdge, inLane)] = pairs;
+        // Loaded/overwritten restrictions are user intent — preserve them from the
+        // normalize phase's auto re-derivation (only auto defaults are rebuilt).
+        if (inEdge >= 0 && inEdge < _edges.Count)
+            _userLaneRestrictionNodes.Add(_edges[inEdge].ToNode);
         Version++;
     }
 
@@ -1413,6 +1530,7 @@ public class RoadGraph
         _nodes.Clear();
         _edges.Clear();
         _laneRestrictions.Clear();
+        _userLaneRestrictionNodes.Clear();
         _turnMatrix.Clear();
 
         _nodes.AddRange(nodes);

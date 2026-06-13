@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Roads.App.Vehicles;
 
 /// <summary>
@@ -12,9 +14,25 @@ public enum VehicleState : byte
 /// Struct-of-Arrays (SoA) storage for all vehicle data, organized into hot (per-tick physics),
 /// warm (edge tracking), path, lane change, and cold (visual) arrays. Uses swap-and-pop
 /// removal for O(1) deletes. Designed for cache-efficient iteration by simulation systems.
+/// Index fixup is centralized: <see cref="Remove"/> raises <see cref="VehicleRemoving"/> and
+/// <see cref="ClearAll"/> raises <see cref="VehiclesCleared"/>, so systems holding vehicle
+/// indices subscribe once and every removal call site — present or future — is automatically
+/// safe. Removal loops must still iterate backward so the swapped-in vehicle is not skipped.
 /// </summary>
 public class VehicleStore
 {
+    // ╔══════════════════════════════════════════════════════════════════════════════════╗
+    // ║ ADDING A PER-VEHICLE FIELD: update ALL of these in sync (columns of one table).    ║
+    // ║   1. Declare the array here                2. Add(): set its initial value         ║
+    // ║   3. Remove(): copy it in the swap block   4. Grow(): Array.Resize it              ║
+    // ║   5. MapSerializer Save + Load + load-skip branch — OR, if it is a derived/        ║
+    // ║      transient field, re-initialize it in Load instead of persisting it.           ║
+    // ║                                                                                    ║
+    // ║ Miss #3 and the field silently leaks between vehicles on every removal (no crash,  ║
+    // ║ just wrong data — the nastiest bug here). Miss #4 and you get an IndexOutOfRange    ║
+    // ║ later, far from the cause. There is no automated guard — keep this list in sync.   ║
+    // ╚══════════════════════════════════════════════════════════════════════════════════╝
+
     // ── Hot data (touched every tick) ──
 
     /// <summary>World-space X position in meters.</summary>
@@ -182,7 +200,8 @@ public class VehicleStore
 
     /// <summary>
     /// Adds a new vehicle at the given position and heading on the specified edge.
-    /// Grows backing arrays if needed.
+    /// Grows backing arrays if needed. Sets an initial value for every per-vehicle
+    /// field — see the field-sync checklist at the top of the class (step 2).
     /// </summary>
     /// <param name="x">World-space X position.</param>
     /// <param name="y">World-space Y position.</param>
@@ -239,7 +258,32 @@ public class VehicleStore
     }
 
     /// <summary>
+    /// Raised at the start of every successful <see cref="Remove"/>, before any array
+    /// mutation. Arguments are (removedIndex, swappedFromIndex): swappedFromIndex is the
+    /// current last index whose data will move into removedIndex, or -1 if the removed
+    /// vehicle is the last (no swap). Handlers may read both slots' data (still intact).
+    /// All cross-system index fixup (resident mappings, editor selection) hangs off this
+    /// event, so removal call sites need no fixup code of their own.
+    /// </summary>
+    public event Action<int, int>? VehicleRemoving;
+
+    /// <summary>
+    /// Raised by <see cref="ClearAll"/> when the store is bulk-reset (new map / load).
+    /// Handlers must drop every vehicle index they hold.
+    /// </summary>
+    public event Action? VehiclesCleared;
+
+    /// <summary>Guards against a <see cref="VehicleRemoving"/> handler re-entering
+    /// <see cref="Remove"/> mid-swap.</summary>
+    private bool _inRemove;
+
+    /// <summary>
     /// Removes a vehicle by swapping it with the last vehicle (swap-and-pop).
+    /// Raises <see cref="VehicleRemoving"/> first so all index holders fix up, then
+    /// retargets <see cref="DiagVehicle"/> itself (the store-owned index holder).
+    /// The swap block must copy every per-vehicle field — see the field-sync checklist
+    /// at the top of the class (step 3); a field omitted here silently leaks between
+    /// vehicles on every removal.
     /// </summary>
     /// <param name="index">Index of the vehicle to remove.</param>
     /// <returns>The index that was swapped in, or -1 if the removed vehicle was the last.</returns>
@@ -247,7 +291,18 @@ public class VehicleStore
     {
         if (index < 0 || index >= Count) return -1;
 
+        Debug.Assert(!_inRemove, "VehicleStore.Remove re-entered from a VehicleRemoving handler.");
+        _inRemove = true;
+
         int last = Count - 1;
+
+        // Notify index holders before any mutation so handlers can read both slots
+        VehicleRemoving?.Invoke(index, index < last ? last : -1);
+
+        // Store-owned index holder: the diagnostic target follows the same fixup rule
+        if (DiagVehicle == index) DiagVehicle = -1;
+        else if (DiagVehicle == last) DiagVehicle = index;
+
         if (index < last)
         {
             // Swap last into the hole
@@ -293,13 +348,19 @@ public class VehicleStore
         }
 
         Count--;
+        _inRemove = false;
         return index < last ? index : -1;
     }
 
-    /// <summary>Removes all vehicles and resets count to zero.</summary>
+    /// <summary>
+    /// Removes all vehicles, resets the diagnostic target, and raises
+    /// <see cref="VehiclesCleared"/> so index holders drop their references.
+    /// </summary>
     public void ClearAll()
     {
         Count = 0;
+        DiagVehicle = -1;
+        VehiclesCleared?.Invoke();
     }
 
     /// <summary>
@@ -312,7 +373,9 @@ public class VehicleStore
         Count = count;
     }
 
-    /// <summary>Resizes all backing arrays to the new capacity.</summary>
+    /// <summary>Resizes all backing arrays to the new capacity. Must resize every
+    /// per-vehicle field — see the field-sync checklist at the top of the class
+    /// (step 4); a field omitted here throws IndexOutOfRange once the store grows.</summary>
     private void Grow(int newCapacity)
     {
         Array.Resize(ref PosX, newCapacity);

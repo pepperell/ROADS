@@ -91,6 +91,72 @@ public class SpatialGrid
         }
     }
 
+    /// <summary>
+    /// Fixes the grid in place for a swap-and-pop removal (see VehicleStore.VehicleRemoving):
+    /// unlinks the removed entity and re-links the swapped entity under its new index, so
+    /// editor-time queries between rebuilds never see a removed or relocated index. The
+    /// unlink walks cell lists without positional assumptions (O(n); removals are rare),
+    /// so it stays correct even for entities that moved since the last <see cref="Rebuild"/>.
+    /// </summary>
+    public void OnEntityRemoving(int removed, int swappedFrom)
+    {
+        UnlinkEntity(removed);
+        if (swappedFrom < 0) return;
+
+        int cell = UnlinkEntity(swappedFrom);
+        if (cell == NotFound || removed >= _capacity)
+            return; // swapped entity not indexed yet (spawned after the last Rebuild)
+
+        // The entity formerly at swappedFrom now lives at index `removed`, same position
+        _next[removed] = _heads.TryGetValue(cell, out int head) ? head : -1;
+        _heads[cell] = removed;
+    }
+
+    /// <summary>Drops all grid contents (entity indices are void after a bulk clear;
+    /// see VehicleStore.VehiclesCleared).</summary>
+    public void Clear() => _heads.Clear();
+
+    /// <summary>Sentinel returned by <see cref="UnlinkEntity"/> when the entity is not in the grid.</summary>
+    private const int NotFound = int.MinValue;
+
+    /// <summary>
+    /// Removes an entity index from whichever cell list contains it and returns that
+    /// cell's key, or <see cref="NotFound"/> if the entity is not indexed.
+    /// </summary>
+    private int UnlinkEntity(int index)
+    {
+        if (index < 0 || index >= _capacity) return NotFound;
+
+        // Locate first, mutate after — _heads must not change during enumeration
+        int foundCell = NotFound;
+        int predecessor = -1;
+        foreach (var kvp in _heads)
+        {
+            if (kvp.Value == index) { foundCell = kvp.Key; break; }
+
+            int idx = kvp.Value;
+            while (idx >= 0)
+            {
+                int next = _next[idx];
+                if (next == index) { foundCell = kvp.Key; predecessor = idx; break; }
+                idx = next;
+            }
+            if (foundCell != NotFound) break;
+        }
+        if (foundCell == NotFound) return NotFound;
+
+        if (predecessor < 0)
+        {
+            int next = _next[index];
+            if (next >= 0) _heads[foundCell] = next; else _heads.Remove(foundCell);
+        }
+        else
+        {
+            _next[predecessor] = _next[index];
+        }
+        return foundCell;
+    }
+
     /// <summary>Computes the cell hash for a world-space position.</summary>
     private static int CellKey(float x, float y)
     {

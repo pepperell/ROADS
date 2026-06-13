@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using Roads.App.World;
 
@@ -59,6 +60,11 @@ public class PopulationManager
         _vehicleGrid = vehicleGrid;
         _poiRegistry = poiRegistry;
         _maxActiveVehicles = maxActiveVehicles;
+
+        // Centralized index fixup: the store notifies on every removal/bulk clear,
+        // regardless of which system initiated it (see VehicleStore.VehicleRemoving).
+        vehicles.VehicleRemoving += OnVehicleRemoving;
+        vehicles.VehiclesCleared += OnVehiclesCleared;
     }
 
     /// <summary>
@@ -462,30 +468,67 @@ public class PopulationManager
     }
 
     /// <summary>
-    /// Removes a resident's vehicle from VehicleStore, handling swap-and-pop fixup.
+    /// Removes a resident's vehicle from the store. All index fixup (this resident's
+    /// links, the swapped-in vehicle's resident, editor selection) happens centrally
+    /// via the store's VehicleRemoving event.
     /// </summary>
     private void RemoveVehicle(Resident resident)
     {
         int vi = resident.VehicleIndex;
         if (vi < 0 || vi >= _vehicles.Count) return;
+        _vehicles.Remove(vi);
+        resident.VehicleIndex = -1; // redundant with the event fixup; belt-and-braces
+    }
 
-        _vehicleToResident.Remove(vi);
-
-        int swappedFrom = _vehicles.Remove(vi);
-        if (swappedFrom >= 0)
+    /// <summary>
+    /// Centralized swap-and-pop fixup, invoked by VehicleStore for every removal
+    /// regardless of call site. Detaches the removed vehicle's resident — an
+    /// externally-removed mid-trip resident goes home dormant and departs again on its
+    /// next schedule entry (POI occupancy is deliberately untouched; drift self-corrects
+    /// on the next population rebuild, and HandleArrival overwrites Activity/CurrentPOINode
+    /// with the true destination right after its own removal) — and redirects the
+    /// swapped-in vehicle's resident links to its new index.
+    /// </summary>
+    private void OnVehicleRemoving(int removed, int swappedFrom)
+    {
+        int rid = _vehicles.ResidentId[removed];
+        if (rid >= 0 && rid < _residents.Count)
         {
-            // The vehicle that was at the last slot is now at vi
-            // Fix up the resident that owned that vehicle
-            int swappedResId = _vehicles.ResidentId[vi];
-            if (swappedResId >= 0 && swappedResId < _residents.Count)
+            var resident = _residents[rid];
+            resident.VehicleIndex = -1;
+            if (resident.Activity == ResidentActivity.Driving)
             {
-                _residents[swappedResId].VehicleIndex = vi;
-                _vehicleToResident.Remove(_vehicles.Count); // old index (now invalid)
-                _vehicleToResident[vi] = swappedResId;
+                resident.Activity = ResidentActivity.Dormant;
+                resident.CurrentPOINode = resident.HomeNode;
             }
         }
+        _vehicleToResident.Remove(removed);
 
-        resident.VehicleIndex = -1;
+        if (swappedFrom >= 0)
+        {
+            // Pre-swap: the last slot's data is still intact and will move to `removed`
+            int srid = _vehicles.ResidentId[swappedFrom];
+            _vehicleToResident.Remove(swappedFrom);
+            if (srid >= 0 && srid < _residents.Count)
+            {
+                _residents[srid].VehicleIndex = removed;
+                _vehicleToResident[removed] = srid;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Invoked by VehicleStore.ClearAll when the world is replaced (new map / load):
+    /// every vehicle index is void, so the population resets entirely. The next Update
+    /// rebuilds a fresh population from the loaded map's POIs.
+    /// </summary>
+    private void OnVehiclesCleared()
+    {
+        _residents.Clear();
+        _vehicleToResident.Clear();
+        _departureQueue.Clear();
+        _poiRegistry.ClearOccupancy();
+        ScheduleModeEnabled = false;
     }
 
     /// <summary>
@@ -498,6 +541,48 @@ public class PopulationManager
             && resident.Schedule[resident.ScheduleIndex].DepartureTime < timeOfDay)
         {
             resident.ScheduleIndex++;
+        }
+    }
+
+    /// <summary>
+    /// Debug-only watchdog asserting the vehicle↔resident index mappings are internally
+    /// consistent in all three directions: the <c>_vehicleToResident</c> dict, the
+    /// <c>VehicleStore.ResidentId</c> back-pointer, and each resident's <c>VehicleIndex</c>
+    /// all agree. A violation means a vehicle removal bypassed the centralized fixup
+    /// (<see cref="OnVehicleRemoving"/>). Compiled out of release builds.
+    /// </summary>
+    [Conditional("DEBUG")]
+    public void ValidateMappings()
+    {
+        foreach (var kvp in _vehicleToResident)
+        {
+            int vi = kvp.Key, rid = kvp.Value;
+            Debug.Assert(vi >= 0 && vi < _vehicles.Count,
+                "ValidateMappings: dict holds an out-of-range vehicle index.");
+            if (vi < 0 || vi >= _vehicles.Count) continue;
+            Debug.Assert(_vehicles.ResidentId[vi] == rid,
+                "ValidateMappings: vehicle's ResidentId disagrees with the dict.");
+            Debug.Assert(rid >= 0 && rid < _residents.Count && _residents[rid].VehicleIndex == vi,
+                "ValidateMappings: resident does not point back to its mapped vehicle.");
+        }
+
+        for (int i = 0; i < _vehicles.Count; i++)
+        {
+            int rid = _vehicles.ResidentId[i];
+            if (rid < 0) continue;
+            Debug.Assert(_vehicleToResident.TryGetValue(i, out int mapped) && mapped == rid,
+                "ValidateMappings: vehicle with a ResidentId is missing/wrong in the dict.");
+            Debug.Assert(rid < _residents.Count && _residents[rid].VehicleIndex == i,
+                "ValidateMappings: vehicle's resident does not point back to it.");
+        }
+
+        foreach (var r in _residents)
+        {
+            int vi = r.VehicleIndex;
+            if (vi < 0) continue;
+            Debug.Assert(vi < _vehicles.Count && _vehicles.ResidentId[vi] == r.Id
+                && _vehicleToResident.TryGetValue(vi, out int rid2) && rid2 == r.Id,
+                "ValidateMappings: driving resident's VehicleIndex is stale or inconsistent.");
         }
     }
 

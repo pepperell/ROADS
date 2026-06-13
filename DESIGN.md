@@ -629,9 +629,11 @@ Section 6: Settings (time scale, maximum population, etc.)
 - [X] Automatic graph-change handling: invoke GraphChangeHandler.HandleIfNeeded once per frame instead of relying on each editor call site to remember it
 - [X] Frame-protocol guards: debug assertions enforcing RebuildIfNeeded → Update → GetSignal order in TrafficSignalSystem, StopSignSystem, and YieldSignSystem
 - [X] Robust load sequence: exemption/rotation setters auto-size their arrays so MapSerializer.Load no longer requires forced rebuilds before applying overrides
-- [ ] Centralized vehicle removal: single removal path that fixes all index holders on swap-and-pop (resident mappings, EditorState.SelectedVehicle identity)
-- [ ] VehicleStore field-sync guard: document the array/Add/Remove/Grow/serializer sync requirement in VehicleStore and make it hard to miss when adding fields
-- [ ] Sweep remaining minor contracts from HIDDEN_DEPENDENCIES.md (SplitEdge internal trio, PopulationManager dual version tracking, ScheduleModeActive handoff)
+- [X] Centralized vehicle removal: single removal path that fixes all index holders on swap-and-pop (resident mappings, EditorState.SelectedVehicle identity)
+- [X] VehicleStore field-sync guard: document the array/Add/Remove/Grow/serializer sync requirement in VehicleStore and make it hard to miss when adding fields
+- [ ] ~~Sweep remaining minor contracts from HIDDEN_DEPENDENCIES.md (SplitEdge internal trio, PopulationManager dual version tracking, ScheduleModeActive handoff)~~ — **deferred**; these three remain documented in HIDDEN_DEPENDENCIES.md §7 as known, low-risk contracts.
+
+**Status:** Complete — items 1–8 landed and verified; item 9 deferred.
 
 **Deliverable:** Ordering mistakes fail fast (debug asserts) or can't happen at all (structure); HIDDEN_DEPENDENCIES.md updated to reflect the hardened state.
 

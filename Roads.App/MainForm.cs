@@ -77,6 +77,15 @@ public class MainForm : Form
         _simLoop = new SimulationLoop(_roadGraph, _vehicles, _vehicleGrid, _stopLineCache, _intersectionArcs, _edgeSpatialGrid, _trafficSignals, _stopSigns, _yieldSigns, _spawner, _populationManager, _editorState, _graphChangeHandler);
         _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _spawnPointRenderer, _uiRenderer, _sliderPanel, _vehicleInfoPanel, _laneRestrictionTool);
 
+        // Centralized vehicle-removal fixup: editor-held vehicle indices follow
+        // swap-and-pop moves and drop on bulk clears (see VehicleStore.VehicleRemoving).
+        // The vehicle spatial grid holds indices too — it self-heals on the same events
+        // so editor-time hit-tests between grid rebuilds never see stale indices.
+        _vehicles.VehicleRemoving += OnVehicleRemoving;
+        _vehicles.VehiclesCleared += OnVehiclesCleared;
+        _vehicles.VehicleRemoving += _vehicleGrid.OnEntityRemoving;
+        _vehicles.VehiclesCleared += _vehicleGrid.Clear;
+
         _sliderPanel.AddSlider("Kp", 0.5f, 10f, () => SteeringController.Kp, v => SteeringController.Kp = v);
         _sliderPanel.AddSlider("Kd", 0f, 5f, () => SteeringController.Kd, v => SteeringController.Kd = v);
         _sliderPanel.AddSlider("Max Steer", 0.1f, 1.5f, () => SteeringController.MaxSteer, v => SteeringController.MaxSteer = v);
@@ -110,6 +119,32 @@ public class MainForm : Form
         _simLoop.Tick();
         _perfHud.RecordSimTime(_perfStopwatch.Elapsed.TotalMilliseconds);
         _canvas.Invalidate();
+    }
+
+    /// <summary>
+    /// Keeps editor-held vehicle indices valid across swap-and-pop removals: an index
+    /// equal to the removed slot clears; one equal to the swapped-from (last) slot
+    /// follows that vehicle to its new index.
+    /// </summary>
+    private void OnVehicleRemoving(int removed, int swappedFrom)
+    {
+        _editorState.SelectedVehicle = FixupVehicleIndex(_editorState.SelectedVehicle, removed, swappedFrom);
+        _editorState.HoveredVehicle = FixupVehicleIndex(_editorState.HoveredVehicle, removed, swappedFrom);
+    }
+
+    /// <summary>Drops editor-held vehicle indices when the store is bulk-cleared.</summary>
+    private void OnVehiclesCleared()
+    {
+        _editorState.SelectedVehicle = -1;
+        _editorState.HoveredVehicle = -1;
+    }
+
+    private static int FixupVehicleIndex(int holder, int removed, int swappedFrom)
+    {
+        if (holder < 0) return holder; // nothing held — and never match the swappedFrom=-1 sentinel
+        if (holder == removed) return -1;
+        if (holder == swappedFrom) return removed;
+        return holder;
     }
 
     private void DumpVehicleDiag(int i)
