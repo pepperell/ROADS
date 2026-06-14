@@ -25,6 +25,10 @@ POI_TYPES = ["None", "Home", "Work", "Shop", "Leisure", "School", "Parking"]
 
 ROAD_TYPES = ["Residential", "Arterial", "Highway", "Dirt"]
 
+DRIVER_ARCHETYPES = ["Commuter", "SundayDriver", "LeadFoot", "NervousNellie", "Trucker"]
+
+RESIDENT_ACTIVITY = ["Dormant", "Driving"]
+
 EDGE_FLAGS = {0: "None"}
 
 
@@ -198,6 +202,37 @@ def unpack(filepath: str) -> str:
         else:
             w("=== VEHICLES: none saved ===")
         w()
+
+        # --- Section 7: Population (v2+, present only when vehicles were saved) ---
+        if version >= 2 and has_vehicles:
+            (res_count,) = read_fmt(f, "<i")
+            w(f"=== POPULATION ({res_count} residents) ===")
+            for i in range(res_count):
+                rid, home, work = read_fmt(f, "<iii")
+                (archetype,) = read_fmt(f, "<B")
+                aggr, sbias, react, steer, brake, lane, patience = read_fmt(f, "<fffffff")
+                (pref_veh,) = read_fmt(f, "<B")
+                cr, cg, cb = read_fmt(f, "<BBB")
+                (sched_len,) = read_fmt(f, "<i")
+                schedule = []
+                for _ in range(sched_len):
+                    (dep,) = read_fmt(f, "<f")
+                    (dest,) = read_fmt(f, "<B")
+                    schedule.append((dep, dest))
+                (sched_idx,) = read_fmt(f, "<i")
+                (activity,) = read_fmt(f, "<B")
+                (cur_poi,) = read_fmt(f, "<i")
+                (veh_idx,) = read_fmt(f, "<i")
+
+                arch_str = enum_name(archetype, DRIVER_ARCHETYPES)
+                act_str = enum_name(activity, RESIDENT_ACTIVITY)
+                w(f"  [{i:3d}] id={rid} home={home} work={work}  {arch_str} {act_str}  "
+                  f"sched[{sched_idx}/{sched_len}] veh={veh_idx} poi={cur_poi}")
+                if schedule:
+                    sched_str = ", ".join(
+                        f"{d:.2f}h->{enum_name(dst, POI_TYPES)}" for d, dst in schedule)
+                    w(f"         schedule: {sched_str}")
+            w()
 
         # --- Summary ---
         w("=== SUMMARY ===")

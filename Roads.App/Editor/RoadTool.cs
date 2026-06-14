@@ -37,8 +37,10 @@ public class RoadTool
             var (nearEdge, nearT) = edgeSpatialGrid.FindNearestEdgeWithT(graph, worldPos, EditorState.SnapDistance);
             if (nearEdge >= 0)
             {
-                // Clamp t away from endpoints to avoid degenerate splits
-                nearT = Math.Clamp(nearT, 0.05f, 0.95f);
+                // Clamp the split a fixed DISTANCE from the endpoints (not a t-fraction,
+                // which grows with road length) so long roads can be split close to where
+                // the user clicked instead of snapping far inward.
+                nearT = Math.Clamp(nearT, SplitMarginT(graph, nearEdge), 1f - SplitMarginT(graph, nearEdge));
                 var (midNode, _, _) = graph.SplitEdge(nearEdge, nearT);
                 nodeIndex = midNode;
             }
@@ -109,7 +111,8 @@ public class RoadTool
 
             // Rescale t into the remaining portion of the curve
             float localT = (tSelf - consumedT) / (1f - consumedT);
-            localT = Math.Clamp(localT, 0.05f, 0.95f);
+            float margin = SplitMarginT(graph, currentEdge);
+            localT = Math.Clamp(localT, margin, 1f - margin);
 
             var (_, _, secondHalf) = graph.SplitEdge(currentEdge, localT, midNodes[i]);
 
@@ -117,6 +120,17 @@ public class RoadTool
             currentEdge = secondHalf;
             consumedT = tSelf;
         }
+    }
+
+    /// <summary>
+    /// Parametric margin corresponding to <see cref="SimConstants.MinSplitSetback"/> meters
+    /// at each end of an edge, capped at 0.45 so the clamp range stays valid on very short
+    /// edges. Distance-based so the un-splittable zone near a node does not scale with length.
+    /// </summary>
+    private static float SplitMarginT(RoadGraph graph, int edgeIndex)
+    {
+        float len = MathF.Max(graph.Edges[edgeIndex].Length, 0.01f);
+        return MathF.Min(0.45f, SimConstants.MinSplitSetback / len);
     }
 
     /// <summary>

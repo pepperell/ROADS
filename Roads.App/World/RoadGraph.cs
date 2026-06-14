@@ -342,8 +342,12 @@ public class RoadGraph
     }
 
     /// <summary>
-    /// Rebuild the turn matrix for a node: allow all incoming->outgoing turns
-    /// except U-turns (back onto the reverse of the same road segment).
+    /// Rebuild the turn matrix for a node: allow all incoming->outgoing turns except
+    /// U-turns (back onto the reverse of the same road segment). The one exception is a
+    /// dead-end: if an incoming edge has no non-U-turn outgoing option, the U-turn is
+    /// allowed so a vehicle can turn around at the end of a road (otherwise it would be
+    /// trapped and removed). This is flag-agnostic — it applies to any terminal node,
+    /// not just Destination/Spawn nodes.
     /// </summary>
     private void RebuildTurnMatrix(int nodeIndex)
     {
@@ -360,13 +364,25 @@ public class RoadGraph
         foreach (int inEdge in incoming)
         {
             var inE = _edges[inEdge];
+            int uTurnEdge = -1;
+            bool hasNonUTurn = false;
             foreach (int outEdge in outgoing)
             {
                 var outE = _edges[outEdge];
-                // Block U-turn: incoming from A->node, outgoing node->A
-                if (inE.FromNode == outE.ToNode) continue;
+                // U-turn: incoming from A->node, outgoing node->A
+                if (inE.FromNode == outE.ToNode)
+                {
+                    uTurnEdge = outEdge;
+                    continue;
+                }
                 turns.Add((inEdge, outEdge));
+                hasNonUTurn = true;
             }
+
+            // Dead-end for this approach: the only way out is back the way we came.
+            // Allow the U-turn so the vehicle can turn around instead of being trapped.
+            if (!hasNonUTurn && uTurnEdge >= 0)
+                turns.Add((inEdge, uTurnEdge));
         }
 
         _turnMatrix[nodeIndex] = turns;
@@ -1334,8 +1350,16 @@ public class RoadGraph
                         float tSelf = (i + u) / segments;
                         float tOther = (j + v) / segments;
 
-                        // Skip crossings very near endpoints (within 5%)
-                        if (tSelf < 0.05f || tSelf > 0.95f || tOther < 0.05f || tOther > 0.95f)
+                        // Skip crossings within a fixed DISTANCE of either road's endpoint
+                        // (a split there would be degenerate / coincide with an existing
+                        // node). Distance-based, not a t-fraction, so the skipped zone does
+                        // not grow with road length — long roads can still be crossed near
+                        // their ends.
+                        float selfLen = MathF.Max(edge.Length, 0.01f);
+                        float otherLen = MathF.Max(otherEdge.Length, 0.01f);
+                        float setback = SimConstants.MinSplitSetback;
+                        if (tSelf * selfLen < setback || (1f - tSelf) * selfLen < setback ||
+                            tOther * otherLen < setback || (1f - tOther) * otherLen < setback)
                             continue;
 
                         crossings.Add((other, tSelf, tOther));

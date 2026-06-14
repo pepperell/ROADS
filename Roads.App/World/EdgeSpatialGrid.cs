@@ -12,8 +12,14 @@ public class EdgeSpatialGrid
 {
     /// <summary>Side length in meters of each grid cell.</summary>
     private const float CellSize = 50f;
-    /// <summary>Number of sample points along each edge used for spatial indexing (t = 0.0, 0.1, ..., 1.0).</summary>
+    /// <summary>Minimum number of sample points along an edge used for spatial indexing.</summary>
     private const int SamplesPerEdge = 11;
+    /// <summary>Target spacing (meters) between an edge's spatial-index samples. Kept at half a
+    /// cell so a long edge has a sample in every cell it passes through — otherwise long edges
+    /// leave gap cells with no entry and edge-snap fails when clicking there.</summary>
+    private const float SampleSpacing = CellSize * 0.5f;
+    /// <summary>Upper bound on samples per edge (guards against pathologically long edges).</summary>
+    private const int MaxSamplesPerEdge = 256;
 
     /// <summary>Per-entry edge index.</summary>
     private int[] _edgeIndex = Array.Empty<int>();
@@ -63,9 +69,13 @@ public class EdgeSpatialGrid
             var edge = graph.Edges[i];
             if (edge.FromNode < 0) continue;
 
-            for (int s = 0; s < SamplesPerEdge; s++)
+            // Sample density scales with length so no cell the edge crosses is skipped.
+            int samples = Math.Max(SamplesPerEdge,
+                Math.Min(MaxSamplesPerEdge, (int)MathF.Ceiling(edge.Length / SampleSpacing) + 1));
+
+            for (int s = 0; s < samples; s++)
             {
-                float t = s / (float)(SamplesPerEdge - 1);
+                float t = s / (float)(samples - 1);
                 var pt = graph.EvaluateBezier(i, t);
                 int cell = PackCell(
                     (int)MathF.Floor(pt.X / CellSize),
@@ -151,14 +161,23 @@ public class EdgeSpatialGrid
         return (bestEdge, bestT);
     }
 
-    /// <summary>Evaluates a single edge at fine sample points, updating the best match.</summary>
+    /// <summary>Distance (meters) between an edge's fine sample points when measuring the
+    /// nearest point for snapping. Must be well under the snap radius so a click on a long
+    /// edge isn't rejected by a too-distant nearest sample.</summary>
+    private const float FineSampleSpacing = 3f;
+    /// <summary>Upper bound on fine sample points per edge.</summary>
+    private const int MaxFineSteps = 1024;
+
+    /// <summary>Evaluates a single edge at fine sample points, updating the best match.
+    /// Sample count scales with edge length so the nearest point (and the snap t) stays
+    /// accurate on long edges.</summary>
     private static void SearchEdge(RoadGraph graph, Vector2 position, int edgeIdx,
         ref int bestEdge, ref float bestT, ref float bestDistSq)
     {
         var edge = graph.Edges[edgeIdx];
         if (edge.FromNode < 0) return;
 
-        const int fineSteps = 20;
+        int fineSteps = Math.Clamp((int)MathF.Ceiling(edge.Length / FineSampleSpacing), 20, MaxFineSteps);
         for (int s = 0; s <= fineSteps; s++)
         {
             float t = s / (float)fineSteps;

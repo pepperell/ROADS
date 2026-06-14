@@ -164,16 +164,68 @@ public class PopulationManager
 
     private void ClearPopulation()
     {
-        // Remove all resident-linked vehicles
+        // Remove ALL vehicles, not just resident-linked ones. When the resident population
+        // takes over (schedule mode activating, e.g. right after a map load), any leftover
+        // legacy vehicles are stale — loaded vehicles lose their resident identity on load
+        // (ResidentId is not serialized), so they would otherwise persist as immortal
+        // wanderers. Residents repopulate from POIs on the following ticks.
         for (int i = _vehicles.Count - 1; i >= 0; i--)
-        {
-            if (_vehicles.ResidentId[i] >= 0)
-                _vehicles.Remove(i);
-        }
+            _vehicles.Remove(i);
         _residents.Clear();
         _vehicleToResident.Clear();
         _departureQueue.Clear();
         _poiRegistry.ClearOccupancy();
+    }
+
+    /// <summary>
+    /// Adopts a resident population loaded from a saved map (v2) instead of regenerating one.
+    /// Rebuilds the vehicle↔resident links from each driving resident's <see cref="Resident.VehicleIndex"/>,
+    /// restores POI occupancy for dormant residents, and enters schedule mode WITHOUT going
+    /// through the activation path (which would <see cref="RebuildPopulation"/> and wipe the
+    /// loaded cars). Called by MapSerializer.Load after the vehicle section has loaded.
+    /// </summary>
+    public void AdoptLoadedPopulation(IReadOnlyList<Resident> residents)
+    {
+        _poiRegistry.RebuildIfNeeded(_graph);
+
+        _residents.Clear();
+        _residents.AddRange(residents);
+        _vehicleToResident.Clear();
+        _departureQueue.Clear();
+        _poiRegistry.ClearOccupancy();
+
+        // The resident list is authoritative for vehicle ownership: reset all vehicle links,
+        // then re-link each driving resident to its vehicle. This keeps VehicleStore.ResidentId,
+        // the _vehicleToResident dict, and Resident.VehicleIndex mutually consistent (the
+        // invariants ValidateMappings asserts).
+        for (int i = 0; i < _vehicles.Count; i++)
+            _vehicles.ResidentId[i] = -1;
+
+        foreach (var res in _residents)
+        {
+            if (res.Activity == ResidentActivity.Driving
+                && res.VehicleIndex >= 0 && res.VehicleIndex < _vehicles.Count)
+            {
+                _vehicleToResident[res.VehicleIndex] = res.Id;
+                _vehicles.ResidentId[res.VehicleIndex] = res.Id;
+            }
+            else
+            {
+                // Dormant (or stale vehicle reference): not in a vehicle — occupy its POI.
+                res.Activity = ResidentActivity.Dormant;
+                res.VehicleIndex = -1;
+                if (res.CurrentPOINode >= 0 && res.CurrentPOINode < _graph.Nodes.Count)
+                {
+                    var poiType = _graph.Nodes[res.CurrentPOINode].PointOfInterest;
+                    if (poiType != POIType.None)
+                        _poiRegistry.TryOccupy(res.CurrentPOINode, poiType);
+                }
+            }
+        }
+
+        ScheduleModeEnabled = true;
+        _poiGraphVersion = _graph.Version;
+        _lastDayNumber = -1; // first Update sets the day baseline without a spurious rollover
     }
 
     /// <summary>

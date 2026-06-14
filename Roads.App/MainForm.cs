@@ -457,7 +457,7 @@ public class MainForm : Form
         {
             Persistence.MapSerializer.Save(dlg.FileName, _roadGraph, _vehicles,
                 _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
-                includeVehicles);
+                _populationManager, includeVehicles);
         }
         catch (Exception ex)
         {
@@ -505,7 +505,7 @@ public class MainForm : Form
 
             Persistence.MapSerializer.Load(dlg.FileName, _roadGraph, _vehicles,
                 _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
-                loadVehicles);
+                _populationManager, loadVehicles);
             _simLoop.RebuildWorldCaches();
 
             // Start paused after loading

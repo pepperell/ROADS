@@ -108,7 +108,7 @@ public static class LaneChangeLogic
             if (store.LaneChangeCooldown[i] > 0f) continue;
 
             // Evaluate lane change decisions (also computes and stores MergeUrgency)
-            byte desiredLane = EvaluateDesiredLane(store, i, graph, grid);
+            byte desiredLane = EvaluateDesiredLane(store, i, graph, grid, arcCache);
             store.DesiredLane[i] = desiredLane;
 
             if (desiredLane != store.CurrentLane[i])
@@ -164,7 +164,7 @@ public static class LaneChangeLogic
     /// <param name="graph">Road graph for path and geometry lookups.</param>
     /// <param name="grid">Spatial grid for lane density queries.</param>
     /// <returns>Desired lane index.</returns>
-    private static byte EvaluateDesiredLane(VehicleStore store, int index, RoadGraph graph, SpatialGrid grid)
+    private static byte EvaluateDesiredLane(VehicleStore store, int index, RoadGraph graph, SpatialGrid grid, IntersectionArcCache arcCache)
     {
         int edgeIdx = store.CurrentEdge[index];
         var edge = graph.Edges[edgeIdx];
@@ -172,7 +172,7 @@ public static class LaneChangeLogic
         byte maxLane = (byte)(edge.LaneCount - 1);
 
         // 1. Turn preparation: check if upcoming turn needs a specific lane
-        byte turnLane = GetTurnPreparationLane(store, index, graph, out float urgency);
+        byte turnLane = GetTurnPreparationLane(store, index, graph, arcCache, out float urgency);
         store.MergeUrgency[index] = urgency;
         if (turnLane != byte.MaxValue)
             return Math.Clamp(turnLane, (byte)0, maxLane);
@@ -256,16 +256,18 @@ public static class LaneChangeLogic
 
     /// <summary>
     /// Looks ahead in the vehicle's path (scanning across multiple edges) to determine if
-    /// a specific lane is needed for an upcoming turn. Uses explicit lane restrictions when
-    /// available, otherwise falls back to cross-product geometry heuristic.
-    /// Also computes merge urgency based on distance remaining and lanes to cross.
+    /// a specific lane is needed for an upcoming turn. For the current edge it uses the arc
+    /// cache's per-lane reachability (which honors explicit restrictions and auto/geometry
+    /// lanes alike — the same paths the vehicle can actually drive); for farther-ahead edges
+    /// it falls back to the cross-product geometry heuristic. Also computes merge urgency
+    /// based on distance remaining and lanes to cross.
     /// </summary>
     /// <param name="store">Vehicle data store.</param>
     /// <param name="index">Index of the vehicle.</param>
     /// <param name="graph">Road graph for tangent evaluation.</param>
     /// <param name="urgency">Output merge urgency (0 = no urgency, 1 = critical). Set to 0 when no turn prep needed.</param>
     /// <returns>Required lane index, or <c>byte.MaxValue</c> if no turn preparation is needed.</returns>
-    private static byte GetTurnPreparationLane(VehicleStore store, int index, RoadGraph graph, out float urgency)
+    private static byte GetTurnPreparationLane(VehicleStore store, int index, RoadGraph graph, IntersectionArcCache arcCache, out float urgency)
     {
         urgency = 0f;
 
@@ -310,39 +312,24 @@ public static class LaneChangeLogic
             // (the one the vehicle is actually on), since that's where lane changes happen
             if (scan == pathIdx)
             {
+                // Find which lane can actually reach the next edge, using the arc cache's
+                // per-lane reachability — the SAME source the vehicle drives and the L-mode
+                // overlay shows, which already honors explicit restrictions AND auto/geometry
+                // lanes. (Consulting only explicit restrictions and skipping null/auto lanes
+                // meant a turn reachable only from an unrestricted lane was never prepared
+                // for — cars never merged into it.) Pick the reachable lane closest to current.
                 byte requiredLane = byte.MaxValue;
-
-                // Check explicit lane restrictions on current edge
-                if (graph.HasLaneRestrictions(currentEdgeIdx))
+                int bestDist = int.MaxValue;
+                for (byte lane = 0; lane <= maxLane; lane++)
                 {
-                    byte bestLane = byte.MaxValue;
-                    int bestDist = int.MaxValue;
-                    for (byte lane = 0; lane <= maxLane; lane++)
-                    {
-                        var restrictions = graph.GetLaneRestrictions(currentEdgeIdx, lane);
-                        if (restrictions == null)
-                        {
-                            continue;
-                        }
-                        else
-                        {
-                            foreach (var (outEdge, _) in restrictions)
-                            {
-                                if (outEdge == nextEdgeIdx)
-                                {
-                                    int dist = Math.Abs(lane - currentLane);
-                                    if (dist < bestDist) { bestDist = dist; bestLane = lane; }
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    requiredLane = bestLane;
-                }
-                else
-                {
-                    // No restrictions — use geometry-based heuristic
-                    requiredLane = ClassifyTurnLane(graph, currentEdgeIdx, nextEdgeIdx, maxLane);
+                    var reach = arcCache.GetReachableFromLane(currentEdgeIdx, lane);
+                    if (reach == null) continue;
+                    bool canReach = false;
+                    foreach (var (outEdge, _, _) in reach)
+                        if (outEdge == nextEdgeIdx) { canReach = true; break; }
+                    if (!canReach) continue;
+                    int dist = Math.Abs(lane - currentLane);
+                    if (dist < bestDist) { bestDist = dist; requiredLane = lane; }
                 }
 
                 if (requiredLane != byte.MaxValue)

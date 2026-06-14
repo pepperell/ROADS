@@ -459,6 +459,23 @@ public static class SteeringController
         float nextStartT = stopLines.GetStopTAtFromNode(nextEdge);
         store.EdgeProgress[index] = nextStartT;
 
+        // U-turn at a dead-end: a real U-turn can't fit within one lane width, so pivot the
+        // vehicle onto the reverse lane (snap to its start, facing back) rather than trying
+        // to steer a 180° turn in place — which would send it off the road. Done before the
+        // heading seed below so normal steering continues smoothly from the pivoted pose.
+        if (nextEdgeData.ToNode == edge.FromNode)
+        {
+            float pivotOffset = LaneChangeLogic.ComputeCurrentLaneOffset(store, index);
+            var pivotPos = OffsetRight(graph, nextEdge, nextStartT, pivotOffset);
+            vx = pivotPos.X;
+            vy = pivotPos.Y;
+            store.PosX[index] = vx;
+            store.PosY[index] = vy;
+            var pivotTan = graph.EvaluateBezierTangent(nextEdge, nextStartT);
+            store.Heading[index] = MathF.Atan2(pivotTan.Y, pivotTan.X);
+            store.Speed[index] = MathF.Min(store.Speed[index], 3f);
+        }
+
         // Seed PrevHeadingError using vehicle's actual position (no teleport)
         float newLookaheadT = MathF.Min(nextStartT + (LookaheadBase + speed * LookaheadPerSpeed) / nextLength, 1f);
         float newLaneOffset = LaneChangeLogic.ComputeCurrentLaneOffset(store, index);

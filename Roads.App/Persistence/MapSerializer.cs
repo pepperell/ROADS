@@ -6,14 +6,16 @@ using Roads.App.World;
 namespace Roads.App.Persistence;
 
 /// <summary>
-/// Binary save/load for road maps. File format version 1.
+/// Binary save/load for road maps. File format version 2.
 /// Saves the road graph (nodes, edges, lane restrictions, traffic control overrides),
-/// camera state, simulation time, and optionally all vehicle state.
+/// camera state, simulation time, and optionally all vehicle state plus the resident
+/// population (v2). v1 files (no population section) still load — their vehicles fall
+/// back to legacy handling.
 /// </summary>
 public static class MapSerializer
 {
     private static readonly byte[] Magic = "ROAD"u8.ToArray();
-    private const ushort FormatVersion = 1;
+    private const ushort FormatVersion = 2;
 
     /// <summary>
     /// Saves the current map state to a binary file.
@@ -21,7 +23,7 @@ public static class MapSerializer
     public static void Save(string path, RoadGraph graph, VehicleStore vehicles,
         Camera camera, SimulationClock clock,
         StopSignSystem stopSigns, YieldSignSystem yieldSigns, TrafficSignalSystem signals,
-        bool includeVehicles)
+        PopulationManager population, bool includeVehicles)
     {
         using var fs = File.Create(path);
         using var w = new BinaryWriter(fs);
@@ -165,6 +167,48 @@ public static class MapSerializer
                 w.Write(vehicles.ColorB[i]);
             }
         }
+
+        // Section 7 — Population (v2). Saved only with vehicles, since a driving resident
+        // references a vehicle index. The vehicle↔resident link is derived from each driving
+        // resident's VehicleIndex on load, so it is NOT duplicated in the vehicle section.
+        if (includeVehicles)
+        {
+            var residents = population.Residents;
+            w.Write(residents.Count);
+            foreach (var res in residents)
+            {
+                w.Write(res.Id);
+                w.Write(res.HomeNode);
+                w.Write(res.WorkNode);
+
+                var t = res.Traits;
+                w.Write((byte)t.Archetype);
+                w.Write(t.Aggressiveness);
+                w.Write(t.SpeedBias);
+                w.Write(t.ReactionTime);
+                w.Write(t.SteeringSharpness);
+                w.Write(t.BrakingComfort);
+                w.Write(t.LaneChangeBias);
+                w.Write(t.PatienceTimer);
+                w.Write(t.PreferredVehicle);
+
+                w.Write(res.ColorR);
+                w.Write(res.ColorG);
+                w.Write(res.ColorB);
+
+                w.Write(res.Schedule.Length);
+                foreach (var entry in res.Schedule)
+                {
+                    w.Write(entry.DepartureTime);
+                    w.Write((byte)entry.Destination);
+                }
+
+                w.Write(res.ScheduleIndex);
+                w.Write((byte)res.Activity);
+                w.Write(res.CurrentPOINode);
+                w.Write(res.VehicleIndex);
+            }
+        }
     }
 
     /// <summary>
@@ -174,7 +218,7 @@ public static class MapSerializer
     public static bool Load(string path, RoadGraph graph, VehicleStore vehicles,
         Camera camera, SimulationClock clock,
         StopSignSystem stopSigns, YieldSignSystem yieldSigns, TrafficSignalSystem signals,
-        bool loadVehicles)
+        PopulationManager population, bool loadVehicles)
     {
         using var fs = File.OpenRead(path);
         using var r = new BinaryReader(fs);
@@ -293,9 +337,12 @@ public static class MapSerializer
                 vehicles.TargetLane[i] = r.ReadByte();
                 vehicles.LaneChangeProgress[i] = r.ReadSingle();
 
-                // Arc tracking
-                vehicles.CurrentArc[i] = r.ReadInt32();
-                vehicles.ArcProgress[i] = r.ReadSingle();
+                // Arc tracking — read for format compatibility but DISCARD: arc indices are
+                // runtime-only (the IntersectionArcCache is rebuilt on load, so a saved index
+                // is stale and may be out of range). The vehicle re-acquires an arc at its
+                // next intersection; treated as a transient/derived field below.
+                r.ReadInt32();   // saved CurrentArc (ignored)
+                r.ReadSingle();  // saved ArcProgress (ignored)
 
                 // Destination
                 vehicles.DestinationNode[i] = r.ReadInt32();
@@ -331,6 +378,8 @@ public static class MapSerializer
                 vehicles.ColorB[i] = r.ReadByte();
 
                 // Initialize derived fields
+                vehicles.CurrentArc[i] = -1;
+                vehicles.ArcProgress[i] = 0f;
                 vehicles.Throttle[i] = 0f;
                 vehicles.Brake[i] = 0f;
                 vehicles.PrevHeadingError[i] = 0f;
@@ -370,6 +419,55 @@ public static class MapSerializer
             }
         }
 
+        // Section 7 — Population (v2+; present only when the file was saved with vehicles).
+        // Always read to consume the bytes; adopt into the population only when vehicles were
+        // loaded (a driving resident references a loaded vehicle index). When vehicles are
+        // skipped, the population is discarded and the schedule system regenerates fresh.
+        if (version >= 2 && hasVehicles)
+        {
+            int residentCount = r.ReadInt32();
+            var loadedResidents = new List<Resident>(residentCount);
+            for (int i = 0; i < residentCount; i++)
+                loadedResidents.Add(ReadResident(r));
+
+            if (loadVehicles)
+                population.AdoptLoadedPopulation(loadedResidents);
+        }
+
         return hasVehicles;
+    }
+
+    /// <summary>Reads one serialized <see cref="Resident"/> (v2 population section).</summary>
+    private static Resident ReadResident(BinaryReader r)
+    {
+        var res = new Resident
+        {
+            Id = r.ReadInt32(),
+            HomeNode = r.ReadInt32(),
+            WorkNode = r.ReadInt32(),
+            Traits = new DriverTraits(
+                (DriverArchetype)r.ReadByte(),
+                r.ReadSingle(), r.ReadSingle(), r.ReadSingle(), r.ReadSingle(),
+                r.ReadSingle(), r.ReadSingle(), r.ReadSingle(), r.ReadByte()),
+        };
+        res.ColorR = r.ReadByte();
+        res.ColorG = r.ReadByte();
+        res.ColorB = r.ReadByte();
+
+        int schedLen = r.ReadInt32();
+        var schedule = new ScheduleEntry[schedLen];
+        for (int j = 0; j < schedLen; j++)
+            schedule[j] = new ScheduleEntry
+            {
+                DepartureTime = r.ReadSingle(),
+                Destination = (POIType)r.ReadByte(),
+            };
+        res.Schedule = schedule;
+
+        res.ScheduleIndex = r.ReadInt32();
+        res.Activity = (ResidentActivity)r.ReadByte();
+        res.CurrentPOINode = r.ReadInt32();
+        res.VehicleIndex = r.ReadInt32();
+        return res;
     }
 }

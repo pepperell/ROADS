@@ -23,4 +23,12 @@ public static class SimConstants
 
     /// <summary>Cross-product threshold for classifying a turn vs. straight-through.</summary>
     public const float TurnThreshold = 0.3f;
+
+    /// <summary>
+    /// Minimum distance (meters) a road split / crossing intersection must sit from an
+    /// edge's endpoint. A fixed distance — NOT a fraction of the edge — so the "can't split
+    /// here" zone near a node does not grow with road length (which would leave long roads
+    /// with large un-splittable / un-marked dead zones at the ends).
+    /// </summary>
+    public const float MinSplitSetback = 5f;
 }

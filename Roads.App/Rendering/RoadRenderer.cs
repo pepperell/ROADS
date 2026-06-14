@@ -238,10 +238,15 @@ public class RoadRenderer
         // Start at exact tMin so the boundary begins precisely at the stop line
         if (tMin > 0f) AddPoint(tMin);
 
+        // Strict inequalities so the true endpoints (t=0 when tMin=0, t=1 when tMax=1) are
+        // included. Using <=/>= dropped the first and last grid segment, leaving an
+        // un-marked dead zone of length/BezierSegments at each untrimmed end — which grows
+        // with road length. (Trimmed ends, tMin>0 / tMax<1, are still anchored by the
+        // explicit AddPoint(tMin)/(tMax) calls above and below.)
         for (int s = 0; s <= BezierSegments; s++)
         {
             float t = s / (float)BezierSegments;
-            if (t <= tMin || t >= tMax) continue;
+            if (t < tMin || t > tMax) continue;
             AddPoint(t);
         }
 
