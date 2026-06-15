@@ -680,7 +680,7 @@ Phases are built by an Opus "director" that hands self-contained milestones to l
 - [ ] Zone painting tool (residential/commercial/industrial)
 - [ ] Map templates (Grid City, Highway Ring, Empty)
 - [X] Road type visuals (highway thick/gray, residential thin/light)
-- [ ] Vehicle type variety (sedan, SUV, truck, bus, motorcycle)
+- [X] Vehicle type variety (sedan, SUV, truck, bus, motorcycle)
 - [ ] Sound effects (optional: ambient traffic hum scaling with density)
 - [ ] Tooltip / info on hover (vehicle speed, driver traits, destination)
 - [ ] Right-click context menus
