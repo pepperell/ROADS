@@ -51,6 +51,7 @@ public static class DriverPersonalityGenerator
 {
     // Archetype base values: (Aggressiveness, SpeedBias, ReactionTime, SteeringSharpness,
     //                         BrakingComfort, LaneChangeBias, PatienceTimer, PreferredVehicle)
+    // PreferredVehicle is a mean — see VehicleWeights below for the per-archetype spread.
     private static readonly (float aggr, float speed, float react, float steer,
         float brake, float lane, float patience, byte vehicle)[] ArchetypeMeans =
     {
@@ -64,6 +65,23 @@ public static class DriverPersonalityGenerator
         (0.15f, 0.95f, 0.5f, 1.5f, 1.8f, 0.2f, 60f, 0),
         // Trucker: low aggression, long reaction time, very patient
         (0.2f, 0.95f, 0.8f, 0.8f, 2.2f, 0.3f, 90f, 2),
+    };
+
+    // Per-archetype vehicle-type weighted selection.
+    // Each row lists (VehicleType byte, weight) for that archetype.
+    // Rows are indexed by (int)DriverArchetype.
+    // Commuter    — sedan 50 %, SUV 35 %, motorcycle 15 %
+    // SundayDriver— sedan 70 %, SUV 30 %
+    // LeadFoot    — motorcycle 40 %, sedan 30 %, SUV 30 %
+    // NervousNellie — sedan 80 %, SUV 20 %
+    // Trucker     — truck 60 %, bus 40 %
+    private static readonly (byte type, int weight)[][] VehicleWeights =
+    {
+        new[] { ((byte)0, 50), ((byte)1, 35), ((byte)4, 15) },   // Commuter
+        new[] { ((byte)0, 70), ((byte)1, 30) },                   // SundayDriver
+        new[] { ((byte)4, 40), ((byte)0, 30), ((byte)1, 30) },   // LeadFoot
+        new[] { ((byte)0, 80), ((byte)1, 20) },                   // NervousNellie
+        new[] { ((byte)2, 60), ((byte)3, 40) },                   // Trucker
     };
 
     // Weighted archetype selection: Commuter 50%, LeadFoot 15%, Trucker 15%,
@@ -105,8 +123,28 @@ public static class DriverPersonalityGenerator
             brakingComfort: Clamp(Gaussian(m.brake, 0.3f), 1.5f, 4.0f),
             laneChangeBias: Clamp(Gaussian(m.lane, 0.1f), 0f, 1f),
             patienceTimer: Clamp(Gaussian(m.patience, 15f), 5f, 180f),
-            preferredVehicle: m.vehicle
+            preferredVehicle: PickVehicleType((int)archetype)
         );
+    }
+
+    /// <summary>
+    /// Picks a vehicle type byte for the given archetype index using the
+    /// <see cref="VehicleWeights"/> table, so each archetype produces an
+    /// archetype-plausible spread of vehicle types rather than a single fixed value.
+    /// </summary>
+    private static byte PickVehicleType(int archetypeIndex)
+    {
+        var weights = VehicleWeights[archetypeIndex];
+        int total = 0;
+        foreach (var (_, w) in weights) total += w;
+        int roll = Random.Shared.Next(total);
+        int cumulative = 0;
+        foreach (var (type, w) in weights)
+        {
+            cumulative += w;
+            if (roll < cumulative) return type;
+        }
+        return weights[0].type;
     }
 
     private static DriverArchetype PickRandomArchetype()

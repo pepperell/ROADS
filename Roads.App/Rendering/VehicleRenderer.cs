@@ -9,13 +9,15 @@ namespace Roads.App.Rendering;
 /// <summary>
 /// Renders all active vehicles as colored rounded rectangles with a translucent windshield.
 /// Each vehicle is drawn at its world position rotated to its heading angle.
+/// Vehicle body dimensions are looked up per-vehicle from <see cref="VehicleTypeDimensions"/>
+/// via <c>store.PreferredVehicle[i]</c>; physics remain constant-sized (rendering-only difference).
 /// </summary>
 public class VehicleRenderer
 {
-    /// <summary>Vehicle body length in meters.</summary>
+    // Sedan baseline (= SimConstants) — used only for headlight cone geometry and debug overlap check,
+    // which intentionally remain constant to avoid per-frame path allocation in Draw().
     private const float VehicleLength = SimConstants.VehicleLength;
-    /// <summary>Vehicle body width in meters.</summary>
-    private const float VehicleWidth = SimConstants.VehicleWidth;
+    private const float VehicleWidth  = SimConstants.VehicleWidth;
 
     /// <summary>When true, draws red circles on vehicles stuck on arcs and magenta lines between pairs at the same node.</summary>
     public static bool ShowArcConflicts { get; set; }
@@ -101,17 +103,21 @@ public class VehicleRenderer
             IsAntialias = true,
         };
 
-        float halfW = VehicleWidth * 0.5f;
-
         for (int i = 0; i < store.Count; i++)
         {
             if (store.State[i] != VehicleState.Driving) continue;
+
+            // Derive render dimensions from the per-vehicle type (clamped to Sedan on unknown byte).
+            var vtype = (VehicleType)store.PreferredVehicle[i];
+            var (vLen, vWid) = VehicleTypeDimensions.GetDimensions(vtype);
+            float vHalfL = vLen * 0.5f;
+            float vHalfW = vWid * 0.5f;
 
             canvas.Save();
             canvas.Translate(store.PosX[i], store.PosY[i]);
             canvas.RotateRadians(store.Heading[i]);
 
-            // 1. Headlight beams (behind body so car sits on top)
+            // 1. Headlight beams (behind body so car sits on top; beam path uses Sedan halfL baseline)
             if (drawHeadlights)
             {
                 canvas.DrawPath(_leftBeam, beamPaint!);
@@ -123,30 +129,30 @@ public class VehicleRenderer
                 (byte)(store.ColorR[i] * ambient),
                 (byte)(store.ColorG[i] * ambient),
                 (byte)(store.ColorB[i] * ambient));
-            canvas.DrawRoundRect(-halfL, -halfW, VehicleLength, VehicleWidth, 0.6f, 0.6f, bodyPaint);
+            canvas.DrawRoundRect(-vHalfL, -vHalfW, vLen, vWid, 0.6f, 0.6f, bodyPaint);
 
             // 3. Windshield (front quarter)
-            canvas.DrawRect(halfL * 0.3f, -halfW + 0.3f, halfL * 0.5f, VehicleWidth - 0.6f, windshieldPaint);
+            canvas.DrawRect(vHalfL * 0.3f, -vHalfW + 0.3f, vHalfL * 0.5f, vWid - 0.6f, windshieldPaint);
 
             // 4. Headlight dots at front corners
             if (drawHeadlights)
             {
-                canvas.DrawCircle(halfL, -halfW * 0.4f, 0.25f, headlightDotPaint!);
-                canvas.DrawCircle(halfL, halfW * 0.4f, 0.25f, headlightDotPaint!);
+                canvas.DrawCircle(vHalfL, -vHalfW * 0.4f, 0.25f, headlightDotPaint!);
+                canvas.DrawCircle(vHalfL,  vHalfW * 0.4f, 0.25f, headlightDotPaint!);
             }
 
             // 5. Brake lights at rear corners (when braking)
             if (store.Brake[i] > 0.1f)
             {
                 brakePaint.Color = new SKColor(255, 30, 20, 230);
-                canvas.DrawRect(-halfL, -halfW * 0.7f - 0.15f, 0.3f, 0.3f, brakePaint);
-                canvas.DrawRect(-halfL, halfW * 0.7f - 0.15f, 0.3f, 0.3f, brakePaint);
+                canvas.DrawRect(-vHalfL, -vHalfW * 0.7f - 0.15f, 0.3f, 0.3f, brakePaint);
+                canvas.DrawRect(-vHalfL,  vHalfW * 0.7f - 0.15f, 0.3f, 0.3f, brakePaint);
             }
             // 6. Tail lights (dim red at night, even when not braking)
             else if (drawHeadlights)
             {
-                canvas.DrawRect(-halfL, -halfW * 0.7f - 0.15f, 0.3f, 0.3f, tailPaint!);
-                canvas.DrawRect(-halfL, halfW * 0.7f - 0.15f, 0.3f, 0.3f, tailPaint!);
+                canvas.DrawRect(-vHalfL, -vHalfW * 0.7f - 0.15f, 0.3f, 0.3f, tailPaint!);
+                canvas.DrawRect(-vHalfL,  vHalfW * 0.7f - 0.15f, 0.3f, 0.3f, tailPaint!);
             }
 
             canvas.Restore();
@@ -155,14 +161,17 @@ public class VehicleRenderer
 
     /// <summary>
     /// Draws a hover highlight around the vehicle under the cursor.
+    /// The box is sized to match the vehicle's render dimensions.
     /// </summary>
     public void DrawHoverOverlay(SKCanvas canvas, VehicleStore store, int index)
     {
         if (index < 0 || index >= store.Count) return;
         if (store.State[index] != VehicleState.Driving) return;
 
-        float halfL = VehicleLength * 0.5f;
-        float halfW = VehicleWidth * 0.5f;
+        var vtype = (VehicleType)store.PreferredVehicle[index];
+        var (vLen, vWid) = VehicleTypeDimensions.GetDimensions(vtype);
+        float halfL = vLen * 0.5f;
+        float halfW = vWid * 0.5f;
 
         canvas.Save();
         canvas.Translate(store.PosX[index], store.PosY[index]);
@@ -176,7 +185,7 @@ public class VehicleRenderer
             IsAntialias = true,
         };
         canvas.DrawRoundRect(-halfL - 0.3f, -halfW - 0.3f,
-            VehicleLength + 0.6f, VehicleWidth + 0.6f, 0.8f, 0.8f, hoverPaint);
+            vLen + 0.6f, vWid + 0.6f, 0.8f, 0.8f, hoverPaint);
         canvas.Restore();
     }
 
@@ -193,10 +202,12 @@ public class VehicleRenderer
         if (index < 0 || index >= store.Count) return;
         if (store.State[index] != VehicleState.Driving) return;
 
-        float halfL = VehicleLength * 0.5f;
-        float halfW = VehicleWidth * 0.5f;
+        var vtype = (VehicleType)store.PreferredVehicle[index];
+        var (vLen, vWid) = VehicleTypeDimensions.GetDimensions(vtype);
+        float halfL = vLen * 0.5f;
+        float halfW = vWid * 0.5f;
 
-        // Selection ring around vehicle
+        // Selection ring around vehicle (sized to match the vehicle's render dimensions)
         canvas.Save();
         canvas.Translate(store.PosX[index], store.PosY[index]);
         canvas.RotateRadians(store.Heading[index]);
@@ -209,7 +220,7 @@ public class VehicleRenderer
             IsAntialias = true,
         };
         canvas.DrawRoundRect(-halfL - 0.3f, -halfW - 0.3f,
-            VehicleLength + 0.6f, VehicleWidth + 0.6f, 0.8f, 0.8f, selectPaint);
+            vLen + 0.6f, vWid + 0.6f, 0.8f, 0.8f, selectPaint);
         canvas.Restore();
 
         // Lookahead target dot
