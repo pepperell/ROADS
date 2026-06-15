@@ -30,11 +30,6 @@ public class SceneRenderer
     /// </summary>
     private readonly CongestionHeatMap _heatMap = new();
 
-    /// <summary>TEMP diagnostic: per-frame draw sub-phase wall time (ms) from the last Render.</summary>
-    public static double DrawRoadsMs;
-    /// <summary>TEMP diagnostic: per-frame vehicle draw wall time (ms) from the last Render.</summary>
-    public static double DrawVehiclesMs;
-
     /// <summary>Reusable buffer of visible edge indices, refilled each frame from the edge grid.</summary>
     private readonly List<int> _visibleEdges = new();
 
@@ -103,10 +98,8 @@ public class SceneRenderer
         // passes iterate only on-screen edges instead of the whole network (big win when zoomed in).
         simLoop.EdgeGrid.QueryVisible(graph.Edges.Count, viewRect.Left, viewRect.Top, viewRect.Right, viewRect.Bottom, _visibleEdges);
 
-        long _tRoads = System.Diagnostics.Stopwatch.GetTimestamp(); // TEMP draw profiling
         // Draw roads (heat-map forwarded so the renderer can tint surfaces)
         _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness, _heatMap, viewRect, _visibleEdges);
-        DrawRoadsMs = (System.Diagnostics.Stopwatch.GetTimestamp() - _tRoads) * 1000.0 / System.Diagnostics.Stopwatch.Frequency; // TEMP (roadRenderer.Draw only)
         _roadRenderer.DrawSignals(canvas, graph, trafficSignals, stopLineCache, camera.Zoom, viewRect);
         _roadRenderer.DrawStopSigns(canvas, graph, stopSigns, stopLineCache, camera.Zoom, viewRect);
         _roadRenderer.DrawYieldSigns(canvas, graph, yieldSigns, stopLineCache, camera.Zoom, viewRect);
@@ -125,7 +118,6 @@ public class SceneRenderer
         // Draw drag crossing previews
         DrawCrossingPreviews(canvas, editorState, camera);
 
-        long _tVeh = System.Diagnostics.Stopwatch.GetTimestamp(); // TEMP draw profiling
         // Draw vehicles
         _vehicleRenderer.Draw(canvas, vehicles, camera.Zoom, darkness, viewRect);
         _vehicleRenderer.DrawArcConflictOverlay(canvas, vehicles, intersectionArcs);
@@ -133,7 +125,6 @@ public class SceneRenderer
             _vehicleRenderer.DrawHoverOverlay(canvas, vehicles, editorState.HoveredVehicle);
         if (editorState.SelectedVehicle >= 0)
             _vehicleRenderer.DrawSelectionOverlay(canvas, vehicles, editorState.SelectedVehicle, graph, stopLineCache, intersectionArcs);
-        DrawVehiclesMs = (System.Diagnostics.Stopwatch.GetTimestamp() - _tVeh) * 1000.0 / System.Diagnostics.Stopwatch.Frequency; // TEMP
 
         // Draw spawn and destination node markers
         _spawnPointRenderer.DrawForFlag(canvas, graph, NodeFlags.Spawn, camera.Zoom);

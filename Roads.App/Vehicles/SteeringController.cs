@@ -99,15 +99,6 @@ public static class SteeringController
         if (newArc >= 0) _arcOccupancy.Enter(newArc, index);
     }
 
-    // --- TEMP diagnostic: per-vehicle steering sub-phase timing, to locate the dominant cost.
-    // Remove once the hot phase is identified and fixed. ---
-    /// <summary>Per-tick steering sub-phase wall time in ms (summed over substeps) from the last UpdateAll.</summary>
-    public struct SteeringProfile { public double ArcMs, ProjectMs, SignalsMs, TransitionMs, SteerMs, SpeedMs; }
-    /// <summary>Most recent steering sub-phase breakdown (TEMP diagnostic).</summary>
-    public static SteeringProfile LastProfile;
-    private static long _tArc, _tProject, _tSignals, _tTransition, _tSteer, _tSpeed;
-    // --- end TEMP diagnostic ---
-
     /// <summary>
     /// Updates a vehicle's steering angle, throttle, brake, and edge/arc progress.
     /// Combines PD heading control, lateral error correction, IDM car-following,
@@ -122,9 +113,7 @@ public static class SteeringController
         if (store.CurrentArc[index] >= 0)
         {
             store.DistToRoadSq[index] = 0f; // arc vehicles are always on-road
-            long tsArc = System.Diagnostics.Stopwatch.GetTimestamp();           // TEMP
             UpdateOnArc(store, index, graph, grid, stopLines, arcCache, dt);
-            _tArc += System.Diagnostics.Stopwatch.GetTimestamp() - tsArc;       // TEMP
             return;
         }
 
@@ -141,7 +130,6 @@ public static class SteeringController
         float edgeLength = edge.Length;
         if (edgeLength < 0.01f) edgeLength = 0.01f;
 
-        long _ts = System.Diagnostics.Stopwatch.GetTimestamp();                 // TEMP
         // Project vehicle position onto the Bezier to compute actual progress
         float vx = store.PosX[index];
         float vy = store.PosY[index];
@@ -159,12 +147,9 @@ public static class SteeringController
             float rdy = vy - laneCenter.Y;
             store.DistToRoadSq[index] = rdx * rdx + rdy * rdy;
         }
-        _tProject += System.Diagnostics.Stopwatch.GetTimestamp() - _ts;         // TEMP
 
-        _ts = System.Diagnostics.Stopwatch.GetTimestamp();                      // TEMP
         // Evaluate signals, stop signs, and yield signs
         var (signal, yieldSignal) = EvaluateSignals(store, index, edgeIdx, graph, signals, stopSigns, yieldSigns);
-        _tSignals += System.Diagnostics.Stopwatch.GetTimestamp() - _ts;         // TEMP
 
         // Compute stop-line position in t-space
         float stopT = stopLines.GetStopTAtToNode(edgeIdx);
@@ -175,23 +160,17 @@ public static class SteeringController
         if (CheckRedLightBlocking(store, index, signal, speed, progress, stopAtT, edgeLength, store.BrakingComfort[index]))
             return;
 
-        _ts = System.Diagnostics.Stopwatch.GetTimestamp();                      // TEMP
         // Handle edge transitions (arc entrance, direct jump, or end-of-path stop)
         var transition = HandleEdgeTransition(store, index, graph, stopLines, arcCache, signals, grid, ref edgeIdx, ref edge, ref edgeLength, ref progress, ref rawProgress, ref baseSpeedLimit, ref targetSpeed, ref stopT, ref halfVehT, ref stopAtT, speed, vx, vy);
-        _tTransition += System.Diagnostics.Stopwatch.GetTimestamp() - _ts;      // TEMP
         if (transition == TransitionResult.Returned) return;
 
         store.EdgeProgress[index] = progress;
 
-        _ts = System.Diagnostics.Stopwatch.GetTimestamp();                      // TEMP
         // PD steering
         ComputeSteering(store, index, graph, edgeIdx, rawProgress, progress, edgeLength, minProgressT, vx, vy, dt);
-        _tSteer += System.Diagnostics.Stopwatch.GetTimestamp() - _ts;           // TEMP
 
-        _ts = System.Diagnostics.Stopwatch.GetTimestamp();                      // TEMP
         // IDM car-following + throttle/brake
         ApplySpeedControl(store, index, graph, grid, stopLines, edgeIdx, edgeLength, speed, targetSpeed, progress, stopAtT, signal, yieldSignal);
-        _tSpeed += System.Diagnostics.Stopwatch.GetTimestamp() - _ts;           // TEMP
 
         // Detect multi-segment skip within a single tick
         int exitPathIdx = store.PathIndex[index];
@@ -1243,8 +1222,6 @@ public static class SteeringController
         // pass via SetArc as vehicles enter/exit arcs (scan #1 reads it instead of scanning all vehicles).
         _arcOccupancy.Rebuild(store, arcCache.ArcCount);
 
-        _tArc = _tProject = _tSignals = _tTransition = _tSteer = _tSpeed = 0; // TEMP diagnostic reset
-
         // Ensure conflict-tracking arrays are sized
         if (DebugLoggingEnabled)
             EnsureConflictArrays(store.Count);
@@ -1301,18 +1278,6 @@ public static class SteeringController
             _prevEdge[i] = afterEdge;
         }
 
-        // TEMP diagnostic: publish the steering sub-phase breakdown for this tick.
-        double _toMs = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-        LastProfile = new SteeringProfile
-        {
-            ArcMs = _tArc * _toMs,
-            ProjectMs = _tProject * _toMs,
-            SignalsMs = _tSignals * _toMs,
-            TransitionMs = _tTransition * _toMs,
-            SteerMs = _tSteer * _toMs,
-            SpeedMs = _tSpeed * _toMs,
-        };
-
 #if DEBUG
         // Collision tripwire: count vehicle pairs simultaneously on mutually-conflicting arcs.
         // On an uncontrolled network this must remain 0 — nonzero means two vehicles are inside
@@ -1343,33 +1308,6 @@ public static class SteeringController
     /// Generic parametric nearest-t search: finds the t in [searchMin, searchMax] closest to (px, py)
     /// using the provided evaluate function. Shared by edge and arc projection.
     /// </summary>
-    private static float FindNearestTGeneric(float px, float py, float currentT,
-        float windowBack, float windowForward, Func<float, Vector2> evaluate)
-    {
-        float bestT = currentT;
-        float bestDist = float.MaxValue;
-
-        float searchMin = MathF.Max(0f, currentT - windowBack);
-        float searchMax = MathF.Min(1.0f, currentT + windowForward);
-        const int steps = 20;
-
-        for (int i = 0; i <= steps; i++)
-        {
-            float t = searchMin + (searchMax - searchMin) * i / steps;
-            var pt = evaluate(t);
-            float dx = pt.X - px;
-            float dy = pt.Y - py;
-            float dist = dx * dx + dy * dy;
-            if (dist < bestDist)
-            {
-                bestDist = dist;
-                bestT = t;
-            }
-        }
-
-        return bestT;
-    }
-
     /// <summary>
     /// Finds the parametric t on the Bézier closest to (px, py), searching in a window near currentT.
     /// </summary>

@@ -29,13 +29,10 @@ public static class BenchmarkCapture
     /// <param name="arcConflicts">DEBUG collision tripwire: pairs of vehicles on mutually-conflicting
     /// arcs after the last tick (should be 0 on the unsignalized stress grid; 0 in Release builds).</param>
     /// <param name="timing">Per-subsystem sim-tick breakdown from the most recent active tick.</param>
-    /// <param name="steering">TEMP: per-vehicle steering sub-phase breakdown (diagnostic).</param>
     public static void Capture(double fps, double simMs, double drawMs,
                                double pathfindMs, int pathfindCalls, int vehicleCount,
                                int arcConflicts, int offroad,
-                               double drawRoadsMs, double drawVehiclesMs,
-                               Roads.App.SimulationLoop.SimTimingBreakdown timing,
-                               Roads.App.Vehicles.SteeringController.SteeringProfile steering)
+                               Roads.App.SimulationLoop.SimTimingBreakdown timing)
     {
         try
         {
@@ -51,11 +48,7 @@ public static class BenchmarkCapture
                           $"[sim breakdown] grid={timing.GridMs:F2}ms, caches={timing.CachesMs:F2}ms, " +
                           $"signals={timing.SignalsMs:F2}ms, lanechange={timing.LaneChangeMs:F2}ms, " +
                           $"steering={timing.SteeringMs:F2}ms, physics={timing.PhysicsMs:F2}ms, " +
-                          $"reroute={timing.RerouteMs:F2}ms, population={timing.PopulationMs:F2}ms, " +
-                          $"[steering] arc={steering.ArcMs:F2}ms, project={steering.ProjectMs:F2}ms, " +
-                          $"signals={steering.SignalsMs:F2}ms, transition={steering.TransitionMs:F2}ms, " +
-                          $"steer={steering.SteerMs:F2}ms, speed={steering.SpeedMs:F2}ms, " +
-                          $"[draw] roads={drawRoadsMs:F2}ms, vehicles={drawVehiclesMs:F2}ms";
+                          $"reroute={timing.RerouteMs:F2}ms, population={timing.PopulationMs:F2}ms";
 
             File.AppendAllText(LogFile, line + Environment.NewLine);
         }

@@ -1242,8 +1242,7 @@ public class MainForm : Form
             _perfHud.AvgFps, _perfHud.AvgSimMs, _perfHud.AvgDrawMs,
             _perfHud.LastPathfindMs, _perfHud.LastPathfindCalls,
             _vehicles.Count, Roads.App.Vehicles.SteeringController.LastConflictCoOccupancy, offroad,
-            Roads.App.Rendering.SceneRenderer.DrawRoadsMs, Roads.App.Rendering.SceneRenderer.DrawVehiclesMs,
-            _simLoop.LastTiming, Roads.App.Vehicles.SteeringController.LastProfile);
+            _simLoop.LastTiming);
         System.Diagnostics.Debug.WriteLine($"[Baseline] captured: fps={_perfHud.AvgFps:F1}, vehicles={_vehicles.Count}");
     }
 

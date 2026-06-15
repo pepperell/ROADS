@@ -651,18 +651,20 @@ Phases are built by an Opus "director" that hands self-contained milestones to l
 
 **Goal:** Optimize to handle 10,000+ vehicles at interactive frame rates.
 
-- [ ] Contraction Hierarchies (replace A* for long-distance paths)
-- [ ] Path caching and batch pathfinding (background thread)
-- [ ] Double-buffered simulation state (sim thread decoupled from render)
+- [ ] ~~Contraction Hierarchies (replace A* for long-distance paths)~~ — **measured out**: at 10K, pathfinding was a few % of the tick (nested in steering), never the bottleneck.
+- [ ] ~~Path caching and batch pathfinding (background thread)~~ — **measured out** (same reason); rerouting is rate-limited and cheap once steering was fixed.
+- [ ] ~~Double-buffered simulation state (sim thread decoupled from render)~~ — **not needed**: after the fixes the frame fits ~1 substep; the spiral clamp gave smooth motion without a second thread.
 - [X] LOD rendering (dots at far zoom, full detail up close)
-- [X] Frustum culling (don't draw off-screen entities)
+- [X] Frustum culling — extended to visible-only iteration of the road + sign passes via the edge spatial grid (the big draw win at zoomed-in views).
 - [X] Parked vehicle optimization (remove from physics loop)
-- [ ] Profile and optimize hot loops (SIMD where beneficial)
-- [ ] Memory pooling for paths and temporary allocations
-- [ ] Stress testing: 10K vehicles on large road network
-- [X] Performance HUD (FPS, vehicle count, sim step time)
+- [X] Profile and optimize hot loops — real wins: fixed-timestep **spiral clamp**, replacing the **O(n²) arc-conflict scans** (entry + car-following) with an **arc-occupancy index**, cached-control-point **Bézier projection**, and **visible-only render culling**. (SIMD evaluated and dropped — physics was <1% of the tick.)
+- [ ] ~~Memory pooling for paths and temporary allocations~~ — **not pursued**: allocations weren't the bottleneck; the per-call projection closure was removed and GC stayed flat at 10K.
+- [X] Stress testing: 10K vehicles on large road network — `GridNetworkGenerator` + bulk-spawn + a headless `--autobench` harness (writes `benchmark.log`; parsed by `scripts/parse_benchmark.py`).
+- [X] Performance HUD (FPS, vehicle count, sim step time) — now instantaneous (no post-unpause ramp); `benchmark.log` adds a per-subsystem sim breakdown.
 
-**Deliverable:** Simulation runs smoothly with 10,000+ vehicles at 30+ FPS.
+**Status:** Complete — **10,000 vehicles at ~30 FPS at 5× zoom** (0.1 → 30 FPS over this phase). The heavyweight planned items (CH, double-buffering, SIMD) were measured out; the actual bottlenecks were the fixed-timestep substep spiral, O(n²) arc-conflict scans, and whole-network render passes. See project memory (`project_phase5_perf_findings`) for the measured root-cause analysis.
+
+**Deliverable:** Simulation runs smoothly with 10,000+ vehicles at 30+ FPS. ✓ (30 FPS @ 5× zoom with 10K.)
 
 ---
 
