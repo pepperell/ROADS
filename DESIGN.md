@@ -676,7 +676,7 @@ Phases are built by an Opus "director" that hands self-contained milestones to l
 - [ ] Undo/Redo system (command pattern)
 - [X] Minimap
 - [X] Statistics panel (vehicle count, avg speed, congestion)
-- [ ] Congestion heat-map overlay
+- [X] Congestion heat-map overlay
 - [ ] Zone painting tool (residential/commercial/industrial)
 - [ ] Map templates (Grid City, Highway Ring, Empty)
 - [X] Road type visuals (highway thick/gray, residential thin/light)
