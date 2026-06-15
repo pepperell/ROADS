@@ -264,6 +264,25 @@ public class MainForm : Form
             }
         }
 
+        // R key: cycle the selected edge's RoadType (Residential → Arterial → Highway → Dirt → Residential)
+        if (e.KeyCode == Keys.R && _editorState.ActiveTool == EditorTool.Select
+            && _editorState.SelectedEdge >= 0)
+        {
+            var cycleEdge = _roadGraph.Edges[_editorState.SelectedEdge];
+            if (cycleEdge.FromNode >= 0)
+            {
+                RoadType nextType = cycleEdge.RoadType switch
+                {
+                    RoadType.Residential => RoadType.Arterial,
+                    RoadType.Arterial    => RoadType.Highway,
+                    RoadType.Highway     => RoadType.Dirt,
+                    _                   => RoadType.Residential,
+                };
+                _roadGraph.SetEdgeRoadType(_editorState.SelectedEdge, nextType);
+                e.Handled = true;
+            }
+        }
+
         // Delete key to delete selected node
         if (e.KeyCode == Keys.Delete && _editorState.ActiveTool == EditorTool.Select
             && _editorState.SelectedNode >= 0)

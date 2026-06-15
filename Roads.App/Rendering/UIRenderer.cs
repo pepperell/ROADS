@@ -123,6 +123,7 @@ public class UIRenderer
         "V      Spawn Vehicle",
         "+  -   Lane Count",
         "[  ]   Speed Limit",
+        "R      Cycle Road Type",
         "T      Toggle Sliders",
         "P      Perf HUD",
         "Del    Delete Node",

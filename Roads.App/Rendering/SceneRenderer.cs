@@ -478,7 +478,7 @@ public class SceneRenderer
         {
             var sel = graph.Edges[editorState.SelectedEdge];
             float mph = sel.SpeedLimit * 2.23694f;
-            selInfo = $"  |  Selected: {sel.LaneCount} lane(s) [+/- lanes]  Speed: {mph:F0} mph [ [ / ] to change]";
+            selInfo = $"  |  Selected: {sel.LaneCount} lane(s) [+/- lanes]  Speed: {mph:F0} mph [ [ / ] to change]  Type: {sel.RoadType} [R to cycle]";
         }
         string spawnInfo = spawnNodeCount > 0 ? $"Spawn Nodes: {spawnNodeCount}" : "V=spawn, or place Spawn Pts";
         string clockDisplay = simLoop.Clock.GetDisplayTime();

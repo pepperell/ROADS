@@ -21,6 +21,8 @@ public class RoadRenderer
     private readonly List<CachedEdgePaths> _cache = new();
     /// <summary>Graph version when the cache was last rebuilt.</summary>
     private int _cachedVersion = -1;
+    /// <summary>Ambient lighting factor for the current frame (1.0 = full day). Set at the start of Draw.</summary>
+    private float _ambient = 1f;
 
     // Reusable paints (avoid per-frame allocation)
     private readonly SKPaint _surfacePaint = new()
@@ -46,6 +48,11 @@ public class RoadRenderer
         IsAntialias = true
     };
 
+    // Dash effects are immutable and shared across all edges/frames — created once to
+    // honor the per-frame no-allocation discipline of the paints above.
+    private readonly SKPathEffect _centerLineDash = SKPathEffect.CreateDash(new[] { 2f, 2f }, 0);
+    private readonly SKPathEffect _dirtCenterLineDash = SKPathEffect.CreateDash(new[] { 3f, 5f }, 0);
+
     // Reusable paints for DrawRoadLines (StrokeWidth updated per frame based on zoom)
     private readonly SKPaint _edgeLinePaint = new()
     {
@@ -57,7 +64,6 @@ public class RoadRenderer
     {
         Color = new SKColor(220, 180, 40),
         Style = SKPaintStyle.Stroke,
-        PathEffect = SKPathEffect.CreateDash(new[] { 2f, 2f }, 0),
         IsAntialias = true
     };
     private readonly SKPaint _laneDividerPaint = new()
@@ -78,13 +84,14 @@ public class RoadRenderer
         if (graph.Edges.Count == 0) return;
 
         // Dim road colors at night
-        float ambient = 1f - darkness * 0.45f;
-        _surfacePaint.Color = new SKColor(Dim(70, ambient), Dim(72, ambient), Dim(78, ambient));
+        _ambient = 1f - darkness * 0.45f;
+        // Default surface paint color (intersection fills use this; per-edge surfaces override it)
+        _surfacePaint.Color = new SKColor(Dim(70, _ambient), Dim(72, _ambient), Dim(78, _ambient));
         _intersectionFillPaint.Color = _surfacePaint.Color;
-        _nodePaint.Color = new SKColor(Dim(120, ambient), Dim(130, ambient), Dim(150, ambient));
-        _edgeLinePaint.Color = new SKColor(Dim(200, ambient), Dim(200, ambient), Dim(200, ambient));
-        _centerLinePaint.Color = new SKColor(Dim(220, ambient), Dim(180, ambient), Dim(40, ambient));
-        _laneDividerPaint.Color = new SKColor(Dim(180, ambient), Dim(180, ambient), Dim(180, ambient), (byte)(160 * ambient));
+        _nodePaint.Color = new SKColor(Dim(120, _ambient), Dim(130, _ambient), Dim(150, _ambient));
+        _edgeLinePaint.Color = new SKColor(Dim(200, _ambient), Dim(200, _ambient), Dim(200, _ambient));
+        _centerLinePaint.Color = new SKColor(Dim(220, _ambient), Dim(180, _ambient), Dim(40, _ambient));
+        _laneDividerPaint.Color = new SKColor(Dim(180, _ambient), Dim(180, _ambient), Dim(180, _ambient), (byte)(160 * _ambient));
 
         RebuildCacheIfNeeded(graph, stopLines);
 
@@ -96,7 +103,7 @@ public class RoadRenderer
             if (edge.FromNode < 0) continue;
             int reverse = graph.FindReverseEdge(i);
             if (reverse >= 0 && reverse < i) continue;
-            DrawRoadSurface(canvas, i);
+            DrawRoadSurface(canvas, edge, i);
         }
 
         // Pass 1.5: fill intersection interiors and draw corner curves
@@ -256,17 +263,23 @@ public class RoadRenderer
         return path;
     }
 
-    /// <summary>Draws the gray asphalt surface for a single road edge.</summary>
-    private void DrawRoadSurface(SKCanvas canvas, int edgeIndex)
+    /// <summary>
+    /// Draws the asphalt surface for a single road edge. Surface color and stroke width
+    /// are derived from the edge's <see cref="RoadType"/> via <see cref="RoadTypeVisuals"/>
+    /// so each classification is visually distinct; lane geometry is not affected.
+    /// </summary>
+    private void DrawRoadSurface(SKCanvas canvas, RoadEdge edge, int edgeIndex)
     {
         var cached = _cache[edgeIndex];
-        _surfacePaint.StrokeWidth = cached.TotalWidth;
+        _surfacePaint.Color = RoadTypeVisuals.GetSurfaceColor(edge.RoadType, _ambient);
+        _surfacePaint.StrokeWidth = cached.TotalWidth * RoadTypeVisuals.GetWidthMultiplier(edge.RoadType);
         canvas.DrawPath(cached.CenterPath, _surfacePaint);
     }
 
     /// <summary>
     /// Draws boundary lines, center line, and lane dividers for a single road edge.
-    /// All marking paths are trimmed at intersection boundaries.
+    /// All marking paths are trimmed at intersection boundaries. Dirt roads use a
+    /// longer dash interval on the center line to suggest an unpaved surface.
     /// </summary>
     private void DrawRoadLines(SKCanvas canvas, RoadEdge edge, int edgeIndex, float zoom)
     {
@@ -277,8 +290,12 @@ public class RoadRenderer
         canvas.DrawPath(cached.LeftEdgePath, _edgeLinePaint);
         canvas.DrawPath(cached.RightEdgePath, _edgeLinePaint);
 
-        // Center line (yellow dashed) — uses trimmed path
+        // Center line — standard yellow dashed, or wider gaps for dirt roads.
+        // Effects are pre-created and shared, so there is no per-frame allocation.
         _centerLinePaint.StrokeWidth = Math.Max(0.3f, 0.4f / zoom);
+        _centerLinePaint.PathEffect = RoadTypeVisuals.UsesDashedCenterLine(edge.RoadType)
+            ? _dirtCenterLineDash
+            : _centerLineDash;
         canvas.DrawPath(cached.CenterLinePath, _centerLinePaint);
 
         // Lane dividers (white dashed, multi-lane only)

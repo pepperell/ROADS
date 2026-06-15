@@ -809,6 +809,35 @@ public class RoadGraph
     }
 
     /// <summary>
+    /// Sets the road type on an edge and its reverse edge. Also updates each edge's speed
+    /// limit to the default for the new type and bumps the graph version so render and
+    /// simulation caches invalidate. The speed limit update matches the behavior of
+    /// <see cref="RoadTypeDefaults.GetDefaultSpeedLimit"/>.
+    /// </summary>
+    /// <param name="edgeIndex">Index of the edge to modify.</param>
+    /// <param name="type">New road classification.</param>
+    public void SetEdgeRoadType(int edgeIndex, RoadType type)
+    {
+        if (edgeIndex < 0 || edgeIndex >= _edges.Count) return;
+        var edge = _edges[edgeIndex];
+        if (edge.FromNode < 0) return;
+        float defaultSpeed = RoadTypeDefaults.GetDefaultSpeedLimit(type);
+        edge.RoadType = type;
+        edge.SpeedLimit = defaultSpeed;
+        _edges[edgeIndex] = edge;
+        // Also update the reverse (opposite direction) edge
+        int reverse = FindReverseEdge(edgeIndex);
+        if (reverse >= 0)
+        {
+            var rev = _edges[reverse];
+            rev.RoadType = type;
+            rev.SpeedLimit = defaultSpeed;
+            _edges[reverse] = rev;
+        }
+        Version++;
+    }
+
+    /// <summary>
     /// Removes a node and all edges connected to it (both incoming and outgoing).
     /// Orphaned nodes left by edge removal are also cleaned up.
     /// </summary>
