@@ -85,14 +85,33 @@ public class RoadRenderer
     /// When <paramref name="heatMap"/> is non-null and <see cref="CongestionHeatMap.Enabled"/>
     /// is true, a congestion tint is alpha-blended over each road surface after the base
     /// color is applied, without affecting lane markings or the road type styling.
+    ///
+    /// Frustum culling: edges whose endpoint AABB does not intersect <paramref name="viewRect"/>
+    /// are skipped in both passes. A generous margin is added to the AABB so that Bézier
+    /// curves bowing outside their endpoint bounding box are never incorrectly culled.
+    ///
+    /// Level-of-Detail: when <paramref name="zoom"/> is below
+    /// <see cref="RenderDetail.RoadSimpleThreshold"/>, Pass 1 draws plain center-line
+    /// strokes only (no surface fill or markings) and Pass 2 / intersections / stop lines
+    /// / nodes are all skipped. The simplified view is always legible at city-overview scale.
     /// </summary>
+    /// <param name="canvas">SkiaSharp canvas in world-space coordinates.</param>
+    /// <param name="graph">Road graph to render.</param>
+    /// <param name="stopLines">Stop-line cache for marking trim t-values.</param>
+    /// <param name="zoom">Current camera zoom (world units per screen pixel).</param>
+    /// <param name="darkness">Ambient darkness factor (0 = full day, 1 = full night).</param>
+    /// <param name="heatMap">Optional congestion heat-map overlay; null disables it.</param>
+    /// <param name="viewRect">Visible world-space rectangle for frustum culling.</param>
     public void Draw(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom,
-        float darkness = 0f, CongestionHeatMap? heatMap = null)
+        float darkness = 0f, CongestionHeatMap? heatMap = null,
+        SKRect viewRect = default)
     {
         if (graph.Edges.Count == 0) return;
 
+        bool lodSimple = zoom < RenderDetail.RoadSimpleThreshold;
+
         // Store heat-map reference for use inside DrawRoadSurface (cleared after the pass)
-        _heatMap = (heatMap != null && heatMap.Enabled) ? heatMap : null;
+        _heatMap = (!lodSimple && heatMap != null && heatMap.Enabled) ? heatMap : null;
 
         // Dim road colors at night
         _ambient = 1f - darkness * 0.45f;
@@ -106,6 +125,38 @@ public class RoadRenderer
 
         RebuildCacheIfNeeded(graph, stopLines);
 
+        // viewRect is only used for culling; a zero/empty rect means no culling (backward-compat
+        // with callers that do not supply it, e.g. signal/sign helper methods).
+        bool cull = viewRect.Width > 0f || viewRect.Height > 0f;
+
+        // LOD simple: draw roads as plain center-line strokes at city-overview zoom.
+        // This replaces both surface pass and marking pass with a single cheap draw.
+        if (lodSimple)
+        {
+            _surfacePaint.StrokeWidth = 1.5f / zoom; // thin but visible at all scales
+            for (int i = 0; i < graph.Edges.Count; i++)
+            {
+                if (i >= _cache.Count) break;
+                var edge = graph.Edges[i];
+                if (edge.FromNode < 0) continue;
+                int reverse = graph.FindReverseEdge(i);
+                if (reverse >= 0 && reverse < i) continue;
+
+                if (cull)
+                {
+                    var from = graph.Nodes[edge.FromNode].Position;
+                    var to   = graph.Nodes[edge.ToNode].Position;
+                    float halfW = edge.LaneCount * SimConstants.LaneWidth;
+                    if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to, halfW), viewRect))
+                        continue;
+                }
+
+                _surfacePaint.Color = RoadTypeVisuals.GetSurfaceColor(edge.RoadType, _ambient);
+                canvas.DrawPath(_cache[i].CenterPath, _surfacePaint);
+            }
+            return; // skip all detail passes
+        }
+
         // Pass 1: draw all asphalt surfaces first so overlapping roads blend seamlessly
         for (int i = 0; i < graph.Edges.Count; i++)
         {
@@ -114,6 +165,16 @@ public class RoadRenderer
             if (edge.FromNode < 0) continue;
             int reverse = graph.FindReverseEdge(i);
             if (reverse >= 0 && reverse < i) continue;
+
+            if (cull)
+            {
+                var from = graph.Nodes[edge.FromNode].Position;
+                var to   = graph.Nodes[edge.ToNode].Position;
+                float halfW = edge.LaneCount * SimConstants.LaneWidth;
+                if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to, halfW), viewRect))
+                    continue;
+            }
+
             DrawRoadSurface(canvas, edge, i);
         }
 
@@ -132,6 +193,16 @@ public class RoadRenderer
             if (edge.FromNode < 0) continue;
             int reverse = graph.FindReverseEdge(i);
             if (reverse >= 0 && reverse < i) continue;
+
+            if (cull)
+            {
+                var from = graph.Nodes[edge.FromNode].Position;
+                var to   = graph.Nodes[edge.ToNode].Position;
+                float halfW = edge.LaneCount * SimConstants.LaneWidth;
+                if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to, halfW), viewRect))
+                    continue;
+            }
+
             DrawRoadLines(canvas, edge, i, zoom);
         }
 

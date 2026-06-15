@@ -83,13 +83,17 @@ public class SceneRenderer
         // Draw grid
         DrawGrid(canvas, camera, info, gridColor);
 
+        // Compute the visible world-space rectangle once; forwarded to renderers for
+        // frustum culling so they can skip off-screen geometry cheaply.
+        var viewRect = camera.GetVisibleWorldRect(info.Width, info.Height);
+
         // Update congestion heat-map before the road draw pass so values are current.
         // Update is cheap even when Enabled is false: it still zeroes counts and normalises,
         // but the renderer skips blending when the overlay is disabled.
         _heatMap.Update(vehicles, graph);
 
         // Draw roads (heat-map forwarded so the renderer can tint surfaces)
-        _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness, _heatMap);
+        _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness, _heatMap, viewRect);
         _roadRenderer.DrawSignals(canvas, graph, trafficSignals, stopLineCache, camera.Zoom);
         _roadRenderer.DrawStopSigns(canvas, graph, stopSigns, stopLineCache, camera.Zoom);
         _roadRenderer.DrawYieldSigns(canvas, graph, yieldSigns, stopLineCache, camera.Zoom);
@@ -109,7 +113,7 @@ public class SceneRenderer
         DrawCrossingPreviews(canvas, editorState, camera);
 
         // Draw vehicles
-        _vehicleRenderer.Draw(canvas, vehicles, camera.Zoom, darkness);
+        _vehicleRenderer.Draw(canvas, vehicles, camera.Zoom, darkness, viewRect);
         _vehicleRenderer.DrawArcConflictOverlay(canvas, vehicles, intersectionArcs);
         if (editorState.HoveredVehicle >= 0 && editorState.HoveredVehicle != editorState.SelectedVehicle)
             _vehicleRenderer.DrawHoverOverlay(canvas, vehicles, editorState.HoveredVehicle);

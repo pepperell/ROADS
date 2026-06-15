@@ -45,18 +45,37 @@ public class VehicleRenderer
     }
 
     /// <summary>
-    /// Draws all active vehicles as colored rounded rectangles with windshield,
-    /// headlight beams at night, brake lights when braking, and tail lights at night.
+    /// Draws all active vehicles with frustum culling and Level-of-Detail.
+    /// Vehicles whose world-space AABB does not intersect <paramref name="viewRect"/> are
+    /// skipped. When <paramref name="zoom"/> is below
+    /// <see cref="RenderDetail.VehicleDotThreshold"/> each visible vehicle is drawn as a
+    /// single small filled dot rather than a full body / windshield / lights, since the
+    /// detail would be sub-pixel at that scale. At normal zoom the output is identical to
+    /// the non-culled version.
     /// </summary>
-    public void Draw(SKCanvas canvas, VehicleStore store, float zoom, float darkness)
+    /// <param name="canvas">SkiaSharp canvas in world-space coordinates.</param>
+    /// <param name="store">Vehicle data store.</param>
+    /// <param name="zoom">Current camera zoom (world units per screen pixel).</param>
+    /// <param name="darkness">Ambient darkness factor (0 = full day, 1 = full night).</param>
+    /// <param name="viewRect">Visible world-space rectangle for frustum culling.</param>
+    public void Draw(SKCanvas canvas, VehicleStore store, float zoom, float darkness, SKRect viewRect)
     {
         if (store.Count == 0) return;
 
-        bool drawHeadlights = darkness > 0.05f;
+        bool lodDot = zoom < RenderDetail.VehicleDotThreshold;
+        bool drawHeadlights = !lodDot && darkness > 0.05f;
         float ambient = 1f - darkness * 0.4f; // darken vehicle bodies at night
 
         using var bodyPaint = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = true };
-        using var windshieldPaint = new SKPaint
+
+        // LOD dot paint — reused for all vehicles when zoomed far out.
+        using var dotPaint = lodDot ? new SKPaint
+        {
+            Style = SKPaintStyle.Fill,
+            IsAntialias = true,
+        } : null;
+
+        using var windshieldPaint = lodDot ? null : new SKPaint
         {
             Color = new SKColor(140, 200, 255, 180),
             Style = SKPaintStyle.Fill,
@@ -97,7 +116,7 @@ public class VehicleRenderer
         } : null;
 
         // Brake light paint (bright red, intensity varies)
-        using var brakePaint = new SKPaint
+        using var brakePaint = lodDot ? null : new SKPaint
         {
             Style = SKPaintStyle.Fill,
             IsAntialias = true,
@@ -112,6 +131,22 @@ public class VehicleRenderer
             var (vLen, vWid) = VehicleTypeDimensions.GetDimensions(vtype);
             float vHalfL = vLen * 0.5f;
             float vHalfW = vWid * 0.5f;
+
+            // Frustum cull: skip vehicles entirely outside the visible world rect.
+            var bounds = RenderDetail.VehicleBounds(store.PosX[i], store.PosY[i], vHalfL, vHalfW);
+            if (!RenderDetail.IsVisible(bounds, viewRect)) continue;
+
+            // LOD: far-out zoom — draw as a single small filled dot (no transform needed).
+            if (lodDot)
+            {
+                dotPaint!.Color = new SKColor(
+                    (byte)(store.ColorR[i] * ambient),
+                    (byte)(store.ColorG[i] * ambient),
+                    (byte)(store.ColorB[i] * ambient));
+                // Dot radius: 1 world unit looks ~3–4 screen pixels at the LOD threshold.
+                canvas.DrawCircle(store.PosX[i], store.PosY[i], 1f, dotPaint);
+                continue;
+            }
 
             canvas.Save();
             canvas.Translate(store.PosX[i], store.PosY[i]);
@@ -132,7 +167,7 @@ public class VehicleRenderer
             canvas.DrawRoundRect(-vHalfL, -vHalfW, vLen, vWid, 0.6f, 0.6f, bodyPaint);
 
             // 3. Windshield (front quarter)
-            canvas.DrawRect(vHalfL * 0.3f, -vHalfW + 0.3f, vHalfL * 0.5f, vWid - 0.6f, windshieldPaint);
+            canvas.DrawRect(vHalfL * 0.3f, -vHalfW + 0.3f, vHalfL * 0.5f, vWid - 0.6f, windshieldPaint!);
 
             // 4. Headlight dots at front corners
             if (drawHeadlights)
@@ -144,7 +179,7 @@ public class VehicleRenderer
             // 5. Brake lights at rear corners (when braking)
             if (store.Brake[i] > 0.1f)
             {
-                brakePaint.Color = new SKColor(255, 30, 20, 230);
+                brakePaint!.Color = new SKColor(255, 30, 20, 230);
                 canvas.DrawRect(-vHalfL, -vHalfW * 0.7f - 0.15f, 0.3f, 0.3f, brakePaint);
                 canvas.DrawRect(-vHalfL,  vHalfW * 0.7f - 0.15f, 0.3f, 0.3f, brakePaint);
             }
