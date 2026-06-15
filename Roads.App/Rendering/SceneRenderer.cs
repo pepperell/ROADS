@@ -22,11 +22,18 @@ public class SceneRenderer
     private readonly VehicleInfoPanel _vehicleInfoPanel;
     private readonly LaneRestrictionTool _laneRestrictionTool;
     private readonly MinimapRenderer _minimap;
+    private readonly StatisticsPanel _statisticsPanel;
 
+    /// <summary>
+    /// Constructs the SceneRenderer and wires all sub-renderers and UI panels.
+    /// Call order dependency: <see cref="Render"/> must be called only after all
+    /// sub-renderers are fully initialized.
+    /// </summary>
     public SceneRenderer(RoadRenderer roadRenderer, VehicleRenderer vehicleRenderer,
         MarkerRenderer spawnPointRenderer,
         UIRenderer uiRenderer, SliderPanel sliderPanel, VehicleInfoPanel vehicleInfoPanel,
-        LaneRestrictionTool laneRestrictionTool, MinimapRenderer minimap)
+        LaneRestrictionTool laneRestrictionTool, MinimapRenderer minimap,
+        StatisticsPanel statisticsPanel)
     {
         _roadRenderer = roadRenderer;
         _vehicleRenderer = vehicleRenderer;
@@ -36,6 +43,7 @@ public class SceneRenderer
         _vehicleInfoPanel = vehicleInfoPanel;
         _laneRestrictionTool = laneRestrictionTool;
         _minimap = minimap;
+        _statisticsPanel = statisticsPanel;
     }
 
     /// <summary>
@@ -106,6 +114,7 @@ public class SceneRenderer
         _sliderPanel.Draw(canvas, info.Width);
         if (editorState.SelectedVehicle >= 0)
             _vehicleInfoPanel.Draw(canvas, vehicles, editorState.SelectedVehicle, graph, info.Height, intersectionArcs);
+        _statisticsPanel.Draw(canvas, vehicles, info.Width, info.Height);
 
         // Minimap drawn last so it sits on top of the other overlays.
         _minimap.Draw(canvas, camera, graph, info.Width, info.Height);

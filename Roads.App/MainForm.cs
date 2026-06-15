@@ -43,6 +43,7 @@ public class MainForm : Form
     private readonly VehicleInfoPanel _vehicleInfoPanel = new();
     private readonly MinimapRenderer _minimap = new();
     private readonly PerformanceHud _perfHud = new();
+    private readonly StatisticsPanel _statisticsPanel = new();
     private readonly Stopwatch _perfStopwatch = new();
     private readonly POIRegistry _poiRegistry = new();
     private readonly VehicleSpawner _spawner;
@@ -78,7 +79,7 @@ public class MainForm : Form
         _populationManager = new PopulationManager(_roadGraph, _vehicles, _vehicleGrid, _poiRegistry, SimulationLoop.MaxVehicles);
         _graphChangeHandler = new GraphChangeHandler(_roadGraph, _editorState, _vehicles, _edgeSpatialGrid, _spawner);
         _simLoop = new SimulationLoop(_roadGraph, _vehicles, _vehicleGrid, _stopLineCache, _intersectionArcs, _edgeSpatialGrid, _trafficSignals, _stopSigns, _yieldSigns, _spawner, _populationManager, _editorState, _graphChangeHandler);
-        _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _spawnPointRenderer, _uiRenderer, _sliderPanel, _vehicleInfoPanel, _laneRestrictionTool, _minimap);
+        _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _spawnPointRenderer, _uiRenderer, _sliderPanel, _vehicleInfoPanel, _laneRestrictionTool, _minimap, _statisticsPanel);
 
         // Centralized vehicle-removal fixup: editor-held vehicle indices follow
         // swap-and-pop moves and drop on bulk clears (see VehicleStore.VehicleRemoving).
@@ -223,7 +224,8 @@ public class MainForm : Form
 
     /// <summary>
     /// Handles keyboard input: V to spawn vehicles, +/- to adjust lane count on selected edge,
-    /// [/] to adjust speed limit, T to toggle the slider panel, Space to pause/unpause,
+    /// [/] to adjust speed limit, T to toggle the slider panel, P to toggle the performance HUD,
+    /// M to toggle the minimap, N to toggle the statistics panel, Space to pause/unpause,
     /// comma/period to decrease/increase simulation speed (1x-64x).
     /// </summary>
     private void OnCanvasKeyDown(object? sender, KeyEventArgs e)
@@ -349,6 +351,13 @@ public class MainForm : Form
         if (e.KeyCode == Keys.M)
         {
             _minimap.Visible = !_minimap.Visible;
+            e.Handled = true;
+        }
+
+        // N = toggle statistics panel (vehicle count, avg speed, congestion)
+        if (e.KeyCode == Keys.N)
+        {
+            _statisticsPanel.Visible = !_statisticsPanel.Visible;
             e.Handled = true;
         }
 
