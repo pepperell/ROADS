@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Numerics;
+using System.Threading;
 
 namespace Roads.App.World;
 
@@ -11,6 +13,31 @@ namespace Roads.App.World;
 /// </summary>
 public static class Pathfinder
 {
+    // ---------------------------------------------------------------------------
+    // Lightweight pathfinding timing accumulators.
+    // Counters are read-and-reset once per frame by the HUD via ReadPathfindStatsAndReset().
+    // Interlocked provides cheap thread safety for a future off-thread pathfinder;
+    // today the pathfinder runs single-threaded.
+    // ---------------------------------------------------------------------------
+
+    /// <summary>Accumulated Stopwatch ticks spent inside FindPath across all calls since last reset.</summary>
+    private static long _totalTicks;
+    /// <summary>Number of FindPath calls since last reset.</summary>
+    private static int _callCount;
+
+    /// <summary>
+    /// Returns the total time spent in <see cref="FindPath"/> and the call count since the
+    /// last call to this method, then resets both accumulators to zero.
+    /// Counters are read-and-reset once per frame by the HUD.
+    /// </summary>
+    public static (double totalMs, int calls) ReadPathfindStatsAndReset()
+    {
+        long ticks = Interlocked.Exchange(ref _totalTicks, 0L);
+        int calls = Interlocked.Exchange(ref _callCount, 0);
+        double totalMs = ticks * 1000.0 / Stopwatch.Frequency;
+        return (totalMs, calls);
+    }
+
     /// <summary>Reusable g-score dictionary keyed by edge index, cleared per call.</summary>
     [ThreadStatic] private static Dictionary<int, float>? _gScore;
     /// <summary>Reusable came-from dictionary: edge index → previous edge index.</summary>
@@ -36,9 +63,26 @@ public static class Pathfinder
     /// <returns>List of edge indices forming the path, or <c>null</c> if no path exists.</returns>
     public static List<int>? FindPath(RoadGraph graph, int startNode, int endNode, int incomingEdge = -1)
     {
-        if (startNode == endNode) return new List<int>();
-        if (float.IsNaN(graph.Nodes[startNode].Position.X)) return null;
-        if (float.IsNaN(graph.Nodes[endNode].Position.X)) return null;
+        long t0 = Stopwatch.GetTimestamp();
+
+        if (startNode == endNode)
+        {
+            Interlocked.Add(ref _totalTicks, Stopwatch.GetTimestamp() - t0);
+            Interlocked.Increment(ref _callCount);
+            return new List<int>();
+        }
+        if (float.IsNaN(graph.Nodes[startNode].Position.X))
+        {
+            Interlocked.Add(ref _totalTicks, Stopwatch.GetTimestamp() - t0);
+            Interlocked.Increment(ref _callCount);
+            return null;
+        }
+        if (float.IsNaN(graph.Nodes[endNode].Position.X))
+        {
+            Interlocked.Add(ref _totalTicks, Stopwatch.GetTimestamp() - t0);
+            Interlocked.Increment(ref _callCount);
+            return null;
+        }
 
         var endPos = graph.Nodes[endNode].Position;
 
@@ -81,7 +125,12 @@ public static class Pathfinder
             int toNode = currentEdgeData.ToNode;
 
             if (toNode == endNode)
-                return ReconstructPath(cameFrom, currentEdge);
+            {
+                var result = ReconstructPath(cameFrom, currentEdge);
+                Interlocked.Add(ref _totalTicks, Stopwatch.GetTimestamp() - t0);
+                Interlocked.Increment(ref _callCount);
+                return result;
+            }
 
             if (!closed.Add(currentEdge))
                 continue;
@@ -114,6 +163,8 @@ public static class Pathfinder
             }
         }
 
+        Interlocked.Add(ref _totalTicks, Stopwatch.GetTimestamp() - t0);
+        Interlocked.Increment(ref _callCount);
         return null; // no path found
     }
 
