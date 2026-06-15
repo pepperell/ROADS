@@ -376,6 +376,13 @@ public class MainForm : Form
             e.Handled = true;
         }
 
+        // H = toggle the congestion heat-map overlay
+        if (e.KeyCode == Keys.H)
+        {
+            _sceneRenderer.HeatMapEnabled = !_sceneRenderer.HeatMapEnabled;
+            e.Handled = true;
+        }
+
         // Time scale controls: Space=pause, >=faster, <=slower
         if (e.KeyCode == Keys.Space)
         {

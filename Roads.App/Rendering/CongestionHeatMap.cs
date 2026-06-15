@@ -27,9 +27,9 @@ public class CongestionHeatMap
     /// </summary>
     private const float MetersPerVehicle = 10f;
 
-    /// <summary>Whether the heat-map overlay is drawn. Defaults to true on this branch
-    /// (director flips the default and adds the keyboard toggle at integration).</summary>
-    public bool Enabled { get; set; } = true;
+    /// <summary>Whether the heat-map overlay is drawn. Defaults to false; toggled at
+    /// runtime via the H key (see MainForm.OnCanvasKeyDown).</summary>
+    public bool Enabled { get; set; } = false;
 
     /// <summary>Per-edge vehicle count, indexed by edge index. Length grows to match the
     /// graph edge list; never shrunk to avoid repeated allocations.</summary>
