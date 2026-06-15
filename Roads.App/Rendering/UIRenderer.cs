@@ -132,7 +132,7 @@ public class UIRenderer
 
     /// <summary>
     /// Draws the status bar text, toolbar buttons (highlighting the active tool),
-    /// and a keyboard shortcut legend in the bottom-right corner.
+    /// and a keyboard shortcut legend in the bottom-left corner.
     /// </summary>
     public void Draw(SKCanvas canvas, EditorState editorState, string statusText,
         bool paused = false, int timeScaleExponent = 0,
@@ -234,7 +234,7 @@ public class UIRenderer
         if (editorState.ActiveTool == EditorTool.Destination)
             DrawPOISubmenu(canvas, editorState);
 
-        // Keyboard shortcut legend (bottom-right)
+        // Keyboard shortcut legend (bottom-left)
         if (canvasWidth > 0 && canvasHeight > 0)
         {
             using var legendFont = new SKFont { Size = 12 };
@@ -242,7 +242,7 @@ public class UIRenderer
             float padding = 8f;
             float legendWidth = 190f;
             float legendHeight = ShortcutLines.Length * lineHeight + padding * 2;
-            float lx = canvasWidth - legendWidth - 10f;
+            float lx = 10f;
             float ly = canvasHeight - legendHeight - 10f;
 
             using var legendBg = new SKPaint

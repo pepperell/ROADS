@@ -41,6 +41,7 @@ public class MainForm : Form
     private readonly YieldSignSystem _yieldSigns = new();
     private readonly IntersectionArcCache _intersectionArcs = new();
     private readonly VehicleInfoPanel _vehicleInfoPanel = new();
+    private readonly MinimapRenderer _minimap = new();
     private readonly PerformanceHud _perfHud = new();
     private readonly Stopwatch _perfStopwatch = new();
     private readonly POIRegistry _poiRegistry = new();
@@ -53,6 +54,8 @@ public class MainForm : Form
     private Point _lastMousePos;
     private Point _currentMousePos;
     private bool _isPanning;
+    /// <summary>Whether a left-button drag is currently scrubbing the camera via the minimap.</summary>
+    private bool _draggingMinimap;
 
     /// <summary>Screen position where a drag-candidate click occurred.</summary>
     private Point _dragStartScreenPos;
@@ -75,7 +78,7 @@ public class MainForm : Form
         _populationManager = new PopulationManager(_roadGraph, _vehicles, _vehicleGrid, _poiRegistry, SimulationLoop.MaxVehicles);
         _graphChangeHandler = new GraphChangeHandler(_roadGraph, _editorState, _vehicles, _edgeSpatialGrid, _spawner);
         _simLoop = new SimulationLoop(_roadGraph, _vehicles, _vehicleGrid, _stopLineCache, _intersectionArcs, _edgeSpatialGrid, _trafficSignals, _stopSigns, _yieldSigns, _spawner, _populationManager, _editorState, _graphChangeHandler);
-        _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _spawnPointRenderer, _uiRenderer, _sliderPanel, _vehicleInfoPanel, _laneRestrictionTool);
+        _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _spawnPointRenderer, _uiRenderer, _sliderPanel, _vehicleInfoPanel, _laneRestrictionTool, _minimap);
 
         // Centralized vehicle-removal fixup: editor-held vehicle indices follow
         // swap-and-pop moves and drop on bulk clears (see VehicleStore.VehicleRemoving).
@@ -324,6 +327,12 @@ public class MainForm : Form
             e.Handled = true;
         }
 
+        if (e.KeyCode == Keys.M)
+        {
+            _minimap.Visible = !_minimap.Visible;
+            e.Handled = true;
+        }
+
         // Time scale controls: Space=pause, >=faster, <=slower
         if (e.KeyCode == Keys.Space)
         {
@@ -564,6 +573,19 @@ public class MainForm : Form
             // Check slider panel first
             if (_sliderPanel.OnMouseDown(e.X, e.Y))
                 return;
+
+            // Minimap click-to-jump: center the camera on the clicked world point and begin a
+            // drag-scrub. Checked before tools so a click on the panel never selects or places
+            // anything behind it; jumps only when the map has roads (otherwise the box is blank).
+            if (_minimap.HitTest(e.X, e.Y))
+            {
+                if (_minimap.TryScreenToWorld(e.X, e.Y, out var minimapWorld))
+                {
+                    _camera.CenterOnWorld(minimapWorld.X, minimapWorld.Y);
+                    _draggingMinimap = true;
+                }
+                return;
+            }
 
             // Check POI submenu (only visible when Destination tool active)
             if (_editorState.ActiveTool == EditorTool.Destination)
@@ -825,6 +847,7 @@ public class MainForm : Form
         else if (e.Button == MouseButtons.Left)
         {
             _sliderPanel.OnMouseUp();
+            _draggingMinimap = false;
             if (_editorState.IsDraggingNode)
             {
                 // Split edges at any crossings created by the drag
@@ -863,6 +886,13 @@ public class MainForm : Form
 
         if (_sliderPanel.OnMouseMove(e.X, e.Y))
             return;
+
+        // Drag across the minimap to scrub the camera continuously.
+        if (_draggingMinimap && _minimap.TryScreenToWorld(e.X, e.Y, out var minimapWorld))
+        {
+            _camera.CenterOnWorld(minimapWorld.X, minimapWorld.Y);
+            return;
+        }
 
         if (_isPanning)
         {

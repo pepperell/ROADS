@@ -666,7 +666,7 @@ Section 6: Settings (time scale, maximum population, etc.)
 - [ ] JSON export
 - [ ] Auto-save with rotating backups
 - [ ] Undo/Redo system (command pattern)
-- [ ] Minimap
+- [X] Minimap
 - [ ] Statistics panel (vehicle count, avg speed, congestion)
 - [ ] Congestion heat-map overlay
 - [ ] Zone painting tool (residential/commercial/industrial)

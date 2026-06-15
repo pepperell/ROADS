@@ -50,6 +50,29 @@ public class Camera
         Zoom = newZoom;
     }
 
+    /// <summary>
+    /// Returns the axis-aligned world-space rectangle currently visible in a viewport of the
+    /// given pixel size. Inverse of the pan/zoom in <see cref="GetTransformMatrix"/>.
+    /// </summary>
+    public SKRect GetVisibleWorldRect(int viewWidth, int viewHeight)
+    {
+        float halfW = viewWidth / (2f * Zoom);
+        float halfH = viewHeight / (2f * Zoom);
+        float cx = -CenterX / Zoom;
+        float cy = -CenterY / Zoom;
+        return new SKRect(cx - halfW, cy - halfH, cx + halfW, cy + halfH);
+    }
+
+    /// <summary>
+    /// Re-centers the camera so the given world position maps to the center of the viewport,
+    /// keeping the current zoom. Inverse of the translation in <see cref="GetTransformMatrix"/>.
+    /// </summary>
+    public void CenterOnWorld(float worldX, float worldY)
+    {
+        CenterX = -Zoom * worldX;
+        CenterY = -Zoom * worldY;
+    }
+
     /// <summary>Returns the world-to-screen transformation matrix for SkiaSharp rendering.</summary>
     public SKMatrix GetTransformMatrix(int viewWidth, int viewHeight)
     {

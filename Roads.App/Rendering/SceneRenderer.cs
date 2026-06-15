@@ -21,11 +21,12 @@ public class SceneRenderer
     private readonly SliderPanel _sliderPanel;
     private readonly VehicleInfoPanel _vehicleInfoPanel;
     private readonly LaneRestrictionTool _laneRestrictionTool;
+    private readonly MinimapRenderer _minimap;
 
     public SceneRenderer(RoadRenderer roadRenderer, VehicleRenderer vehicleRenderer,
         MarkerRenderer spawnPointRenderer,
         UIRenderer uiRenderer, SliderPanel sliderPanel, VehicleInfoPanel vehicleInfoPanel,
-        LaneRestrictionTool laneRestrictionTool)
+        LaneRestrictionTool laneRestrictionTool, MinimapRenderer minimap)
     {
         _roadRenderer = roadRenderer;
         _vehicleRenderer = vehicleRenderer;
@@ -34,6 +35,7 @@ public class SceneRenderer
         _sliderPanel = sliderPanel;
         _vehicleInfoPanel = vehicleInfoPanel;
         _laneRestrictionTool = laneRestrictionTool;
+        _minimap = minimap;
     }
 
     /// <summary>
@@ -104,6 +106,9 @@ public class SceneRenderer
         _sliderPanel.Draw(canvas, info.Width);
         if (editorState.SelectedVehicle >= 0)
             _vehicleInfoPanel.Draw(canvas, vehicles, editorState.SelectedVehicle, graph, info.Height, intersectionArcs);
+
+        // Minimap drawn last so it sits on top of the other overlays.
+        _minimap.Draw(canvas, camera, graph, info.Width, info.Height);
     }
 
     private static void DrawGrid(SKCanvas canvas, Camera camera, SKImageInfo info, SKColor gridColor)
@@ -116,10 +121,11 @@ public class SceneRenderer
         };
 
         float gridSize = 100f;
-        float worldLeft = -camera.CenterX / camera.Zoom - info.Width / (2f * camera.Zoom);
-        float worldRight = -camera.CenterX / camera.Zoom + info.Width / (2f * camera.Zoom);
-        float worldTop = -camera.CenterY / camera.Zoom - info.Height / (2f * camera.Zoom);
-        float worldBottom = -camera.CenterY / camera.Zoom + info.Height / (2f * camera.Zoom);
+        var view = camera.GetVisibleWorldRect(info.Width, info.Height);
+        float worldLeft = view.Left;
+        float worldRight = view.Right;
+        float worldTop = view.Top;
+        float worldBottom = view.Bottom;
 
         float startX = MathF.Floor(worldLeft / gridSize) * gridSize;
         float startY = MathF.Floor(worldTop / gridSize) * gridSize;

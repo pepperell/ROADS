@@ -14,8 +14,18 @@ public class StopLineCache
 {
     /// <summary>Assumed lane width in meters for stop line offset calculations.</summary>
     private const float LaneWidth = SimConstants.LaneWidth;
-    /// <summary>Minimum angle (~15 degrees) between roads to count as a crossing; near-parallel/anti-parallel roads are skipped.</summary>
+    /// <summary>
+    /// Lower edge (~15 degrees) of the crossing taper. Below this a leg is a through-continuation
+    /// and contributes no setback; above it the contribution ramps in (see <see cref="ContinuationBand"/>).
+    /// </summary>
     private const float MinAngle = 0.262f;
+    /// <summary>
+    /// Width (~15 degrees) of the smooth ramp above <see cref="MinAngle"/> over which a crossing's
+    /// setback contribution fades from zero to full. Without this ramp the contribution would switch
+    /// on abruptly at <see cref="MinAngle"/> (the clamped denominator makes it jump straight to ~13m),
+    /// so the intersection would visibly snap in size as a leg is dragged through the transition.
+    /// </summary>
+    private const float ContinuationBand = 0.262f;
     /// <summary>
     /// Minimum effective sin(angle) for crossing distance calculation.
     /// Caps crossing distance at halfWidth / MinSinAngle (~2× halfWidth at 30°),
@@ -151,24 +161,34 @@ public class StopLineCache
         var edge = graph.Edges[edgeIndex];
         int nodeIndex = atToNode ? edge.ToNode : edge.FromNode;
 
-        var tangent = atToNode
-            ? graph.EvaluateBezierTangent(edgeIndex, 1f)
-            : graph.EvaluateBezierTangent(edgeIndex, 0f);
-        float tangentLen = tangent.Length();
-        if (tangentLen < 0.001f) { stopT = defaultT; leftTrimT = defaultT; rightTrimT = defaultT; return; }
-        var dir = tangent / tangentLen;
+        // Approach direction = node-to-node chord (travel direction), NOT the bezier tangent
+        // at the endpoint. The endpoint tangent depends on control-point placement, so a
+        // curved or dragged road can meet the node at a steep local angle even when the roads
+        // look perpendicular — which made the computed crossing angle (and the intersection
+        // clearance) balloon and shift erratically with small edits. The chord reflects the
+        // visible road direction and is stable.
+        var fromPos = graph.Nodes[edge.FromNode].Position;
+        var toPos = graph.Nodes[edge.ToNode].Position;
+        var chord = toPos - fromPos;
+        float chordLen = chord.Length();
+        if (chordLen < 0.001f) { stopT = defaultT; leftTrimT = defaultT; rightTrimT = defaultT; return; }
+        var dir = chord / chordLen;
+
+        // Local endpoint tangent at this node (zero if degenerate). Used only to recognize a
+        // smooth through-road as a continuation (not a crossing) — see AccumulateCrossingDistances.
+        var selfTangent = EndpointTangentDir(graph, edgeIndex, atToNode);
 
         float halfWidthSelf = edge.LaneCount * LaneWidth;
         float maxLeftDist = 0f;
         float maxRightDist = 0f;
 
         foreach (int otherEdge in graph.GetOutgoingEdges(nodeIndex))
-            AccumulateCrossingDistances(graph, edgeIndex, otherEdge, nodeIndex, dir, halfWidthSelf,
-                isOutgoing: true, ref maxLeftDist, ref maxRightDist);
+            AccumulateCrossingDistances(graph, nodeIndex, edgeIndex, otherEdge, dir, selfTangent, halfWidthSelf,
+                ref maxLeftDist, ref maxRightDist);
 
         foreach (int otherEdge in graph.GetIncomingEdges(nodeIndex))
-            AccumulateCrossingDistances(graph, edgeIndex, otherEdge, nodeIndex, dir, halfWidthSelf,
-                isOutgoing: false, ref maxLeftDist, ref maxRightDist);
+            AccumulateCrossingDistances(graph, nodeIndex, edgeIndex, otherEdge, dir, selfTangent, halfWidthSelf,
+                ref maxLeftDist, ref maxRightDist);
 
         // Clamp
         float maxAllowed = edge.Length * MaxDistanceFraction;
@@ -193,9 +213,18 @@ public class StopLineCache
     /// into the left/right maximums. Uses the crossing road's position (left or right of the
     /// current road via cross product) to assign asymmetric distances:
     /// near-side = (hSelf·cosθ + hOther) / sinθ, far-side = (hOther − hSelf·cosθ) / sinθ.
+    ///
+    /// A leg is skipped as a through-continuation (not a crossing) when it is near-collinear
+    /// by EITHER the node-to-node chord OR the local endpoint tangent. Both tests are needed
+    /// because dragging a node rigidly shifts the near control point (see RoadGraph.MoveNode):
+    /// a smooth through-road can then kink in chord space (so the chord alone would mistake it
+    /// for a crossing and balloon the intersection), while a dragged road can meet the node at
+    /// a stale tangent angle (so the tangent alone is unreliable). The crossing-angle MAGNITUDE
+    /// still uses the chord, which reflects the visible road direction. <paramref name="selfTangent"/>
+    /// is this edge's normalized endpoint tangent at the node (Zero if degenerate).
     /// </summary>
-    private void AccumulateCrossingDistances(RoadGraph graph, int edgeIndex, int otherEdge,
-        int nodeIndex, Vector2 dir, float halfWidthSelf, bool isOutgoing,
+    private void AccumulateCrossingDistances(RoadGraph graph, int nodeIndex, int edgeIndex, int otherEdge,
+        Vector2 dir, Vector2 selfTangent, float halfWidthSelf,
         ref float maxLeftDist, ref float maxRightDist)
     {
         if (otherEdge == edgeIndex) return;
@@ -206,19 +235,36 @@ public class StopLineCache
         // Skip reverse edge (same road, opposite direction)
         if (other.FromNode == edge.ToNode && other.ToNode == edge.FromNode) return;
 
-        // Get other edge's tangent at this node
-        Vector2 otherTangent = isOutgoing
-            ? graph.EvaluateBezierTangent(otherEdge, 0f)
-            : graph.EvaluateBezierTangent(otherEdge, 1f);
-
-        float otherLen = otherTangent.Length();
+        // Crossing road's direction = its node-to-node chord. It auto-orients to the travel
+        // direction (points away from the node for an outgoing edge, toward it for an incoming
+        // one), matching what the endpoint tangent used to give but without that tangent's
+        // control-point sensitivity (see ComputeAllStopTs).
+        var oFrom = graph.Nodes[other.FromNode].Position;
+        var oTo = graph.Nodes[other.ToNode].Position;
+        var otherChord = oTo - oFrom;
+        float otherLen = otherChord.Length();
         if (otherLen < 0.001f) return;
-        var otherDir = otherTangent / otherLen;
+        var otherDir = otherChord / otherLen;
 
-        // Compute acute angle between the two road directions
+        // Acute angle between the two chord directions — drives the setback magnitude.
         float absDot = MathF.Min(MathF.Abs(dir.X * otherDir.X + dir.Y * otherDir.Y), 1f);
         float angle = MathF.Acos(absDot);
-        if (angle < MinAngle) return;
+
+        // Continuation test: skip if near-collinear by chord OR by local endpoint tangent.
+        // Fall back to the chord angle alone when either tangent is degenerate.
+        float skipAngle = angle;
+        var otherTangent = EndpointTangentDir(graph, otherEdge, atToNode: other.ToNode == nodeIndex);
+        if (selfTangent != Vector2.Zero && otherTangent != Vector2.Zero)
+        {
+            float tanDot = MathF.Min(MathF.Abs(selfTangent.X * otherTangent.X + selfTangent.Y * otherTangent.Y), 1f);
+            skipAngle = MathF.Min(angle, MathF.Acos(tanDot));
+        }
+
+        // Smoothly fade the crossing in across [MinAngle, MinAngle + ContinuationBand] instead of
+        // switching it on abruptly, so the intersection size changes continuously (no snap) as a
+        // leg is dragged through the continuation→crossing transition. weight is 0 below MinAngle.
+        float weight = ContinuationWeight(skipAngle);
+        if (weight <= 0f) return;
 
         float sinAngle = MathF.Max(MathF.Sin(angle), MinSinAngle);
         float cosAngle = absDot; // cos of the acute angle
@@ -226,9 +272,9 @@ public class StopLineCache
         float halfWidthOther = other.LaneCount * LaneWidth;
 
         // Near-side: boundary facing the crossing road needs full geometric setback
-        float dNear = (halfWidthSelf * cosAngle + halfWidthOther) / sinAngle;
+        float dNear = weight * (halfWidthSelf * cosAngle + halfWidthOther) / sinAngle;
         // Far-side: boundary away from the crossing road needs less setback
-        float dFar = MathF.Max(0f, (halfWidthOther - halfWidthSelf * cosAngle) / sinAngle);
+        float dFar = weight * MathF.Max(0f, (halfWidthOther - halfWidthSelf * cosAngle) / sinAngle);
 
         // Determine which side the crossing road is on using 2D cross product.
         // In Y-down: cross > 0 means otherDir is to the RIGHT of dir.
@@ -246,6 +292,35 @@ public class StopLineCache
             if (dNear > maxLeftDist) maxLeftDist = dNear;
             if (dFar > maxRightDist) maxRightDist = dFar;
         }
+    }
+
+    /// <summary>
+    /// Smoothstep ramp for a crossing's setback contribution: 0 at or below <see cref="MinAngle"/>,
+    /// 1 at or above <see cref="MinAngle"/> + <see cref="ContinuationBand"/>, with a C1-continuous
+    /// transition between (zero slope at both ends) so the intersection size has no kink or jump
+    /// as the crossing angle changes.
+    /// </summary>
+    private static float ContinuationWeight(float angle)
+    {
+        float x = (angle - MinAngle) / ContinuationBand;
+        if (x <= 0f) return 0f;
+        if (x >= 1f) return 1f;
+        return x * x * (3f - 2f * x);
+    }
+
+    /// <summary>
+    /// Returns the normalized Bezier tangent at one endpoint of an edge, oriented to point
+    /// along the curve away from that endpoint, or <see cref="Vector2.Zero"/> if the tangent
+    /// is degenerate (control point coincident with the node). Used to detect smooth
+    /// through-continuations independently of the node-to-node chord.
+    /// </summary>
+    private static Vector2 EndpointTangentDir(RoadGraph graph, int edgeIndex, bool atToNode)
+    {
+        var tangent = graph.EvaluateBezierTangent(edgeIndex, atToNode ? 1f : 0f);
+        // At the ToNode the tangent points into the node; flip so it points away (out of the node).
+        if (atToNode) tangent = -tangent;
+        float len = tangent.Length();
+        return len < 0.001f ? Vector2.Zero : tangent / len;
     }
 
     /// <summary>
