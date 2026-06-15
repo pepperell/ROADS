@@ -542,6 +542,14 @@ Section 6: Settings (time scale, maximum population, etc.)
 
 ## 13. Development Phases
 
+### Development Workflow
+
+Phases are built by an Opus "director" that hands self-contained milestones to lower-cost worker agents:
+
+- **Independent features** run as parallel batches. The director partitions open items so no two workers modify the same existing file (newly-added files are always safe), spawns one worker per milestone on a `ms/<slug>` branch in its own git worktree, reviews each diff, then merges after the user verifies — one branch at a time, since the app is tested interactively.
+- **File-scope is enforced at the merge gate, not by trust.** Before merging, the director runs `git diff --name-only main..<branch>` and reverts anything outside the milestone's declared file set. Worktree isolation guarantees a stray edit can never reach another worker or `main` un-reviewed.
+- **Architectural, cross-cutting work** (e.g. contraction hierarchies, double-buffered simulation, undo/redo) stays sequential and director-led — it is not handed to workers.
+
 ### Phase 1: Foundation (Core Infrastructure)
 
 **Goal:** Window with a pannable/zoomable canvas, basic road drawing, and a single vehicle driving along a road.
