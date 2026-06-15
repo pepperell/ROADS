@@ -30,6 +30,11 @@ public class SceneRenderer
     /// </summary>
     private readonly CongestionHeatMap _heatMap = new();
 
+    /// <summary>TEMP diagnostic: per-frame draw sub-phase wall time (ms) from the last Render.</summary>
+    public static double DrawRoadsMs;
+    /// <summary>TEMP diagnostic: per-frame vehicle draw wall time (ms) from the last Render.</summary>
+    public static double DrawVehiclesMs;
+
     /// <summary>
     /// Enables or disables the congestion heat-map overlay. Forwards to
     /// <see cref="CongestionHeatMap.Enabled"/> so the director can wire a keyboard
@@ -87,17 +92,18 @@ public class SceneRenderer
         // frustum culling so they can skip off-screen geometry cheaply.
         var viewRect = camera.GetVisibleWorldRect(info.Width, info.Height);
 
-        // Update congestion heat-map before the road draw pass so values are current.
-        // Update is cheap even when Enabled is false: it still zeroes counts and normalises,
-        // but the renderer skips blending when the overlay is disabled.
+        // Update congestion heat-map before the road draw pass so values are current
+        // (cheap no-op when the overlay is disabled).
         _heatMap.Update(vehicles, graph);
 
+        long _tRoads = System.Diagnostics.Stopwatch.GetTimestamp(); // TEMP draw profiling
         // Draw roads (heat-map forwarded so the renderer can tint surfaces)
         _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness, _heatMap, viewRect);
         _roadRenderer.DrawSignals(canvas, graph, trafficSignals, stopLineCache, camera.Zoom);
         _roadRenderer.DrawStopSigns(canvas, graph, stopSigns, stopLineCache, camera.Zoom);
         _roadRenderer.DrawYieldSigns(canvas, graph, yieldSigns, stopLineCache, camera.Zoom);
         _roadRenderer.DrawSpeedLimitSigns(canvas, graph, camera.Zoom);
+        DrawRoadsMs = (System.Diagnostics.Stopwatch.GetTimestamp() - _tRoads) * 1000.0 / System.Diagnostics.Stopwatch.Frequency; // TEMP
 
         // Draw hover and selection highlights
         DrawEdgeHoverHighlight(canvas, graph, editorState);
@@ -112,6 +118,7 @@ public class SceneRenderer
         // Draw drag crossing previews
         DrawCrossingPreviews(canvas, editorState, camera);
 
+        long _tVeh = System.Diagnostics.Stopwatch.GetTimestamp(); // TEMP draw profiling
         // Draw vehicles
         _vehicleRenderer.Draw(canvas, vehicles, camera.Zoom, darkness, viewRect);
         _vehicleRenderer.DrawArcConflictOverlay(canvas, vehicles, intersectionArcs);
@@ -119,6 +126,7 @@ public class SceneRenderer
             _vehicleRenderer.DrawHoverOverlay(canvas, vehicles, editorState.HoveredVehicle);
         if (editorState.SelectedVehicle >= 0)
             _vehicleRenderer.DrawSelectionOverlay(canvas, vehicles, editorState.SelectedVehicle, graph, stopLineCache, intersectionArcs);
+        DrawVehiclesMs = (System.Diagnostics.Stopwatch.GetTimestamp() - _tVeh) * 1000.0 / System.Diagnostics.Stopwatch.Frequency; // TEMP
 
         // Draw spawn and destination node markers
         _spawnPointRenderer.DrawForFlag(canvas, graph, NodeFlags.Spawn, camera.Zoom);

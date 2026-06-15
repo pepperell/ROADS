@@ -64,6 +64,11 @@ public class CongestionHeatMap
     /// <param name="graph">Road graph providing edge lengths and lane counts.</param>
     public void Update(VehicleStore vehicles, RoadGraph graph)
     {
+        // Nothing consumes the per-edge counts unless the overlay is drawn, so skip the full
+        // edge+vehicle tally when disabled (it ran every frame regardless before). On re-enable,
+        // the next frame's Update repopulates before the renderer reads it.
+        if (!Enabled) return;
+
         int edgeCount = graph.Edges.Count;
 
         // Grow buffers if the graph has grown (never shrink to avoid churn)

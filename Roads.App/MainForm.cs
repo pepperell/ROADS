@@ -157,7 +157,7 @@ public class MainForm : Form
     private void AutoBenchStep()
     {
         if (_autoBenchFrameCount == 0)
-            GenerateStressScene();
+            GenerateStressScene(5f); // benchmark at the 5x target view (culling active), not the overview
 
         _autoBenchFrameCount++;
 
@@ -1179,7 +1179,7 @@ public class MainForm : Form
     /// for Phase 5 stress-testing. No confirmation dialog — the intent is immediate load testing.
     /// Camera is centered on the grid center and zoomed out to fit the full ~5 km extent.
     /// </summary>
-    private void GenerateStressScene()
+    private void GenerateStressScene(float camZoom = 0.2f)
     {
         const int gridCols = 50, gridRows = 50;
         const float spacing = 100f;
@@ -1200,7 +1200,7 @@ public class MainForm : Form
 
         // Center on the grid middle, zoomed out to fit the ~5 km grid. CenterX/CenterY are
         // screen-pixel pan offsets (not world coords), so set Zoom first then use CenterOnWorld.
-        _camera.Zoom = 0.2f;
+        _camera.Zoom = camZoom;
         _camera.CenterOnWorld((gridCols - 1) * spacing / 2f, (gridRows - 1) * spacing / 2f);
 
         _simLoop.Clock.TimeOfDay = 12.0;
@@ -1242,6 +1242,7 @@ public class MainForm : Form
             _perfHud.AvgFps, _perfHud.AvgSimMs, _perfHud.AvgDrawMs,
             _perfHud.LastPathfindMs, _perfHud.LastPathfindCalls,
             _vehicles.Count, Roads.App.Vehicles.SteeringController.LastConflictCoOccupancy, offroad,
+            Roads.App.Rendering.SceneRenderer.DrawRoadsMs, Roads.App.Rendering.SceneRenderer.DrawVehiclesMs,
             _simLoop.LastTiming, Roads.App.Vehicles.SteeringController.LastProfile);
         System.Diagnostics.Debug.WriteLine($"[Baseline] captured: fps={_perfHud.AvgFps:F1}, vehicles={_vehicles.Count}");
     }

@@ -33,6 +33,7 @@ public static class BenchmarkCapture
     public static void Capture(double fps, double simMs, double drawMs,
                                double pathfindMs, int pathfindCalls, int vehicleCount,
                                int arcConflicts, int offroad,
+                               double drawRoadsMs, double drawVehiclesMs,
                                Roads.App.SimulationLoop.SimTimingBreakdown timing,
                                Roads.App.Vehicles.SteeringController.SteeringProfile steering)
     {
@@ -53,7 +54,8 @@ public static class BenchmarkCapture
                           $"reroute={timing.RerouteMs:F2}ms, population={timing.PopulationMs:F2}ms, " +
                           $"[steering] arc={steering.ArcMs:F2}ms, project={steering.ProjectMs:F2}ms, " +
                           $"signals={steering.SignalsMs:F2}ms, transition={steering.TransitionMs:F2}ms, " +
-                          $"steer={steering.SteerMs:F2}ms, speed={steering.SpeedMs:F2}ms";
+                          $"steer={steering.SteerMs:F2}ms, speed={steering.SpeedMs:F2}ms, " +
+                          $"[draw] roads={drawRoadsMs:F2}ms, vehicles={drawVehiclesMs:F2}ms";
 
             File.AppendAllText(LogFile, line + Environment.NewLine);
         }
