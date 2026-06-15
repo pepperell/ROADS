@@ -7,7 +7,7 @@ namespace Roads.App.Rendering;
 /// Static visual style lookup for each <see cref="RoadType"/>. Provides the asphalt surface
 /// color and a width multiplier applied to the lane-derived road width, so road types are
 /// visually distinct without altering lane geometry or Bézier paths.
-/// Dirt roads also use a dashed center line to suggest an unpaved surface.
+/// Unpaved types (dirt) carry no painted lane markings.
 /// </summary>
 public static class RoadTypeVisuals
 {
@@ -54,11 +54,11 @@ public static class RoadTypeVisuals
     }
 
     /// <summary>
-    /// Returns true when the road type should use a dashed center-line pattern to suggest
-    /// a non-standard surface (currently only <see cref="RoadType.Dirt"/>).
-    /// Callers should replace the solid center-line with a longer dash interval.
+    /// Returns true when the road type carries painted lane markings (edge lines, center
+    /// line, lane dividers). Unpaved types — currently <see cref="RoadType.Dirt"/> — have
+    /// no paint, so callers should skip all marking rendering for them.
     /// </summary>
-    public static bool UsesDashedCenterLine(RoadType type) => type == RoadType.Dirt;
+    public static bool HasPaintedLines(RoadType type) => type != RoadType.Dirt;
 
     private static byte Dim(int baseValue, float ambient) =>
         (byte)Math.Clamp((int)(baseValue * ambient), 0, 255);

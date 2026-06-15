@@ -48,10 +48,9 @@ public class RoadRenderer
         IsAntialias = true
     };
 
-    // Dash effects are immutable and shared across all edges/frames — created once to
-    // honor the per-frame no-allocation discipline of the paints above.
+    // Center-line dash effect — immutable and shared across all edges/frames (created once
+    // to honor the per-frame no-allocation discipline of the paints above).
     private readonly SKPathEffect _centerLineDash = SKPathEffect.CreateDash(new[] { 2f, 2f }, 0);
-    private readonly SKPathEffect _dirtCenterLineDash = SKPathEffect.CreateDash(new[] { 3f, 5f }, 0);
 
     // Reusable paints for DrawRoadLines (StrokeWidth updated per frame based on zoom)
     private readonly SKPaint _edgeLinePaint = new()
@@ -278,24 +277,25 @@ public class RoadRenderer
 
     /// <summary>
     /// Draws boundary lines, center line, and lane dividers for a single road edge.
-    /// All marking paths are trimmed at intersection boundaries. Dirt roads use a
-    /// longer dash interval on the center line to suggest an unpaved surface.
+    /// All marking paths are trimmed at intersection boundaries. Unpaved road types
+    /// (those where <see cref="RoadTypeVisuals.HasPaintedLines"/> is false, i.e. dirt)
+    /// carry no paint and are skipped entirely.
     /// </summary>
     private void DrawRoadLines(SKCanvas canvas, RoadEdge edge, int edgeIndex, float zoom)
     {
         var cached = _cache[edgeIndex];
+
+        // Unpaved roads (dirt) have no painted edge lines, center line, or lane dividers.
+        if (!RoadTypeVisuals.HasPaintedLines(edge.RoadType)) return;
 
         // Edge boundary lines (white) — update zoom-dependent stroke width
         _edgeLinePaint.StrokeWidth = Math.Max(0.3f, 0.5f / zoom);
         canvas.DrawPath(cached.LeftEdgePath, _edgeLinePaint);
         canvas.DrawPath(cached.RightEdgePath, _edgeLinePaint);
 
-        // Center line — standard yellow dashed, or wider gaps for dirt roads.
-        // Effects are pre-created and shared, so there is no per-frame allocation.
+        // Center line (yellow dashed) — shared effect, no per-frame allocation.
         _centerLinePaint.StrokeWidth = Math.Max(0.3f, 0.4f / zoom);
-        _centerLinePaint.PathEffect = RoadTypeVisuals.UsesDashedCenterLine(edge.RoadType)
-            ? _dirtCenterLineDash
-            : _centerLineDash;
+        _centerLinePaint.PathEffect = _centerLineDash;
         canvas.DrawPath(cached.CenterLinePath, _centerLinePaint);
 
         // Lane dividers (white dashed, multi-lane only)
