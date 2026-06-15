@@ -529,6 +529,7 @@ public class RoadRenderer
     /// </summary>
     public void DrawSignals(SKCanvas canvas, RoadGraph graph, TrafficSignalSystem signals, StopLineCache stopLines, float zoom)
     {
+        if (zoom < 0.3f) return; // too far out to read — skip (declutter + draw cost at scale); matches speed-limit signs
         float radius = Math.Max(1.5f, 2.5f / zoom);
 
         using var greenPaint = new SKPaint { Color = new SKColor(0, 200, 0), Style = SKPaintStyle.Fill, IsAntialias = true };
@@ -558,6 +559,7 @@ public class RoadRenderer
     /// </summary>
     public void DrawStopSigns(SKCanvas canvas, RoadGraph graph, StopSignSystem stopSigns, StopLineCache stopLines, float zoom)
     {
+        if (zoom < 0.3f) return; // too far out to read — skip (declutter + draw cost at scale); matches speed-limit signs
         float size = Math.Max(1.5f, 2.5f / zoom);
 
         using var stopPaint = new SKPaint { Color = new SKColor(200, 30, 30), Style = SKPaintStyle.Fill, IsAntialias = true };
@@ -575,6 +577,7 @@ public class RoadRenderer
     /// </summary>
     public void DrawYieldSigns(SKCanvas canvas, RoadGraph graph, YieldSignSystem yieldSigns, StopLineCache stopLines, float zoom)
     {
+        if (zoom < 0.3f) return; // too far out to read — skip (declutter + draw cost at scale); matches speed-limit signs
         float size = Math.Max(1.5f, 2.5f / zoom);
 
         using var yieldPaint = new SKPaint { Color = new SKColor(230, 160, 0), Style = SKPaintStyle.Fill, IsAntialias = true };

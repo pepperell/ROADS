@@ -1198,10 +1198,10 @@ public class MainForm : Form
 
         int spawned = _spawner.SpawnBulk(vehicleCount);
 
-        // Center camera on grid middle and zoom out to fit the ~5 km grid.
-        _camera.CenterX = (gridCols - 1) * spacing / 2f;
-        _camera.CenterY = (gridRows - 1) * spacing / 2f;
+        // Center on the grid middle, zoomed out to fit the ~5 km grid. CenterX/CenterY are
+        // screen-pixel pan offsets (not world coords), so set Zoom first then use CenterOnWorld.
         _camera.Zoom = 0.2f;
+        _camera.CenterOnWorld((gridCols - 1) * spacing / 2f, (gridRows - 1) * spacing / 2f);
 
         _simLoop.Clock.TimeOfDay = 12.0;
         _simLoop.Paused = false;
