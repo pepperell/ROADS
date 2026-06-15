@@ -468,6 +468,8 @@ public class MainForm : Form
 
     /// <summary>
     /// Prompts for a file path and saves the current map. Asks whether to include vehicles.
+    /// A <c>.json</c> file name writes a human-readable snapshot via <see cref="Persistence.MapJsonSerializer"/>;
+    /// any other extension uses the binary <see cref="Persistence.MapSerializer"/> format.
     /// </summary>
     private void SaveMap()
     {
@@ -477,7 +479,7 @@ public class MainForm : Form
         using var dlg = new SaveFileDialog
         {
             Title = "Save Map",
-            Filter = "ROADS Map (*.roads)|*.roads",
+            Filter = "ROADS Map (*.roads)|*.roads|JSON (*.json)|*.json",
             DefaultExt = "roads"
         };
         if (dlg.ShowDialog() != DialogResult.OK)
@@ -492,9 +494,20 @@ public class MainForm : Form
 
         try
         {
-            Persistence.MapSerializer.Save(dlg.FileName, _roadGraph, _vehicles,
-                _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
-                _populationManager, includeVehicles);
+            bool asJson = System.IO.Path.GetExtension(dlg.FileName)
+                .Equals(".json", StringComparison.OrdinalIgnoreCase);
+            if (asJson)
+            {
+                Persistence.MapJsonSerializer.Save(dlg.FileName, _roadGraph, _vehicles,
+                    _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
+                    _populationManager, includeVehicles);
+            }
+            else
+            {
+                Persistence.MapSerializer.Save(dlg.FileName, _roadGraph, _vehicles,
+                    _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
+                    _populationManager, includeVehicles);
+            }
         }
         catch (Exception ex)
         {

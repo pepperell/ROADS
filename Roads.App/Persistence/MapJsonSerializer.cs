@@ -79,11 +79,6 @@ public static class MapJsonSerializer
 {
     private const int SchemaVersion = 2;
 
-    private static readonly JsonSerializerOptions IndentedOptions = new()
-    {
-        WriteIndented = true,
-    };
-
     /// <summary>
     /// Writes a human-readable JSON snapshot of the current map state to <paramref name="path"/>.
     /// The parameter set is identical to <see cref="MapSerializer.Save"/> so both serializers
