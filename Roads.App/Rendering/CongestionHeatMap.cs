@@ -90,7 +90,12 @@ public class CongestionHeatMap
                 _counts[e]++;
         }
 
-        // Normalise against capacity
+        // Normalise against capacity. A bidirectional road is rendered as ONE surface —
+        // RoadRenderer draws only the lower-index edge of each forward/reverse pair — so a
+        // road's congestion must aggregate BOTH directed edges. Otherwise return-direction
+        // traffic (e.g. the evening home-bound commute, which rides the reverse edge) is
+        // counted but never displayed. Both edges of a pair receive the same combined value,
+        // so whichever one is drawn reflects the road's total congestion.
         var edges = graph.Edges;
         for (int i = 0; i < edgeCount; i++)
         {
@@ -101,9 +106,19 @@ public class CongestionHeatMap
                 continue;
             }
 
+            int count = _counts[i];
             float capacity = edge.LaneCount * edge.Length / MetersPerVehicle;
+
+            int reverse = graph.FindReverseEdge(i);
+            if ((uint)reverse < (uint)edgeCount && edges[reverse].FromNode >= 0)
+            {
+                var rev = edges[reverse];
+                count += _counts[reverse];
+                capacity += rev.LaneCount * rev.Length / MetersPerVehicle;
+            }
+
             if (capacity < 0.5f) capacity = 0.5f; // guard against zero-length edges
-            _congestion[i] = Math.Min(1f, _counts[i] / capacity);
+            _congestion[i] = Math.Min(1f, count / capacity);
         }
     }
 
