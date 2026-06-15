@@ -678,7 +678,7 @@ Phases are built by an Opus "director" that hands self-contained milestones to l
 - [X] Statistics panel (vehicle count, avg speed, congestion)
 - [X] Congestion heat-map overlay
 - [ ] Zone painting tool (residential/commercial/industrial)
-- [ ] Map templates (Grid City, Highway Ring, Empty)
+- [ ] ~~Map templates (Grid City, Highway Ring, Empty)~~ — **removed** (feature pulled 2026-06-15; not pursuing)
 - [X] Road type visuals (highway thick/gray, residential thin/light)
 - [X] Vehicle type variety (sedan, SUV, truck, bus, motorcycle)
 - [ ] Sound effects (optional: ambient traffic hum scaling with density)
