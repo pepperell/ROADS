@@ -35,6 +35,11 @@ public class EdgeSpatialGrid
     /// <summary>Graph version when the grid was last rebuilt.</summary>
     private int _cachedVersion = -1;
 
+    /// <summary>Per-edge stamp for deduping a visible-edge query (an edge has samples in many cells).</summary>
+    private int[] _seenStamp = Array.Empty<int>();
+    /// <summary>Incremented each <see cref="QueryVisible"/> call so stale stamps read as "not seen".</summary>
+    private int _queryStamp;
+
     /// <summary>
     /// Rebuilds the spatial index if the graph has changed since the last rebuild.
     /// Must be called before any edge queries each frame.
@@ -44,6 +49,41 @@ public class EdgeSpatialGrid
         if (_cachedVersion == graph.Version) return;
         Rebuild(graph);
         _cachedVersion = graph.Version;
+    }
+
+    /// <summary>
+    /// Collects the indices of edges with at least one sample inside the world-space rectangle
+    /// (expanded by one cell of margin), deduplicated into <paramref name="results"/>. Lets the
+    /// renderer draw only on-screen roads instead of iterating the whole edge list. Cost is
+    /// O(cells overlapping the rect + entries in them), i.e. proportional to what's visible.
+    /// </summary>
+    public void QueryVisible(int edgeCount, float minX, float minY, float maxX, float maxY, List<int> results)
+    {
+        results.Clear();
+        if (_seenStamp.Length < edgeCount)
+            _seenStamp = new int[edgeCount];
+        _queryStamp++;
+
+        int cMinX = (int)MathF.Floor((minX - CellSize) / CellSize);
+        int cMaxX = (int)MathF.Floor((maxX + CellSize) / CellSize);
+        int cMinY = (int)MathF.Floor((minY - CellSize) / CellSize);
+        int cMaxY = (int)MathF.Floor((maxY + CellSize) / CellSize);
+
+        for (int cx = cMinX; cx <= cMaxX; cx++)
+        for (int cy = cMinY; cy <= cMaxY; cy++)
+        {
+            if (!_heads.TryGetValue(PackCell(cx, cy), out int idx)) continue;
+            while (idx >= 0)
+            {
+                int e = _edgeIndex[idx];
+                if ((uint)e < (uint)_seenStamp.Length && _seenStamp[e] != _queryStamp)
+                {
+                    _seenStamp[e] = _queryStamp;
+                    results.Add(e);
+                }
+                idx = _next[idx];
+            }
+        }
     }
 
     /// <summary>

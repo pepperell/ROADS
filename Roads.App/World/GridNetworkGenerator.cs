@@ -56,7 +56,12 @@ public static class GridNetworkGenerator
                     Position = new Vector2(c * spacing, r * spacing),
                     EdgeStartIdx = 0,   // filled by RoadGraph.LoadFromData → RebuildAdjacency
                     EdgeCount = 0,      // filled by RoadGraph.LoadFromData → RebuildAdjacency
-                    Flags = NodeFlags.None,
+                    // Every intersection is a valid destination so vehicles always have a reroute
+                    // target on path completion (VehicleSpawner.RerouteFinished removes a vehicle
+                    // when the destination cache is empty) — keeps the stress population constant.
+                    // Signal auto-assignment only toggles its own TrafficLight/StopSign bit, so this
+                    // Destination flag is preserved.
+                    Flags = NodeFlags.Destination,
                     PointOfInterest = POIType.None,
                 });
             }

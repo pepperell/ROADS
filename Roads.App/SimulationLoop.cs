@@ -58,6 +58,9 @@ public class SimulationLoop
     /// <summary>Gets the population manager for resident/schedule info.</summary>
     public PopulationManager Population => _populationManager;
 
+    /// <summary>Edge spatial grid (rebuilt on graph change) — used by the renderer for visible-edge culling.</summary>
+    public EdgeSpatialGrid EdgeGrid => _edgeSpatialGrid;
+
     /// <summary>
     /// Per-tick wall-clock breakdown of the simulation subsystems in milliseconds,
     /// summed across all fixed substeps executed in the most recent active <see cref="Tick"/>.

@@ -35,6 +35,9 @@ public class SceneRenderer
     /// <summary>TEMP diagnostic: per-frame vehicle draw wall time (ms) from the last Render.</summary>
     public static double DrawVehiclesMs;
 
+    /// <summary>Reusable buffer of visible edge indices, refilled each frame from the edge grid.</summary>
+    private readonly List<int> _visibleEdges = new();
+
     /// <summary>
     /// Enables or disables the congestion heat-map overlay. Forwards to
     /// <see cref="CongestionHeatMap.Enabled"/> so the director can wire a keyboard
@@ -96,14 +99,18 @@ public class SceneRenderer
         // (cheap no-op when the overlay is disabled).
         _heatMap.Update(vehicles, graph);
 
+        // Cull roads to the visible viewport via the edge spatial grid, so the surface/marking
+        // passes iterate only on-screen edges instead of the whole network (big win when zoomed in).
+        simLoop.EdgeGrid.QueryVisible(graph.Edges.Count, viewRect.Left, viewRect.Top, viewRect.Right, viewRect.Bottom, _visibleEdges);
+
         long _tRoads = System.Diagnostics.Stopwatch.GetTimestamp(); // TEMP draw profiling
         // Draw roads (heat-map forwarded so the renderer can tint surfaces)
-        _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness, _heatMap, viewRect);
-        _roadRenderer.DrawSignals(canvas, graph, trafficSignals, stopLineCache, camera.Zoom);
-        _roadRenderer.DrawStopSigns(canvas, graph, stopSigns, stopLineCache, camera.Zoom);
-        _roadRenderer.DrawYieldSigns(canvas, graph, yieldSigns, stopLineCache, camera.Zoom);
-        _roadRenderer.DrawSpeedLimitSigns(canvas, graph, camera.Zoom);
-        DrawRoadsMs = (System.Diagnostics.Stopwatch.GetTimestamp() - _tRoads) * 1000.0 / System.Diagnostics.Stopwatch.Frequency; // TEMP
+        _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness, _heatMap, viewRect, _visibleEdges);
+        DrawRoadsMs = (System.Diagnostics.Stopwatch.GetTimestamp() - _tRoads) * 1000.0 / System.Diagnostics.Stopwatch.Frequency; // TEMP (roadRenderer.Draw only)
+        _roadRenderer.DrawSignals(canvas, graph, trafficSignals, stopLineCache, camera.Zoom, viewRect);
+        _roadRenderer.DrawStopSigns(canvas, graph, stopSigns, stopLineCache, camera.Zoom, viewRect);
+        _roadRenderer.DrawYieldSigns(canvas, graph, yieldSigns, stopLineCache, camera.Zoom, viewRect);
+        _roadRenderer.DrawSpeedLimitSigns(canvas, graph, camera.Zoom, viewRect);
 
         // Draw hover and selection highlights
         DrawEdgeHoverHighlight(canvas, graph, editorState);

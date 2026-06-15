@@ -104,9 +104,14 @@ public class RoadRenderer
     /// <param name="viewRect">Visible world-space rectangle for frustum culling.</param>
     public void Draw(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom,
         float darkness = 0f, CongestionHeatMap? heatMap = null,
-        SKRect viewRect = default)
+        SKRect viewRect = default, IReadOnlyList<int>? visibleEdges = null)
     {
         if (graph.Edges.Count == 0) return;
+
+        // When the caller supplies a pre-culled visible-edge list (from the edge spatial grid),
+        // the surface/marking passes iterate only those instead of the whole edge list. The
+        // per-edge IsVisible check below still runs as a precise refinement of the grid's superset.
+        int visCount = visibleEdges?.Count ?? graph.Edges.Count;
 
         bool lodSimple = zoom < RenderDetail.RoadSimpleThreshold;
 
@@ -158,9 +163,10 @@ public class RoadRenderer
         }
 
         // Pass 1: draw all asphalt surfaces first so overlapping roads blend seamlessly
-        for (int i = 0; i < graph.Edges.Count; i++)
+        for (int k = 0; k < visCount; k++)
         {
-            if (i >= _cache.Count) break;
+            int i = visibleEdges != null ? visibleEdges[k] : k;
+            if (i >= _cache.Count) continue;
             var edge = graph.Edges[i];
             if (edge.FromNode < 0) continue;
             int reverse = graph.FindReverseEdge(i);
@@ -183,12 +189,13 @@ public class RoadRenderer
         _heatMap = null;
 
         // Pass 1.5: fill intersection interiors and draw corner curves
-        DrawIntersectionFills(canvas, graph, stopLines, zoom);
+        DrawIntersectionFills(canvas, graph, stopLines, zoom, viewRect);
 
         // Pass 2: draw all lane markings and boundary lines on top
-        for (int i = 0; i < graph.Edges.Count; i++)
+        for (int k = 0; k < visCount; k++)
         {
-            if (i >= _cache.Count) break;
+            int i = visibleEdges != null ? visibleEdges[k] : k;
+            if (i >= _cache.Count) continue;
             var edge = graph.Edges[i];
             if (edge.FromNode < 0) continue;
             int reverse = graph.FindReverseEdge(i);
@@ -206,8 +213,8 @@ public class RoadRenderer
             DrawRoadLines(canvas, edge, i, zoom);
         }
 
-        DrawStopLines(canvas, graph, stopLines, zoom);
-        DrawNodes(canvas, graph, zoom);
+        DrawStopLines(canvas, graph, stopLines, zoom, viewRect);
+        DrawNodes(canvas, graph, zoom, viewRect);
     }
 
     /// <summary>Rebuilds the per-edge path cache if the graph version has changed.</summary>
@@ -419,7 +426,14 @@ public class RoadRenderer
     /// <summary>Mask of node flags that indicate a controlled intersection where stop lines should be drawn.</summary>
     private const NodeFlags ControlledMask = NodeFlags.TrafficLight | NodeFlags.StopSign | NodeFlags.Yield;
 
-    private void DrawStopLines(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom)
+    /// <summary>True if (x,y) is within the cull rect (expanded by <paramref name="margin"/>), or
+    /// culling is off (an empty rect means "draw everything"). Used to skip off-screen node/edge work.</summary>
+    private static bool InView(float x, float y, SKRect cull, float margin)
+        => (cull.Width <= 0f && cull.Height <= 0f)
+           || (x >= cull.Left - margin && x <= cull.Right + margin
+               && y >= cull.Top - margin && y <= cull.Bottom + margin);
+
+    private void DrawStopLines(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom, SKRect cullRect = default)
     {
         using var stopLinePaint = new SKPaint
         {
@@ -434,6 +448,9 @@ public class RoadRenderer
         {
             var edge = graph.Edges[i];
             if (edge.FromNode < 0) continue;
+
+            var toPos = graph.Nodes[edge.ToNode].Position;
+            if (!InView(toPos.X, toPos.Y, cullRect, 40f)) continue;
 
             // Draw stop line at ToNode end only (the approach side of the intersection).
             // Outgoing edges (FromNode end) don't need stop lines.
@@ -469,7 +486,7 @@ public class RoadRenderer
     }
 
     /// <summary>Draws small circles at each active intersection/endpoint node.</summary>
-    private void DrawNodes(SKCanvas canvas, RoadGraph graph, float zoom)
+    private void DrawNodes(SKCanvas canvas, RoadGraph graph, float zoom, SKRect cullRect = default)
     {
         float nodeRadius = Math.Max(2f, 3f / zoom);
 
@@ -477,6 +494,7 @@ public class RoadRenderer
         {
             var node = graph.Nodes[i];
             if (float.IsNaN(node.Position.X)) continue; // skip defunct nodes
+            if (!InView(node.Position.X, node.Position.Y, cullRect, nodeRadius + 10f)) continue;
             canvas.DrawCircle(node.Position.X, node.Position.Y, nodeRadius, _nodePaint);
         }
     }
@@ -491,13 +509,15 @@ public class RoadRenderer
         Func<int, bool> isNodeActive,
         Func<int, bool>? isEdgeIncluded,
         Action<SKCanvas, int, float, float> drawSign,
-        SKCanvas canvas)
+        SKCanvas canvas, SKRect cullRect = default)
     {
         for (int n = 0; n < graph.Nodes.Count; n++)
         {
             if (!isNodeActive(n)) continue;
             var node = graph.Nodes[n];
             if (float.IsNaN(node.Position.X)) continue;
+            // Skip the per-edge Bezier evaluations below for off-screen intersections.
+            if (!InView(node.Position.X, node.Position.Y, cullRect, 40f)) continue;
 
             var incoming = graph.GetIncomingEdges(n);
             foreach (int edgeIdx in incoming)
@@ -527,7 +547,7 @@ public class RoadRenderer
     /// Draws colored circles (green/yellow/red) for traffic light signals at each incoming
     /// edge's stop line, offset to the right of the travel direction.
     /// </summary>
-    public void DrawSignals(SKCanvas canvas, RoadGraph graph, TrafficSignalSystem signals, StopLineCache stopLines, float zoom)
+    public void DrawSignals(SKCanvas canvas, RoadGraph graph, TrafficSignalSystem signals, StopLineCache stopLines, float zoom, SKRect cullRect = default)
     {
         if (zoom < 0.3f) return; // too far out to read — skip (declutter + draw cost at scale); matches speed-limit signs
         float radius = Math.Max(1.5f, 2.5f / zoom);
@@ -550,14 +570,14 @@ public class RoadRenderer
                 };
                 c.DrawCircle(sx, sy, radius, paint);
             },
-            canvas);
+            canvas, cullRect);
     }
 
     /// <summary>
     /// Draws red squares for stop signs at each incoming edge's stop line, offset to the
     /// right of the travel direction.
     /// </summary>
-    public void DrawStopSigns(SKCanvas canvas, RoadGraph graph, StopSignSystem stopSigns, StopLineCache stopLines, float zoom)
+    public void DrawStopSigns(SKCanvas canvas, RoadGraph graph, StopSignSystem stopSigns, StopLineCache stopLines, float zoom, SKRect cullRect = default)
     {
         if (zoom < 0.3f) return; // too far out to read — skip (declutter + draw cost at scale); matches speed-limit signs
         float size = Math.Max(1.5f, 2.5f / zoom);
@@ -568,14 +588,14 @@ public class RoadRenderer
             n => stopSigns.IsStopSign(n),
             edgeIdx => !stopSigns.IsEdgeExempt(edgeIdx),
             (c, _, sx, sy) => c.DrawRect(sx - size, sy - size, size * 2, size * 2, stopPaint),
-            canvas);
+            canvas, cullRect);
     }
 
     /// <summary>
     /// Draws orange inverted triangles for yield signs at each incoming edge's stop line,
     /// offset to the right of the travel direction.
     /// </summary>
-    public void DrawYieldSigns(SKCanvas canvas, RoadGraph graph, YieldSignSystem yieldSigns, StopLineCache stopLines, float zoom)
+    public void DrawYieldSigns(SKCanvas canvas, RoadGraph graph, YieldSignSystem yieldSigns, StopLineCache stopLines, float zoom, SKRect cullRect = default)
     {
         if (zoom < 0.3f) return; // too far out to read — skip (declutter + draw cost at scale); matches speed-limit signs
         float size = Math.Max(1.5f, 2.5f / zoom);
@@ -594,7 +614,7 @@ public class RoadRenderer
                 path.Close();
                 c.DrawPath(path, yieldPaint);
             },
-            canvas);
+            canvas, cullRect);
     }
 
     /// <summary>
@@ -602,7 +622,7 @@ public class RoadRenderer
     /// the travel direction. Shows a white circle with red border and speed in mph.
     /// Only drawn at medium/close zoom to avoid visual clutter.
     /// </summary>
-    public void DrawSpeedLimitSigns(SKCanvas canvas, RoadGraph graph, float zoom)
+    public void DrawSpeedLimitSigns(SKCanvas canvas, RoadGraph graph, float zoom, SKRect cullRect = default)
     {
         if (zoom < 0.3f) return; // too far out — skip to avoid clutter
 
@@ -639,6 +659,9 @@ public class RoadRenderer
             // For paired edges, only draw on the lower-index edge
             int reverse = graph.FindReverseEdge(i);
             if (reverse >= 0 && reverse < i) continue;
+
+            var fromPos = graph.Nodes[edge.FromNode].Position;
+            if (!InView(fromPos.X, fromPos.Y, cullRect, 60f)) continue;
 
             // Position at 20% of the edge length (past intersection, near start)
             float signT = 0.2f;
@@ -692,7 +715,7 @@ public class RoadRenderer
     /// Fills intersection interiors with asphalt and draws curved boundary lines connecting
     /// adjacent roads at each intersection node.
     /// </summary>
-    private void DrawIntersectionFills(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom)
+    private void DrawIntersectionFills(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom, SKRect cullRect = default)
     {
         float curveLineWidth = Math.Max(0.3f, 0.5f / zoom);
 
@@ -700,6 +723,8 @@ public class RoadRenderer
         {
             var node = graph.Nodes[n];
             if (float.IsNaN(node.Position.X)) continue;
+            // Cull before the expensive CollectApproaches (allocates + sorts) for off-screen nodes.
+            if (!InView(node.Position.X, node.Position.Y, cullRect, 60f)) continue;
 
             var approaches = CollectApproaches(graph, stopLines, n);
             if (approaches.Count < 2) continue;
