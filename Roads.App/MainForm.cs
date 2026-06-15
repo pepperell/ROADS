@@ -448,6 +448,20 @@ public class MainForm : Form
             LoadMap();
             e.Handled = true;
         }
+
+        // K: generate stress-test grid scene with bulk vehicle spawn
+        if (e.KeyCode == Keys.K)
+        {
+            GenerateStressScene();
+            e.Handled = true;
+        }
+
+        // B: capture performance baseline snapshot to benchmark.log
+        if (e.KeyCode == Keys.B)
+        {
+            CaptureBaseline();
+            e.Handled = true;
+        }
     }
 
     /// <summary>
@@ -1130,6 +1144,68 @@ public class MainForm : Form
             _roadGraph.SetNodeFlags(bestNode, _roadGraph.Nodes[bestNode].Flags & ~NodeFlags.Destination);
             _roadGraph.SetNodePOIType(bestNode, POIType.None);
         }
+    }
+
+    /// <summary>
+    /// Replaces the current map with a 50×50 grid road network and bulk-spawns 10,000 vehicles
+    /// for Phase 5 stress-testing. No confirmation dialog — the intent is immediate load testing.
+    /// Camera is centered on the grid center and zoomed out to fit the full ~5 km extent.
+    /// </summary>
+    private void GenerateStressScene()
+    {
+        const int gridCols = 50, gridRows = 50;
+        const float spacing = 100f;
+        const int vehicleCount = 10000;
+
+        _vehicles.ClearAll();
+        var (nodes, edges) = Roads.App.World.GridNetworkGenerator.Generate(gridCols, gridRows, spacing);
+        _roadGraph.LoadFromData(nodes, edges);
+
+        // Reset per-map traffic-control overrides exactly as NewMap() does.
+        _stopSigns.SetExemptEdges(new List<int>());
+        _yieldSigns.SetExemptEdges(new List<int>());
+        _trafficSignals.SetPhaseRotations(new List<(int, byte)>());
+
+        _simLoop.RebuildWorldCaches();
+
+        int spawned = _spawner.SpawnBulk(vehicleCount);
+
+        // Center camera on grid middle and zoom out to fit the ~5 km grid.
+        _camera.CenterX = (gridCols - 1) * spacing / 2f;
+        _camera.CenterY = (gridRows - 1) * spacing / 2f;
+        _camera.Zoom = 0.2f;
+
+        _simLoop.Clock.TimeOfDay = 12.0;
+        _simLoop.Paused = false;
+        _simLoop.TimeScaleExponent = 0;
+
+        // Reset editor selection/tool exactly as NewMap() does.
+        _editorState.SelectedEdge = -1;
+        _editorState.SelectedNode = -1;
+        _editorState.SelectedVehicle = -1;
+        _editorState.LaneRestrictionMode = false;
+        _editorState.LaneRestrictionEdge = -1;
+        _editorState.RoadStartNode = null;
+        _editorState.ActiveTool = Editor.EditorTool.Select;
+
+        // Show FPS HUD immediately so the user sees the load metrics.
+        _perfHud.Visible = true;
+
+        System.Diagnostics.Debug.WriteLine($"[StressScene] grid {gridCols}x{gridRows}, spawned {spawned}/{vehicleCount} vehicles");
+    }
+
+    /// <summary>
+    /// Captures a non-intrusive performance baseline snapshot to benchmark.log.
+    /// Reads per-frame stats from <see cref="_perfHud"/> (which already drains the
+    /// pathfind accumulators each frame) so this method does not reset any shared state.
+    /// </summary>
+    private void CaptureBaseline()
+    {
+        Roads.App.Rendering.BenchmarkCapture.Capture(
+            _perfHud.AvgFps, _perfHud.AvgSimMs, _perfHud.AvgDrawMs,
+            _perfHud.LastPathfindMs, _perfHud.LastPathfindCalls,
+            _vehicles.Count);
+        System.Diagnostics.Debug.WriteLine($"[Baseline] captured: fps={_perfHud.AvgFps:F1}, vehicles={_vehicles.Count}");
     }
 
 }

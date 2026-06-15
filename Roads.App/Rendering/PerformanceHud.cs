@@ -57,6 +57,20 @@ public class PerformanceHud
     /// <summary>Rolling 60-frame averaged draw time in milliseconds.</summary>
     public double AvgDrawMs { get; private set; }
 
+    /// <summary>
+    /// Pathfinding time in milliseconds for the last frame, as read by <see cref="Draw"/>.
+    /// The HUD is the single consumer/resetter of the pathfind accumulators; callers must
+    /// read this after <see cref="Draw"/> has been called for the frame.
+    /// </summary>
+    public double LastPathfindMs => _lastPathfindMs;
+
+    /// <summary>
+    /// Number of pathfinder calls in the last frame, as read by <see cref="Draw"/>.
+    /// The HUD is the single consumer/resetter of the pathfind accumulators; callers must
+    /// read this after <see cref="Draw"/> has been called for the frame.
+    /// </summary>
+    public int LastPathfindCalls => _lastPathfindCalls;
+
     /// <summary>Records the simulation time for the current frame in milliseconds.</summary>
     public void RecordSimTime(double milliseconds)
     {

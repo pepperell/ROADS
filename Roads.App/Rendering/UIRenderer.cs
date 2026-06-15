@@ -139,6 +139,8 @@ public class UIRenderer
         "F       Frame Diag Log",
         "Ctrl+S  Save Map",
         "Ctrl+O  Load Map",
+        "K       Stress: Grid + 10K",
+        "B       Capture Baseline",
     };
 
     /// <summary>

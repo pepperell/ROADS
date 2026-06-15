@@ -295,4 +295,107 @@ public class VehicleSpawner
         _vehicleGrid.QueryFiltered(x, y, minSpawnClearance, _vehicles.PosX, _vehicles.PosY, _spawnBlockedBuffer);
         return _spawnBlockedBuffer.Count > 0;
     }
+
+    /// <summary>
+    /// Bulk stress spawn: places up to <paramref name="count"/> vehicles at random positions
+    /// on the graph, each routed to a random destination node.
+    /// Bypasses node Spawn/Destination flags and the 8 m IsSpawnBlocked clearance check
+    /// so it works on generated grids (which have no flagged nodes) and achieves high density.
+    /// Each vehicle gets one <see cref="Pathfinder.FindPath"/> call.
+    /// </summary>
+    /// <param name="count">Target number of vehicles to spawn.</param>
+    /// <returns>The number of vehicles actually spawned (may be less if the graph is sparse).</returns>
+    public int SpawnBulk(int count)
+    {
+        // Build a list of active node indices (nodes with valid positions).
+        var activeNodes = new List<int>(_graph.Nodes.Count);
+        for (int i = 0; i < _graph.Nodes.Count; i++)
+        {
+            if (!float.IsNaN(_graph.Nodes[i].Position.X))
+                activeNodes.Add(i);
+        }
+
+        // Build a list of active edge indices.
+        var activeEdges = new List<int>(_graph.Edges.Count);
+        for (int i = 0; i < _graph.Edges.Count; i++)
+        {
+            if (_graph.Edges[i].FromNode >= 0)
+                activeEdges.Add(i);
+        }
+
+        if (activeNodes.Count == 0 || activeEdges.Count == 0)
+            return 0;
+
+        int spawned = 0;
+        const int maxAttemptsPerSlot = 5;
+        // Total attempt budget: count * maxAttemptsPerSlot (on a connected grid, paths almost always exist).
+        int totalAttemptBudget = count * maxAttemptsPerSlot;
+        int totalAttempts = 0;
+
+        while (spawned < count && totalAttempts < totalAttemptBudget)
+        {
+            // Pick a random active edge and start param.
+            int startEdge = activeEdges[Random.Shared.Next(activeEdges.Count)];
+            float t = 0.1f + Random.Shared.NextSingle() * 0.8f; // [0.1, 0.9]
+
+            // Try up to maxAttemptsPerSlot different destination nodes for this slot.
+            List<int>? full = null;
+            int destNode = -1;
+            int edgeToNode = _graph.Edges[startEdge].ToNode;
+
+            for (int attempt = 0; attempt < maxAttemptsPerSlot; attempt++)
+            {
+                totalAttempts++;
+                int candidateDest = activeNodes[Random.Shared.Next(activeNodes.Count)];
+
+                if (candidateDest == edgeToNode)
+                {
+                    // Already at destination — single-edge path.
+                    full = new List<int> { startEdge };
+                    destNode = candidateDest;
+                    break;
+                }
+
+                var tail = Pathfinder.FindPath(_graph, edgeToNode, candidateDest, startEdge);
+                if (tail != null && tail.Count > 0)
+                {
+                    full = new List<int> { startEdge };
+                    full.AddRange(tail);
+                    destNode = candidateDest;
+                    break;
+                }
+            }
+
+            if (full == null)
+                continue;
+
+            // Evaluate position and heading on the start edge.
+            var pos = _graph.EvaluateBezier(startEdge, t);
+            var tan = _graph.EvaluateBezierTangent(startEdge, t);
+            float heading = MathF.Atan2(tan.Y, tan.X);
+
+            int vi = _vehicles.Add(pos.X, pos.Y, heading, startEdge);
+
+            // Apply random driver personality traits (same fields as SpawnOnEdge).
+            var traits = DriverPersonalityGenerator.GenerateRandom();
+            _vehicles.Aggressiveness[vi] = traits.Aggressiveness;
+            _vehicles.SpeedBias[vi] = traits.SpeedBias;
+            _vehicles.ReactionTime[vi] = traits.ReactionTime;
+            _vehicles.SteeringSharpness[vi] = traits.SteeringSharpness;
+            _vehicles.BrakingComfort[vi] = traits.BrakingComfort;
+            _vehicles.LaneChangeBias[vi] = traits.LaneChangeBias;
+            _vehicles.PatienceTimer[vi] = traits.PatienceTimer;
+            _vehicles.PreferredVehicle[vi] = traits.PreferredVehicle;
+            _vehicles.Archetype[vi] = (byte)traits.Archetype;
+
+            _vehicles.Path[vi] = full;
+            _vehicles.PathIndex[vi] = 0;
+            _vehicles.EdgeProgress[vi] = t;
+            _vehicles.DestinationNode[vi] = destNode;
+
+            spawned++;
+        }
+
+        return spawned;
+    }
 }
