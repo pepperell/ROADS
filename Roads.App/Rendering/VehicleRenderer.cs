@@ -143,8 +143,10 @@ public class VehicleRenderer
                     (byte)(store.ColorR[i] * ambient),
                     (byte)(store.ColorG[i] * ambient),
                     (byte)(store.ColorB[i] * ambient));
-                // Dot radius: 1 world unit looks ~3–4 screen pixels at the LOD threshold.
-                canvas.DrawCircle(store.PosX[i], store.PosY[i], 1f, dotPaint);
+                // Dot radius in WORLD units = (screen px) / zoom, so the dot stays a
+                // constant ~2px on screen at any LOD zoom. A fixed world radius would be
+                // sub-pixel (invisible) once zoomed out — which is exactly when LOD kicks in.
+                canvas.DrawCircle(store.PosX[i], store.PosY[i], 2f / zoom, dotPaint);
                 continue;
             }
 
