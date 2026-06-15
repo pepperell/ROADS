@@ -45,12 +45,14 @@ public class MainForm : Form
     private readonly PerformanceHud _perfHud = new();
     private readonly StatisticsPanel _statisticsPanel = new();
     private readonly Stopwatch _perfStopwatch = new();
+    private readonly Stopwatch _autoSaveClock = Stopwatch.StartNew();
     private readonly POIRegistry _poiRegistry = new();
     private readonly VehicleSpawner _spawner;
     private readonly PopulationManager _populationManager;
     private readonly GraphChangeHandler _graphChangeHandler;
     private readonly SimulationLoop _simLoop;
     private readonly SceneRenderer _sceneRenderer;
+    private readonly Persistence.AutoSaveManager _autoSave;
 
     private Point _lastMousePos;
     private Point _currentMousePos;
@@ -80,6 +82,11 @@ public class MainForm : Form
         _graphChangeHandler = new GraphChangeHandler(_roadGraph, _editorState, _vehicles, _edgeSpatialGrid, _spawner);
         _simLoop = new SimulationLoop(_roadGraph, _vehicles, _vehicleGrid, _stopLineCache, _intersectionArcs, _edgeSpatialGrid, _trafficSignals, _stopSigns, _yieldSigns, _spawner, _populationManager, _editorState, _graphChangeHandler);
         _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _spawnPointRenderer, _uiRenderer, _sliderPanel, _vehicleInfoPanel, _laneRestrictionTool, _minimap, _statisticsPanel);
+        // AutoSaveManager shares the same object references used by SaveMap() so the
+        // backup format is identical to a manual save (minus vehicles, which are transient).
+        // Triggered from the render-timer tick so it runs on the UI thread with no locking.
+        _autoSave = new Persistence.AutoSaveManager(_roadGraph, _vehicles, _camera,
+            _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals, _populationManager);
 
         // Centralized vehicle-removal fixup: editor-held vehicle indices follow
         // swap-and-pop moves and drop on bulk clears (see VehicleStore.VehicleRemoving).
@@ -122,6 +129,14 @@ public class MainForm : Form
         _perfStopwatch.Restart();
         _simLoop.Tick();
         _perfHud.RecordSimTime(_perfStopwatch.Elapsed.TotalMilliseconds);
+
+        // Accumulate wall time and trigger a backup when the interval elapses.
+        // The auto-save clock is independent of simulation time and pause state
+        // so that backups run on a predictable wall-clock cadence.
+        double tickWall = _autoSaveClock.Elapsed.TotalSeconds;
+        _autoSaveClock.Restart();
+        _autoSave.MaybeSave(tickWall);
+
         _canvas.Invalidate();
     }
 
