@@ -1,0 +1,7819 @@
+{
+  "version": 2,
+  "timeOfDay": 19.041694735114767,
+  "includesVehicles": true,
+  "camera": {
+    "centerX": -251.17398,
+    "centerY": -97.147125,
+    "zoom": 1.8796878
+  },
+  "nodes": [
+    {
+      "x": -146.90828,
+      "y": 64.93554,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -40.970108,
+      "y": 39.491875,
+      "flags": 0,
+      "flagNames": "None",
+      "poi": "None"
+    },
+    {
+      "x": 25.112007,
+      "y": 70.69167,
+      "flags": 17,
+      "flagNames": "TrafficLight, ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": 81.6221,
+      "y": 29.77703,
+      "flags": 0,
+      "flagNames": "None",
+      "poi": "None"
+    },
+    {
+      "x": 163.50443,
+      "y": 67.71122,
+      "flags": 0,
+      "flagNames": "None",
+      "poi": "None"
+    },
+    {
+      "x": 198.62389,
+      "y": 52.78427,
+      "flags": 0,
+      "flagNames": "None",
+      "poi": "None"
+    },
+    {
+      "x": 240.91562,
+      "y": 49.295464,
+      "flags": 17,
+      "flagNames": "TrafficLight, ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": 263.62292,
+      "y": -8.20612,
+      "flags": 17,
+      "flagNames": "TrafficLight, ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": 217.63004,
+      "y": -24.348587,
+      "flags": 0,
+      "flagNames": "None",
+      "poi": "None"
+    },
+    {
+      "x": 161.19138,
+      "y": 7.5716476,
+      "flags": 0,
+      "flagNames": "None",
+      "poi": "None"
+    },
+    {
+      "x": 96.42569,
+      "y": -11.858063,
+      "flags": 0,
+      "flagNames": "None",
+      "poi": "None"
+    },
+    {
+      "x": 34.435654,
+      "y": 8.034256,
+      "flags": 0,
+      "flagNames": "None",
+      "poi": "None"
+    },
+    {
+      "x": -19.689957,
+      "y": -13.245895,
+      "flags": 17,
+      "flagNames": "TrafficLight, ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": -125.16551,
+      "y": 0.6324692,
+      "flags": 0,
+      "flagNames": "None",
+      "poi": "None"
+    },
+    {
+      "x": -153.84746,
+      "y": -14.17112,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Work"
+    },
+    {
+      "x": -132.5673,
+      "y": 36.253593,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -110.82454,
+      "y": 79.27651,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -121.19336,
+      "y": 58.759468,
+      "flags": 16,
+      "flagNames": "ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": -104.34798,
+      "y": 27.00135,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -76.59125,
+      "y": 73.72517,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -89.9408,
+      "y": 51.253395,
+      "flags": 16,
+      "flagNames": "ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": -75.666016,
+      "y": 18.211723,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -52.99803,
+      "y": 64.01032,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -62.566196,
+      "y": 44.67871,
+      "flags": 16,
+      "flagNames": "ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": -10.118744,
+      "y": -74.307236,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Shop"
+    },
+    {
+      "x": -47.35901,
+      "y": -56.751106,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Shop"
+    },
+    {
+      "x": 15.949463,
+      "y": -45.047028,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Shop"
+    },
+    {
+      "x": -13.841898,
+      "y": -50.554672,
+      "flags": 18,
+      "flagNames": "StopSign, ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": -12.778748,
+      "y": 126.25821,
+      "flags": 1,
+      "flagNames": "TrafficLight",
+      "poi": "None"
+    },
+    {
+      "x": -134.07562,
+      "y": 148.60236,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -109.07144,
+      "y": 118.27815,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -100.027374,
+      "y": 163.49847,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -104.110565,
+      "y": 143.08249,
+      "flags": 16,
+      "flagNames": "ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": -85.66327,
+      "y": 113.49011,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -72.89519,
+      "y": 158.17844,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -78.55341,
+      "y": 138.3746,
+      "flags": 16,
+      "flagNames": "ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": -54.275055,
+      "y": 103.382034,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -43.63498,
+      "y": 154.98642,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -48.21249,
+      "y": 132.78548,
+      "flags": 16,
+      "flagNames": "ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": -34.59091,
+      "y": 94.33798,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": 1.5853577,
+      "y": 146.47437,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": 336.2527,
+      "y": 20.550705,
+      "flags": 18,
+      "flagNames": "StopSign, ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": 322.37433,
+      "y": 70.5128,
+      "flags": 18,
+      "flagNames": "StopSign, ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": 278.8888,
+      "y": 86.24161,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Leisure"
+    },
+    {
+      "x": 314.0473,
+      "y": -8.131241,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Shop"
+    },
+    {
+      "x": 288.12634,
+      "y": 61.446148,
+      "flags": 18,
+      "flagNames": "StopSign, ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": 305.0849,
+      "y": 15.925741,
+      "flags": 18,
+      "flagNames": "StopSign, ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": 299.1494,
+      "y": 31.857882,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Shop"
+    },
+    {
+      "x": 294.7402,
+      "y": 43.69319,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Leisure"
+    },
+    {
+      "x": 342.7805,
+      "y": -2.1541824,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Shop"
+    },
+    {
+      "x": 361.8245,
+      "y": 26.676315,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Shop"
+    },
+    {
+      "x": 315.008,
+      "y": 94.388306,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Leisure"
+    },
+    {
+      "x": 349.6575,
+      "y": 74.021805,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Work"
+    },
+    {
+      "x": 64.10568,
+      "y": 100.12973,
+      "flags": 0,
+      "flagNames": "None",
+      "poi": "None"
+    },
+    {
+      "x": 64.10568,
+      "y": 177.43576,
+      "flags": 16,
+      "flagNames": "ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": -96.802795,
+      "y": 216.96329,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -81.06175,
+      "y": 185.831,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -65.6705,
+      "y": 232.70432,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -72.77715,
+      "y": 211.06134,
+      "flags": 16,
+      "flagNames": "ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": -53.427475,
+      "y": 182.33298,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -36.287216,
+      "y": 226.75772,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -44.978065,
+      "y": 204.23244,
+      "flags": 16,
+      "flagNames": "ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": -16.698364,
+      "y": 171.83896,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -0.6075134,
+      "y": 215.56409,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": -8.1104,
+      "y": 195.17581,
+      "flags": 16,
+      "flagNames": "ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": 17.582138,
+      "y": 164.49312,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": 30.52478,
+      "y": 208.91785,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": 24.208214,
+      "y": 187.23666,
+      "flags": 16,
+      "flagNames": "ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": 40.319214,
+      "y": 137.20865,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": 93.13916,
+      "y": 138.60785,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": 64.10569,
+      "y": 137.83878,
+      "flags": 16,
+      "flagNames": "ManualSignal",
+      "poi": "None"
+    },
+    {
+      "x": 85.44354,
+      "y": 195.97522,
+      "flags": 32,
+      "flagNames": "Destination",
+      "poi": "Home"
+    },
+    {
+      "x": 47.876125,
+      "y": 84.6479,
+      "flags": 0,
+      "flagNames": "None",
+      "poi": "None"
+    },
+    {
+      "x": 51.509716,
+      "y": 39.61349,
+      "flags": 0,
+      "flagNames": "None",
+      "poi": "None"
+    }
+  ],
+  "edges": [
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -111.59555,
+        "y": 56.454315
+      },
+      "cp2": {
+        "x": -76.28283,
+        "y": 47.973095
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -76.28284,
+        "y": 47.9731
+      },
+      "cp2": {
+        "x": -111.59556,
+        "y": 56.45432
+      }
+    },
+    {
+      "fromNode": 1,
+      "toNode": 2,
+      "length": 73.09748,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -20.152561,
+        "y": 50.74877
+      },
+      "cp2": {
+        "x": 4.294464,
+        "y": 59.434776
+      }
+    },
+    {
+      "fromNode": 2,
+      "toNode": 1,
+      "length": 73.09747,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 4.2944603,
+        "y": 59.434776
+      },
+      "cp2": {
+        "x": -20.152565,
+        "y": 50.74877
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 3,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 38.057358,
+        "y": 50.93637
+      },
+      "cp2": {
+        "x": 49.332535,
+        "y": 32.378967
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 3,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 49.332535,
+        "y": 32.378967
+      },
+      "cp2": {
+        "x": 38.057358,
+        "y": 50.93637
+      }
+    },
+    {
+      "fromNode": 3,
+      "toNode": 4,
+      "length": 92.05797,
+      "speedLimit": 11.2,
+      "laneCount": 2,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 112.06442,
+        "y": 29.129318
+      },
+      "cp2": {
+        "x": 138.68933,
+        "y": 70.80753
+      }
+    },
+    {
+      "fromNode": 4,
+      "toNode": 3,
+      "length": 92.057976,
+      "speedLimit": 11.2,
+      "laneCount": 2,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 138.68933,
+        "y": 70.80753
+      },
+      "cp2": {
+        "x": 112.06442,
+        "y": 29.129318
+      }
+    },
+    {
+      "fromNode": 4,
+      "toNode": 5,
+      "length": 38.906437,
+      "speedLimit": 11.2,
+      "laneCount": 2,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 183.40082,
+        "y": 66.62858
+      },
+      "cp2": {
+        "x": 184.48552,
+        "y": 60.73469
+      }
+    },
+    {
+      "fromNode": 5,
+      "toNode": 4,
+      "length": 38.906433,
+      "speedLimit": 11.2,
+      "laneCount": 2,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 184.48552,
+        "y": 60.73469
+      },
+      "cp2": {
+        "x": 183.40082,
+        "y": 66.62858
+      }
+    },
+    {
+      "fromNode": 5,
+      "toNode": 6,
+      "length": 44.05756,
+      "speedLimit": 11.2,
+      "laneCount": 2,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 212.69789,
+        "y": 44.659763
+      },
+      "cp2": {
+        "x": 223.02795,
+        "y": 43.58992
+      }
+    },
+    {
+      "fromNode": 6,
+      "toNode": 5,
+      "length": 44.057564,
+      "speedLimit": 11.2,
+      "laneCount": 2,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 223.02794,
+        "y": 43.589916
+      },
+      "cp2": {
+        "x": 212.69789,
+        "y": 44.659763
+      }
+    },
+    {
+      "fromNode": 6,
+      "toNode": 7,
+      "length": 61.82452,
+      "speedLimit": 11.2,
+      "laneCount": 2,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 246.15857,
+        "y": 35.108692
+      },
+      "cp2": {
+        "x": 258.38,
+        "y": 5.98065
+      }
+    },
+    {
+      "fromNode": 7,
+      "toNode": 6,
+      "length": 61.824524,
+      "speedLimit": 11.2,
+      "laneCount": 2,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 258.38,
+        "y": 5.980652
+      },
+      "cp2": {
+        "x": 246.15857,
+        "y": 35.108696
+      }
+    },
+    {
+      "fromNode": 7,
+      "toNode": 8,
+      "length": 49.302696,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 243.8848,
+        "y": -20.234034
+      },
+      "cp2": {
+        "x": 241.6266,
+        "y": -20.533398
+      }
+    },
+    {
+      "fromNode": 8,
+      "toNode": 7,
+      "length": 49.302692,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 241.6266,
+        "y": -20.533398
+      },
+      "cp2": {
+        "x": 243.8848,
+        "y": -20.234032
+      }
+    },
+    {
+      "fromNode": 8,
+      "toNode": 9,
+      "length": 67.558,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 196.68793,
+        "y": -26.179684
+      },
+      "cp2": {
+        "x": 183.95853,
+        "y": 12.748667
+      }
+    },
+    {
+      "fromNode": 9,
+      "toNode": 8,
+      "length": 67.558,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 183.95853,
+        "y": 12.748667
+      },
+      "cp2": {
+        "x": 196.68793,
+        "y": -26.179684
+      }
+    },
+    {
+      "fromNode": 9,
+      "toNode": 10,
+      "length": 67.61736,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 139.60281,
+        "y": 1.0950775
+      },
+      "cp2": {
+        "x": 118.01425,
+        "y": -5.3814926
+      }
+    },
+    {
+      "fromNode": 10,
+      "toNode": 9,
+      "length": 67.61736,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 118.01425,
+        "y": -5.3814926
+      },
+      "cp2": {
+        "x": 139.60281,
+        "y": 1.0950775
+      }
+    },
+    {
+      "fromNode": 10,
+      "toNode": 11,
+      "length": 67.17317,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 69.070496,
+        "y": -19.523512
+      },
+      "cp2": {
+        "x": 55.099,
+        "y": 1.4034834
+      }
+    },
+    {
+      "fromNode": 11,
+      "toNode": 10,
+      "length": 67.17319,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 55.099,
+        "y": 1.4034829
+      },
+      "cp2": {
+        "x": 69.070496,
+        "y": -19.523512
+      }
+    },
+    {
+      "fromNode": 11,
+      "toNode": 12,
+      "length": 60.76678,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 16.8564,
+        "y": 17.59491
+      },
+      "cp2": {
+        "x": -1.6480865,
+        "y": -6.1525116
+      }
+    },
+    {
+      "fromNode": 12,
+      "toNode": 11,
+      "length": 60.766785,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -1.6480865,
+        "y": -6.1525116
+      },
+      "cp2": {
+        "x": 16.8564,
+        "y": 17.59491
+      }
+    },
+    {
+      "fromNode": 12,
+      "toNode": 13,
+      "length": 106.38469,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -54.848476,
+        "y": -8.619774
+      },
+      "cp2": {
+        "x": -90.006996,
+        "y": -3.9936523
+      }
+    },
+    {
+      "fromNode": 13,
+      "toNode": 12,
+      "length": 106.38469,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -90.00699,
+        "y": -3.9936523
+      },
+      "cp2": {
+        "x": -54.848473,
+        "y": -8.619774
+      }
+    },
+    {
+      "fromNode": 13,
+      "toNode": 14,
+      "length": 32.27693,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -134.72617,
+        "y": -4.3020606
+      },
+      "cp2": {
+        "x": -144.2868,
+        "y": -9.23659
+      }
+    },
+    {
+      "fromNode": 14,
+      "toNode": 13,
+      "length": 32.27693,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -144.2868,
+        "y": -9.236589
+      },
+      "cp2": {
+        "x": -134.72617,
+        "y": -4.30206
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -125.31972,
+        "y": 50.594566
+      },
+      "cp2": {
+        "x": -118.07213,
+        "y": 64.93554
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -118.07213,
+        "y": 64.93554
+      },
+      "cp2": {
+        "x": -125.31972,
+        "y": 50.594566
+      }
+    },
+    {
+      "fromNode": 0,
+      "toNode": 17,
+      "length": 26.446194,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -138.33664,
+        "y": 62.876846
+      },
+      "cp2": {
+        "x": -129.765,
+        "y": 60.818153
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -94.45228,
+        "y": 52.336937
+      },
+      "cp2": {
+        "x": -67.7112,
+        "y": 45.914406
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -67.7112,
+        "y": 45.91441
+      },
+      "cp2": {
+        "x": -94.452286,
+        "y": 52.33694
+      }
+    },
+    {
+      "fromNode": 17,
+      "toNode": 0,
+      "length": 26.446175,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -129.76501,
+        "y": 60.81816
+      },
+      "cp2": {
+        "x": -138.33664,
+        "y": 62.87685
+      }
+    },
+    {
+      "fromNode": 15,
+      "toNode": 17,
+      "length": 25.21668,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -128.776,
+        "y": 43.75555
+      },
+      "cp2": {
+        "x": -124.98468,
+        "y": 51.25751
+      }
+    },
+    {
+      "fromNode": 17,
+      "toNode": 16,
+      "length": 22.988293,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -117.73709,
+        "y": 65.59849
+      },
+      "cp2": {
+        "x": -114.280815,
+        "y": 72.4375
+      }
+    },
+    {
+      "fromNode": 16,
+      "toNode": 17,
+      "length": 22.988295,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -114.280815,
+        "y": 72.4375
+      },
+      "cp2": {
+        "x": -117.73709,
+        "y": 65.59849
+      }
+    },
+    {
+      "fromNode": 17,
+      "toNode": 15,
+      "length": 25.216679,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -124.98468,
+        "y": 51.25751
+      },
+      "cp2": {
+        "x": -128.776,
+        "y": 43.75555
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -95.09573,
+        "y": 42.57596
+      },
+      "cp2": {
+        "x": -85.84349,
+        "y": 58.150562
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -85.84349,
+        "y": 58.15056
+      },
+      "cp2": {
+        "x": -95.09573,
+        "y": 42.575954
+      }
+    },
+    {
+      "fromNode": 17,
+      "toNode": 20,
+      "length": 32.141293,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -110.77585,
+        "y": 56.257446
+      },
+      "cp2": {
+        "x": -100.35832,
+        "y": 53.755424
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -73.61725,
+        "y": 47.332893
+      },
+      "cp2": {
+        "x": -57.29368,
+        "y": 43.412384
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -57.29368,
+        "y": 43.412384
+      },
+      "cp2": {
+        "x": -73.61725,
+        "y": 47.332893
+      }
+    },
+    {
+      "fromNode": 20,
+      "toNode": 17,
+      "length": 32.141296,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -100.35833,
+        "y": 53.755424
+      },
+      "cp2": {
+        "x": -110.77585,
+        "y": 56.257446
+      }
+    },
+    {
+      "fromNode": 18,
+      "toNode": 20,
+      "length": 28.20865,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -99.54559,
+        "y": 35.08537
+      },
+      "cp2": {
+        "x": -94.74321,
+        "y": 43.169388
+      }
+    },
+    {
+      "fromNode": 20,
+      "toNode": 19,
+      "length": 26.13793,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -85.49097,
+        "y": 58.74399
+      },
+      "cp2": {
+        "x": -81.04111,
+        "y": 66.23458
+      }
+    },
+    {
+      "fromNode": 19,
+      "toNode": 20,
+      "length": 26.13793,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -81.04111,
+        "y": 66.23457
+      },
+      "cp2": {
+        "x": -85.49097,
+        "y": 58.743988
+      }
+    },
+    {
+      "fromNode": 20,
+      "toNode": 18,
+      "length": 28.20865,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -94.74321,
+        "y": 43.169384
+      },
+      "cp2": {
+        "x": -99.54559,
+        "y": 35.085365
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -68.11002,
+        "y": 33.477924
+      },
+      "cp2": {
+        "x": -60.554024,
+        "y": 48.744125
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -60.554028,
+        "y": 48.74412
+      },
+      "cp2": {
+        "x": -68.11002,
+        "y": 33.47792
+      }
+    },
+    {
+      "fromNode": 20,
+      "toNode": 23,
+      "length": 28.153072,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -80.81594,
+        "y": 49.061836
+      },
+      "cp2": {
+        "x": -71.69107,
+        "y": 46.870274
+      }
+    },
+    {
+      "fromNode": 23,
+      "toNode": 1,
+      "length": 22.210232,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -55.367504,
+        "y": 42.949764
+      },
+      "cp2": {
+        "x": -48.168808,
+        "y": 41.220818
+      }
+    },
+    {
+      "fromNode": 1,
+      "toNode": 23,
+      "length": 22.210234,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -48.168808,
+        "y": 41.220818
+      },
+      "cp2": {
+        "x": -55.367504,
+        "y": 42.949764
+      }
+    },
+    {
+      "fromNode": 23,
+      "toNode": 20,
+      "length": 28.15307,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -71.69107,
+        "y": 46.870274
+      },
+      "cp2": {
+        "x": -80.81594,
+        "y": 49.061836
+      }
+    },
+    {
+      "fromNode": 21,
+      "toNode": 23,
+      "length": 29.531445,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -71.29941,
+        "y": 27.03405
+      },
+      "cp2": {
+        "x": -66.9328,
+        "y": 35.856377
+      }
+    },
+    {
+      "fromNode": 23,
+      "toNode": 22,
+      "length": 21.569918,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -59.37681,
+        "y": 51.12258
+      },
+      "cp2": {
+        "x": -56.18742,
+        "y": 57.566452
+      }
+    },
+    {
+      "fromNode": 22,
+      "toNode": 23,
+      "length": 21.56992,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -56.187424,
+        "y": 57.566452
+      },
+      "cp2": {
+        "x": -59.376816,
+        "y": 51.12258
+      }
+    },
+    {
+      "fromNode": 23,
+      "toNode": 21,
+      "length": 29.53144,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -66.93281,
+        "y": 35.856377
+      },
+      "cp2": {
+        "x": -71.29941,
+        "y": 27.03405
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -16.499552,
+        "y": -33.599678
+      },
+      "cp2": {
+        "x": -13.309148,
+        "y": -53.953457
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -13.309149,
+        "y": -53.953453
+      },
+      "cp2": {
+        "x": -16.499554,
+        "y": -33.599674
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -26.256184,
+        "y": -52.849747
+      },
+      "cp2": {
+        "x": -5.1533585,
+        "y": -48.948387
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -5.1533623,
+        "y": -48.948387
+      },
+      "cp2": {
+        "x": -26.256187,
+        "y": -52.849747
+      }
+    },
+    {
+      "fromNode": 12,
+      "toNode": 27,
+      "length": 37.76433,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -17.740604,
+        "y": -25.682156
+      },
+      "cp2": {
+        "x": -15.791251,
+        "y": -38.118416
+      }
+    },
+    {
+      "fromNode": 27,
+      "toNode": 24,
+      "length": 24.042593,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -12.600847,
+        "y": -58.472195
+      },
+      "cp2": {
+        "x": -11.359796,
+        "y": -66.38972
+      }
+    },
+    {
+      "fromNode": 24,
+      "toNode": 27,
+      "length": 24.042593,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -11.359796,
+        "y": -66.38971
+      },
+      "cp2": {
+        "x": -12.600848,
+        "y": -58.47219
+      }
+    },
+    {
+      "fromNode": 27,
+      "toNode": 12,
+      "length": 37.76433,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -15.791253,
+        "y": -38.118416
+      },
+      "cp2": {
+        "x": -17.740604,
+        "y": -25.682154
+      }
+    },
+    {
+      "fromNode": 25,
+      "toNode": 27,
+      "length": 34.085075,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -36.186638,
+        "y": -54.685627
+      },
+      "cp2": {
+        "x": -25.014267,
+        "y": -52.620148
+      }
+    },
+    {
+      "fromNode": 27,
+      "toNode": 26,
+      "length": 30.296194,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -3.9114444,
+        "y": -48.718792
+      },
+      "cp2": {
+        "x": 6.0190096,
+        "y": -46.882908
+      }
+    },
+    {
+      "fromNode": 26,
+      "toNode": 27,
+      "length": 30.296198,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 6.019008,
+        "y": -46.882908
+      },
+      "cp2": {
+        "x": -3.9114478,
+        "y": -48.718792
+      }
+    },
+    {
+      "fromNode": 27,
+      "toNode": 25,
+      "length": 34.08507,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -25.01427,
+        "y": -52.620148
+      },
+      "cp2": {
+        "x": -36.186638,
+        "y": -54.685627
+      }
+    },
+    {
+      "fromNode": 2,
+      "toNode": 28,
+      "length": 67.259415,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 13.691582,
+        "y": 88.35689
+      },
+      "cp2": {
+        "x": -1.3583221,
+        "y": 108.592995
+      }
+    },
+    {
+      "fromNode": 28,
+      "toNode": 2,
+      "length": 67.259415,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -1.3583221,
+        "y": 108.592995
+      },
+      "cp2": {
+        "x": 13.691582,
+        "y": 88.35689
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -53.21104,
+        "y": 133.70625
+      },
+      "cp2": {
+        "x": -93.64333,
+        "y": 141.15431
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -93.643326,
+        "y": 141.15431
+      },
+      "cp2": {
+        "x": -53.211037,
+        "y": 133.70625
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -106.056755,
+        "y": 133.3516
+      },
+      "cp2": {
+        "x": -103.04206,
+        "y": 148.42503
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -103.04206,
+        "y": 148.42503
+      },
+      "cp2": {
+        "x": -106.056755,
+        "y": 133.3516
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -43.22269,
+        "y": 131.8663
+      },
+      "cp2": {
+        "x": -73.66663,
+        "y": 137.4744
+      }
+    },
+    {
+      "fromNode": 32,
+      "toNode": 29,
+      "length": 30.469221,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -114.09892,
+        "y": 144.92244
+      },
+      "cp2": {
+        "x": -124.08727,
+        "y": 146.76239
+      }
+    },
+    {
+      "fromNode": 29,
+      "toNode": 32,
+      "length": 30.469225,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -124.08727,
+        "y": 146.76239
+      },
+      "cp2": {
+        "x": -114.09892,
+        "y": 144.92244
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -73.66662,
+        "y": 137.4744
+      },
+      "cp2": {
+        "x": -43.222687,
+        "y": 131.8663
+      }
+    },
+    {
+      "fromNode": 30,
+      "toNode": 32,
+      "length": 25.29556,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -107.417816,
+        "y": 126.546265
+      },
+      "cp2": {
+        "x": -105.76419,
+        "y": 134.81438
+      }
+    },
+    {
+      "fromNode": 32,
+      "toNode": 31,
+      "length": 20.820301,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -102.74951,
+        "y": 149.88782
+      },
+      "cp2": {
+        "x": -101.38844,
+        "y": 156.69315
+      }
+    },
+    {
+      "fromNode": 31,
+      "toNode": 32,
+      "length": 20.820303,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -101.38844,
+        "y": 156.69315
+      },
+      "cp2": {
+        "x": -102.74951,
+        "y": 149.88782
+      }
+    },
+    {
+      "fromNode": 32,
+      "toNode": 30,
+      "length": 25.295559,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -105.76419,
+        "y": 134.81438
+      },
+      "cp2": {
+        "x": -107.417816,
+        "y": 126.546265
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -81.40724,
+        "y": 128.38622
+      },
+      "cp2": {
+        "x": -77.151215,
+        "y": 143.28233
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -77.151215,
+        "y": 143.28233
+      },
+      "cp2": {
+        "x": -81.40724,
+        "y": 128.38622
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -34.70364,
+        "y": 130.29701
+      },
+      "cp2": {
+        "x": -56.628532,
+        "y": 134.3358
+      }
+    },
+    {
+      "fromNode": 35,
+      "toNode": 32,
+      "length": 25.98716,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -87.072464,
+        "y": 139.9439
+      },
+      "cp2": {
+        "x": -95.59152,
+        "y": 141.51318
+      }
+    },
+    {
+      "fromNode": 32,
+      "toNode": 35,
+      "length": 25.98716,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -95.591515,
+        "y": 141.51318
+      },
+      "cp2": {
+        "x": -87.072464,
+        "y": 139.9439
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -56.628517,
+        "y": 134.3358
+      },
+      "cp2": {
+        "x": -34.703636,
+        "y": 130.29701
+      }
+    },
+    {
+      "fromNode": 33,
+      "toNode": 35,
+      "length": 25.88026,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -83.29332,
+        "y": 121.78494
+      },
+      "cp2": {
+        "x": -80.92337,
+        "y": 130.07977
+      }
+    },
+    {
+      "fromNode": 35,
+      "toNode": 34,
+      "length": 20.596296,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -76.66734,
+        "y": 144.97589
+      },
+      "cp2": {
+        "x": -74.781265,
+        "y": 151.57716
+      }
+    },
+    {
+      "fromNode": 34,
+      "toNode": 35,
+      "length": 20.596294,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -74.781265,
+        "y": 151.57716
+      },
+      "cp2": {
+        "x": -76.66734,
+        "y": 144.97589
+      }
+    },
+    {
+      "fromNode": 35,
+      "toNode": 33,
+      "length": 25.880259,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -80.92337,
+        "y": 130.07977
+      },
+      "cp2": {
+        "x": -83.29332,
+        "y": 121.78494
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -50.728363,
+        "y": 120.583496
+      },
+      "cp2": {
+        "x": -47.18167,
+        "y": 137.78496
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -47.18167,
+        "y": 137.78496
+      },
+      "cp2": {
+        "x": -50.728363,
+        "y": 120.583496
+      }
+    },
+    {
+      "fromNode": 28,
+      "toNode": 38,
+      "length": 36.029922,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -24.589996,
+        "y": 128.43398
+      },
+      "cp2": {
+        "x": -36.40124,
+        "y": 130.60973
+      }
+    },
+    {
+      "fromNode": 38,
+      "toNode": 35,
+      "length": 30.85142,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -58.326134,
+        "y": 134.64851
+      },
+      "cp2": {
+        "x": -68.43977,
+        "y": 136.51157
+      }
+    },
+    {
+      "fromNode": 35,
+      "toNode": 38,
+      "length": 30.851423,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -68.439766,
+        "y": 136.51157
+      },
+      "cp2": {
+        "x": -58.326126,
+        "y": 134.64851
+      }
+    },
+    {
+      "fromNode": 38,
+      "toNode": 28,
+      "length": 36.029922,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -36.401237,
+        "y": 130.60973
+      },
+      "cp2": {
+        "x": -24.589994,
+        "y": 128.43398
+      }
+    },
+    {
+      "fromNode": 36,
+      "toNode": 38,
+      "length": 30.021944,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -52.2542,
+        "y": 113.18318
+      },
+      "cp2": {
+        "x": -50.233345,
+        "y": 122.98433
+      }
+    },
+    {
+      "fromNode": 38,
+      "toNode": 37,
+      "length": 22.66794,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -46.686653,
+        "y": 140.18579
+      },
+      "cp2": {
+        "x": -45.160816,
+        "y": 147.5861
+      }
+    },
+    {
+      "fromNode": 37,
+      "toNode": 38,
+      "length": 22.667938,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -45.160816,
+        "y": 147.5861
+      },
+      "cp2": {
+        "x": -46.686653,
+        "y": 140.18579
+      }
+    },
+    {
+      "fromNode": 38,
+      "toNode": 36,
+      "length": 30.021946,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -50.233345,
+        "y": 122.98433
+      },
+      "cp2": {
+        "x": -52.2542,
+        "y": 113.18318
+      }
+    },
+    {
+      "fromNode": 28,
+      "toNode": 39,
+      "length": 38.66098,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -20.049469,
+        "y": 115.61813
+      },
+      "cp2": {
+        "x": -27.32019,
+        "y": 104.97806
+      }
+    },
+    {
+      "fromNode": 39,
+      "toNode": 28,
+      "length": 38.66098,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -27.32019,
+        "y": 104.97806
+      },
+      "cp2": {
+        "x": -20.049469,
+        "y": 115.61813
+      }
+    },
+    {
+      "fromNode": 28,
+      "toNode": 40,
+      "length": 24.799606,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -7.990712,
+        "y": 132.99693
+      },
+      "cp2": {
+        "x": -3.2026768,
+        "y": 139.73564
+      }
+    },
+    {
+      "fromNode": 40,
+      "toNode": 28,
+      "length": 24.799606,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -3.2026777,
+        "y": 139.73564
+      },
+      "cp2": {
+        "x": -7.990713,
+        "y": 132.99693
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 296.64716,
+        "y": 14.673671
+      },
+      "cp2": {
+        "x": 316.44992,
+        "y": 17.612188
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 316.44992,
+        "y": 17.612188
+      },
+      "cp2": {
+        "x": 296.64716,
+        "y": 14.67367
+      }
+    },
+    {
+      "fromNode": 41,
+      "toNode": 42,
+      "length": 51.853832,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 331.62656,
+        "y": 37.20474
+      },
+      "cp2": {
+        "x": 327.00046,
+        "y": 53.858772
+      }
+    },
+    {
+      "fromNode": 42,
+      "toNode": 41,
+      "length": 51.853832,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 327.00046,
+        "y": 53.85877
+      },
+      "cp2": {
+        "x": 331.62656,
+        "y": 37.204735
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 301.95474,
+        "y": 65.107025
+      },
+      "cp2": {
+        "x": 281.5352,
+        "y": 59.70124
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 281.5352,
+        "y": 59.701244
+      },
+      "cp2": {
+        "x": 301.95474,
+        "y": 65.107025
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 290.6083,
+        "y": 54.78399
+      },
+      "cp2": {
+        "x": 302.3278,
+        "y": 23.326374
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 302.3278,
+        "y": 23.326376
+      },
+      "cp2": {
+        "x": 290.6083,
+        "y": 54.783993
+      }
+    },
+    {
+      "fromNode": 42,
+      "toNode": 45,
+      "length": 35.427822,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 310.9583,
+        "y": 67.490585
+      },
+      "cp2": {
+        "x": 299.54233,
+        "y": 64.46837
+      }
+    },
+    {
+      "fromNode": 45,
+      "toNode": 6,
+      "length": 48.749367,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 279.12274,
+        "y": 59.062588
+      },
+      "cp2": {
+        "x": 249.9192,
+        "y": 51.679024
+      }
+    },
+    {
+      "fromNode": 6,
+      "toNode": 45,
+      "length": 48.749367,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 249.9192,
+        "y": 51.679024
+      },
+      "cp2": {
+        "x": 279.12274,
+        "y": 59.062588
+      }
+    },
+    {
+      "fromNode": 45,
+      "toNode": 42,
+      "length": 35.427826,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 299.54233,
+        "y": 64.46837
+      },
+      "cp2": {
+        "x": 310.9583,
+        "y": 67.490585
+      }
+    },
+    {
+      "fromNode": 7,
+      "toNode": 46,
+      "length": 48.252293,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 273.0364,
+        "y": -6.8092575
+      },
+      "cp2": {
+        "x": 295.6714,
+        "y": 14.528878
+      }
+    },
+    {
+      "fromNode": 46,
+      "toNode": 41,
+      "length": 31.509094,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 315.47415,
+        "y": 17.467396
+      },
+      "cp2": {
+        "x": 325.8634,
+        "y": 19.00905
+      }
+    },
+    {
+      "fromNode": 41,
+      "toNode": 46,
+      "length": 31.509064,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 325.86343,
+        "y": 19.009052
+      },
+      "cp2": {
+        "x": 315.47418,
+        "y": 17.467396
+      }
+    },
+    {
+      "fromNode": 46,
+      "toNode": 7,
+      "length": 48.252293,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 295.6714,
+        "y": 14.528879
+      },
+      "cp2": {
+        "x": 273.0364,
+        "y": -6.8092575
+      }
+    },
+    {
+      "fromNode": 43,
+      "toNode": 45,
+      "length": 26.46029,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 281.968,
+        "y": 77.976456
+      },
+      "cp2": {
+        "x": 285.04715,
+        "y": 69.7113
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 296.76666,
+        "y": 38.253685
+      },
+      "cp2": {
+        "x": 305.40695,
+        "y": 15.061222
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 305.40695,
+        "y": 15.061224
+      },
+      "cp2": {
+        "x": 296.76666,
+        "y": 38.253685
+      }
+    },
+    {
+      "fromNode": 45,
+      "toNode": 43,
+      "length": 26.460289,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 285.04715,
+        "y": 69.7113
+      },
+      "cp2": {
+        "x": 281.968,
+        "y": 77.976456
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 293.7792,
+        "y": 46.27268
+      },
+      "cp2": {
+        "x": 299.43204,
+        "y": 31.099209
+      }
+    },
+    {
+      "fromNode": 46,
+      "toNode": 44,
+      "length": 25.67222,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 308.07236,
+        "y": 7.906747
+      },
+      "cp2": {
+        "x": 311.0598,
+        "y": -0.11224699
+      }
+    },
+    {
+      "fromNode": 44,
+      "toNode": 46,
+      "length": 25.672224,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 311.0598,
+        "y": -0.11224604
+      },
+      "cp2": {
+        "x": 308.07236,
+        "y": 7.9067483
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 299.43204,
+        "y": 31.09921
+      },
+      "cp2": {
+        "x": 293.7792,
+        "y": 46.27268
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 291.80072,
+        "y": 51.583393
+      },
+      "cp2": {
+        "x": 295.47507,
+        "y": 41.72064
+      }
+    },
+    {
+      "fromNode": 47,
+      "toNode": 46,
+      "length": 17.001856,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 301.1279,
+        "y": 26.547169
+      },
+      "cp2": {
+        "x": 303.10638,
+        "y": 21.236454
+      }
+    },
+    {
+      "fromNode": 46,
+      "toNode": 47,
+      "length": 17.00186,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 303.10638,
+        "y": 21.236456
+      },
+      "cp2": {
+        "x": 301.1279,
+        "y": 26.547173
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 295.47507,
+        "y": 41.720642
+      },
+      "cp2": {
+        "x": 291.80072,
+        "y": 51.583393
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 12.629945,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 297.6797,
+        "y": 35.802986
+      },
+      "cp2": {
+        "x": 296.20996,
+        "y": 39.748093
+      }
+    },
+    {
+      "fromNode": 48,
+      "toNode": 45,
+      "length": 18.944944,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 292.5356,
+        "y": 49.610847
+      },
+      "cp2": {
+        "x": 290.331,
+        "y": 55.528496
+      }
+    },
+    {
+      "fromNode": 45,
+      "toNode": 48,
+      "length": 18.94494,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 290.33096,
+        "y": 55.528496
+      },
+      "cp2": {
+        "x": 292.53558,
+        "y": 49.610844
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 12.629949,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 296.20996,
+        "y": 39.748085
+      },
+      "cp2": {
+        "x": 297.6797,
+        "y": 35.802982
+      }
+    },
+    {
+      "fromNode": 41,
+      "toNode": 49,
+      "length": 23.62465,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 338.42862,
+        "y": 12.982409
+      },
+      "cp2": {
+        "x": 340.60455,
+        "y": 5.414113
+      }
+    },
+    {
+      "fromNode": 49,
+      "toNode": 41,
+      "length": 23.62465,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 340.60455,
+        "y": 5.4141135
+      },
+      "cp2": {
+        "x": 338.42862,
+        "y": 12.9824095
+      }
+    },
+    {
+      "fromNode": 41,
+      "toNode": 50,
+      "length": 26.295256,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 344.7766,
+        "y": 22.592575
+      },
+      "cp2": {
+        "x": 353.30057,
+        "y": 24.634445
+      }
+    },
+    {
+      "fromNode": 50,
+      "toNode": 41,
+      "length": 26.295256,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 353.30057,
+        "y": 24.634445
+      },
+      "cp2": {
+        "x": 344.7766,
+        "y": 22.592575
+      }
+    },
+    {
+      "fromNode": 42,
+      "toNode": 51,
+      "length": 24.986048,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 319.91888,
+        "y": 78.471306
+      },
+      "cp2": {
+        "x": 317.46344,
+        "y": 86.4298
+      }
+    },
+    {
+      "fromNode": 51,
+      "toNode": 42,
+      "length": 24.986048,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 317.46344,
+        "y": 86.4298
+      },
+      "cp2": {
+        "x": 319.91888,
+        "y": 78.471306
+      }
+    },
+    {
+      "fromNode": 42,
+      "toNode": 52,
+      "length": 27.507902,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 331.46872,
+        "y": 71.68247
+      },
+      "cp2": {
+        "x": 340.5631,
+        "y": 72.852135
+      }
+    },
+    {
+      "fromNode": 52,
+      "toNode": 42,
+      "length": 27.507902,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 340.5631,
+        "y": 72.852135
+      },
+      "cp2": {
+        "x": 331.46872,
+        "y": 71.68247
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 39.319725,
+        "y": 79.64739
+      },
+      "cp2": {
+        "x": 56.854477,
+        "y": 88.3914
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 56.854477,
+        "y": 88.3914
+      },
+      "cp2": {
+        "x": 39.319725,
+        "y": 79.64739
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 64.10568,
+        "y": 125.89841
+      },
+      "cp2": {
+        "x": 64.10568,
+        "y": 151.66708
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 64.10568,
+        "y": 151.66708
+      },
+      "cp2": {
+        "x": 64.10568,
+        "y": 125.89841
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 10.469521,
+        "y": 190.6116
+      },
+      "cp2": {
+        "x": -43.16664,
+        "y": 203.78745
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -43.166634,
+        "y": 203.78745
+      },
+      "cp2": {
+        "x": 10.469528,
+        "y": 190.6116
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -75.931335,
+        "y": 201.45543
+      },
+      "cp2": {
+        "x": -70.80092,
+        "y": 217.07988
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -70.80092,
+        "y": 217.07988
+      },
+      "cp2": {
+        "x": -75.931335,
+        "y": 201.45543
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 18.47807,
+        "y": 188.64429
+      },
+      "cp2": {
+        "x": -27.149544,
+        "y": 199.85281
+      }
+    },
+    {
+      "fromNode": 58,
+      "toNode": 55,
+      "length": 24.739943,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -80.7857,
+        "y": 213.02866
+      },
+      "cp2": {
+        "x": -88.79425,
+        "y": 214.99597
+      }
+    },
+    {
+      "fromNode": 55,
+      "toNode": 58,
+      "length": 24.739943,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -88.79425,
+        "y": 214.99597
+      },
+      "cp2": {
+        "x": -80.7857,
+        "y": 213.02866
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -27.149534,
+        "y": 199.85281
+      },
+      "cp2": {
+        "x": 18.478077,
+        "y": 188.64429
+      }
+    },
+    {
+      "fromNode": 56,
+      "toNode": 58,
+      "length": 26.555698,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -78.30022,
+        "y": 194.2411
+      },
+      "cp2": {
+        "x": -75.53868,
+        "y": 202.65121
+      }
+    },
+    {
+      "fromNode": 58,
+      "toNode": 57,
+      "length": 22.779877,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -70.408264,
+        "y": 218.27567
+      },
+      "cp2": {
+        "x": -68.03938,
+        "y": 225.48999
+      }
+    },
+    {
+      "fromNode": 57,
+      "toNode": 58,
+      "length": 22.779875,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -68.03938,
+        "y": 225.48999
+      },
+      "cp2": {
+        "x": -70.408264,
+        "y": 218.27567
+      }
+    },
+    {
+      "fromNode": 58,
+      "toNode": 56,
+      "length": 26.5557,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -75.53868,
+        "y": 202.65121
+      },
+      "cp2": {
+        "x": -78.30022,
+        "y": 194.2411
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -47.714054,
+        "y": 197.14122
+      },
+      "cp2": {
+        "x": -42.000633,
+        "y": 211.94948
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -42.000637,
+        "y": 211.94948
+      },
+      "cp2": {
+        "x": -47.714058,
+        "y": 197.14122
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 27.74443,
+        "y": 186.36798
+      },
+      "cp2": {
+        "x": -8.616817,
+        "y": 195.30022
+      }
+    },
+    {
+      "fromNode": 61,
+      "toNode": 58,
+      "length": 28.625574,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -54.244427,
+        "y": 206.50873
+      },
+      "cp2": {
+        "x": -63.510788,
+        "y": 208.78503
+      }
+    },
+    {
+      "fromNode": 58,
+      "toNode": 61,
+      "length": 28.625574,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -63.510788,
+        "y": 208.78503
+      },
+      "cp2": {
+        "x": -54.244427,
+        "y": 206.50873
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -8.616809,
+        "y": 195.30022
+      },
+      "cp2": {
+        "x": 27.744438,
+        "y": 186.36798
+      }
+    },
+    {
+      "fromNode": 59,
+      "toNode": 61,
+      "length": 23.47295,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -50.611008,
+        "y": 189.6328
+      },
+      "cp2": {
+        "x": -47.79454,
+        "y": 196.93262
+      }
+    },
+    {
+      "fromNode": 61,
+      "toNode": 60,
+      "length": 24.14371,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -42.08112,
+        "y": 211.74088
+      },
+      "cp2": {
+        "x": -39.184166,
+        "y": 219.2493
+      }
+    },
+    {
+      "fromNode": 60,
+      "toNode": 61,
+      "length": 24.143711,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -39.184166,
+        "y": 219.2493
+      },
+      "cp2": {
+        "x": -42.08112,
+        "y": 211.74088
+      }
+    },
+    {
+      "fromNode": 61,
+      "toNode": 59,
+      "length": 23.472948,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -47.79454,
+        "y": 196.93262
+      },
+      "cp2": {
+        "x": -50.611008,
+        "y": 189.6328
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -11.334747,
+        "y": 186.414
+      },
+      "cp2": {
+        "x": -5.9711304,
+        "y": 200.98904
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -5.9711304,
+        "y": 200.98904
+      },
+      "cp2": {
+        "x": -11.334747,
+        "y": 186.414
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 40.033653,
+        "y": 183.3491
+      },
+      "cp2": {
+        "x": 15.961627,
+        "y": 189.26245
+      }
+    },
+    {
+      "fromNode": 64,
+      "toNode": 61,
+      "length": 37.96376,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -20.39962,
+        "y": 198.1947
+      },
+      "cp2": {
+        "x": -32.688843,
+        "y": 201.21356
+      }
+    },
+    {
+      "fromNode": 61,
+      "toNode": 64,
+      "length": 37.963768,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -32.68884,
+        "y": 201.21356
+      },
+      "cp2": {
+        "x": -20.399616,
+        "y": 198.1947
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 15.961635,
+        "y": 189.26245
+      },
+      "cp2": {
+        "x": 40.03366,
+        "y": 183.3491
+      }
+    },
+    {
+      "fromNode": 62,
+      "toNode": 64,
+      "length": 24.86691,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -13.835709,
+        "y": 179.61792
+      },
+      "cp2": {
+        "x": -10.973053,
+        "y": 187.39688
+      }
+    },
+    {
+      "fromNode": 64,
+      "toNode": 63,
+      "length": 21.72496,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -5.6094365,
+        "y": 201.97192
+      },
+      "cp2": {
+        "x": -3.108475,
+        "y": 208.768
+      }
+    },
+    {
+      "fromNode": 63,
+      "toNode": 64,
+      "length": 21.72496,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -3.108475,
+        "y": 208.768
+      },
+      "cp2": {
+        "x": -5.6094365,
+        "y": 201.97192
+      }
+    },
+    {
+      "fromNode": 64,
+      "toNode": 62,
+      "length": 24.866913,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": -10.973053,
+        "y": 187.39688
+      },
+      "cp2": {
+        "x": -13.835709,
+        "y": 179.61792
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 21.896353,
+        "y": 179.30136
+      },
+      "cp2": {
+        "x": 26.210567,
+        "y": 194.1096
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 26.210566,
+        "y": 194.1096
+      },
+      "cp2": {
+        "x": 21.89635,
+        "y": 179.30136
+      }
+    },
+    {
+      "fromNode": 54,
+      "toNode": 67,
+      "length": 41.083645,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 50.806526,
+        "y": 180.70273
+      },
+      "cp2": {
+        "x": 37.50737,
+        "y": 183.9697
+      }
+    },
+    {
+      "fromNode": 67,
+      "toNode": 64,
+      "length": 33.279465,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 13.435343,
+        "y": 189.88304
+      },
+      "cp2": {
+        "x": 2.6624718,
+        "y": 192.52942
+      }
+    },
+    {
+      "fromNode": 64,
+      "toNode": 67,
+      "length": 33.279476,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 2.662475,
+        "y": 192.52942
+      },
+      "cp2": {
+        "x": 13.4353485,
+        "y": 189.88304
+      }
+    },
+    {
+      "fromNode": 67,
+      "toNode": 54,
+      "length": 41.08364,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 37.507378,
+        "y": 183.9697
+      },
+      "cp2": {
+        "x": 50.806534,
+        "y": 180.70273
+      }
+    },
+    {
+      "fromNode": 65,
+      "toNode": 67,
+      "length": 23.689106,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 19.79083,
+        "y": 172.0743
+      },
+      "cp2": {
+        "x": 21.999523,
+        "y": 179.65549
+      }
+    },
+    {
+      "fromNode": 67,
+      "toNode": 66,
+      "length": 22.582577,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 26.313736,
+        "y": 194.46373
+      },
+      "cp2": {
+        "x": 28.419258,
+        "y": 201.6908
+      }
+    },
+    {
+      "fromNode": 66,
+      "toNode": 67,
+      "length": 22.582577,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 28.419258,
+        "y": 201.6908
+      },
+      "cp2": {
+        "x": 26.313736,
+        "y": 194.46373
+      }
+    },
+    {
+      "fromNode": 67,
+      "toNode": 65,
+      "length": 23.689106,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 21.999521,
+        "y": 179.65549
+      },
+      "cp2": {
+        "x": 19.790829,
+        "y": 172.0743
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 57.925865,
+        "y": 137.67505
+      },
+      "cp2": {
+        "x": 75.53252,
+        "y": 138.14145
+      }
+    },
+    {
+      "fromNode": -1,
+      "toNode": -1,
+      "length": 0,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 75.53251,
+        "y": 138.14145
+      },
+      "cp2": {
+        "x": 57.92586,
+        "y": 137.67505
+      }
+    },
+    {
+      "fromNode": 53,
+      "toNode": 70,
+      "length": 38.87875,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 73.149155,
+        "y": 112.69941
+      },
+      "cp2": {
+        "x": 63.105682,
+        "y": 125.86909
+      }
+    },
+    {
+      "fromNode": 70,
+      "toNode": 54,
+      "length": 39.596985,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 64.10568,
+        "y": 151.03777
+      },
+      "cp2": {
+        "x": 64.10568,
+        "y": 164.23677
+      }
+    },
+    {
+      "fromNode": 54,
+      "toNode": 70,
+      "length": 39.597,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 64.10568,
+        "y": 164.23676
+      },
+      "cp2": {
+        "x": 64.10568,
+        "y": 151.03775
+      }
+    },
+    {
+      "fromNode": 70,
+      "toNode": 53,
+      "length": 38.878754,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 63.105682,
+        "y": 125.86909
+      },
+      "cp2": {
+        "x": 73.149155,
+        "y": 112.69941
+      }
+    },
+    {
+      "fromNode": 68,
+      "toNode": 70,
+      "length": 23.794802,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 48.248035,
+        "y": 137.41867
+      },
+      "cp2": {
+        "x": 56.176857,
+        "y": 137.62871
+      }
+    },
+    {
+      "fromNode": 70,
+      "toNode": 69,
+      "length": 29.043673,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 73.78351,
+        "y": 138.09511
+      },
+      "cp2": {
+        "x": 83.461334,
+        "y": 138.35147
+      }
+    },
+    {
+      "fromNode": 69,
+      "toNode": 70,
+      "length": 29.043667,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 83.461334,
+        "y": 138.35149
+      },
+      "cp2": {
+        "x": 73.78351,
+        "y": 138.09512
+      }
+    },
+    {
+      "fromNode": 70,
+      "toNode": 68,
+      "length": 23.79481,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 56.176857,
+        "y": 137.62872
+      },
+      "cp2": {
+        "x": 48.248035,
+        "y": 137.41869
+      }
+    },
+    {
+      "fromNode": 54,
+      "toNode": 71,
+      "length": 28.266869,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 71.2183,
+        "y": 183.61559
+      },
+      "cp2": {
+        "x": 78.330925,
+        "y": 189.7954
+      }
+    },
+    {
+      "fromNode": 71,
+      "toNode": 54,
+      "length": 28.266869,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 78.330925,
+        "y": 189.7954
+      },
+      "cp2": {
+        "x": 71.2183,
+        "y": 183.61559
+      }
+    },
+    {
+      "fromNode": 53,
+      "toNode": 72,
+      "length": 22.802183,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 59.02984,
+        "y": 91.9129
+      },
+      "cp2": {
+        "x": 58.361412,
+        "y": 91.02997
+      }
+    },
+    {
+      "fromNode": 72,
+      "toNode": 2,
+      "length": 26.701847,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 43.382427,
+        "y": 81.91273
+      },
+      "cp2": {
+        "x": 29.374323,
+        "y": 73.37839
+      }
+    },
+    {
+      "fromNode": 2,
+      "toNode": 72,
+      "length": 26.701845,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 29.374323,
+        "y": 73.37839
+      },
+      "cp2": {
+        "x": 43.382427,
+        "y": 81.91273
+      }
+    },
+    {
+      "fromNode": 72,
+      "toNode": 53,
+      "length": 22.802183,
+      "speedLimit": 11.2,
+      "laneCount": 1,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 58.361412,
+        "y": 91.02997
+      },
+      "cp2": {
+        "x": 59.02984,
+        "y": 91.9129
+      }
+    },
+    {
+      "fromNode": 2,
+      "toNode": 73,
+      "length": 41.066162,
+      "speedLimit": 11.2,
+      "laneCount": 2,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 32.87922,
+        "y": 58.838493
+      },
+      "cp2": {
+        "x": 40.045166,
+        "y": 47.416557
+      }
+    },
+    {
+      "fromNode": 73,
+      "toNode": 3,
+      "length": 32.044857,
+      "speedLimit": 11.2,
+      "laneCount": 2,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 59.15275,
+        "y": 34.411453
+      },
+      "cp2": {
+        "x": 68.706276,
+        "y": 30.817804
+      }
+    },
+    {
+      "fromNode": 3,
+      "toNode": 73,
+      "length": 32.044853,
+      "speedLimit": 11.2,
+      "laneCount": 2,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 68.706276,
+        "y": 30.817804
+      },
+      "cp2": {
+        "x": 59.15275,
+        "y": 34.411453
+      }
+    },
+    {
+      "fromNode": 73,
+      "toNode": 2,
+      "length": 41.066166,
+      "speedLimit": 11.2,
+      "laneCount": 2,
+      "roadType": "Residential",
+      "flags": 0,
+      "cp1": {
+        "x": 40.045166,
+        "y": 47.416557
+      },
+      "cp2": {
+        "x": 32.87922,
+        "y": 58.838493
+      }
+    }
+  ],
+  "laneRestrictions": [
+    {
+      "inEdge": 117,
+      "inLane": 0,
+      "allowed": [
+        {
+          "outEdge": 11,
+          "outLane": 0
+        },
+        {
+          "outEdge": 12,
+          "outLane": 1
+        },
+        {
+          "outEdge": 11,
+          "outLane": 1
+        },
+        {
+          "outEdge": 12,
+          "outLane": 0
+        }
+      ]
+    },
+    {
+      "inEdge": 13,
+      "inLane": 1,
+      "allowed": [
+        {
+          "outEdge": 11,
+          "outLane": 1
+        }
+      ]
+    },
+    {
+      "inEdge": 13,
+      "inLane": 0,
+      "allowed": [
+        {
+          "outEdge": 118,
+          "outLane": 0
+        },
+        {
+          "outEdge": 11,
+          "outLane": 0
+        }
+      ]
+    },
+    {
+      "inEdge": 10,
+      "inLane": 0,
+      "allowed": [
+        {
+          "outEdge": 12,
+          "outLane": 0
+        }
+      ]
+    },
+    {
+      "inEdge": 12,
+      "inLane": 0,
+      "allowed": [
+        {
+          "outEdge": 14,
+          "outLane": 0
+        }
+      ]
+    },
+    {
+      "inEdge": 12,
+      "inLane": 1,
+      "allowed": [
+        {
+          "outEdge": 120,
+          "outLane": 0
+        }
+      ]
+    },
+    {
+      "inEdge": 15,
+      "inLane": 0,
+      "allowed": [
+        {
+          "outEdge": 13,
+          "outLane": 1
+        },
+        {
+          "outEdge": 120,
+          "outLane": 0
+        },
+        {
+          "outEdge": 13,
+          "outLane": 0
+        }
+      ]
+    },
+    {
+      "inEdge": 123,
+      "inLane": 0,
+      "allowed": [
+        {
+          "outEdge": 13,
+          "outLane": 0
+        },
+        {
+          "outEdge": 14,
+          "outLane": 0
+        },
+        {
+          "outEdge": 13,
+          "outLane": 1
+        }
+      ]
+    },
+    {
+      "inEdge": 2,
+      "inLane": 0,
+      "allowed": [
+        {
+          "outEdge": 210,
+          "outLane": 0
+        },
+        {
+          "outEdge": 70,
+          "outLane": 0
+        },
+        {
+          "outEdge": 208,
+          "outLane": 0
+        },
+        {
+          "outEdge": 210,
+          "outLane": 1
+        },
+        {
+          "outEdge": 210,
+          "outLane": 2
+        }
+      ]
+    },
+    {
+      "inEdge": 213,
+      "inLane": 1,
+      "allowed": [
+        {
+          "outEdge": 3,
+          "outLane": 0
+        }
+      ]
+    },
+    {
+      "inEdge": 213,
+      "inLane": 0,
+      "allowed": [
+        {
+          "outEdge": 208,
+          "outLane": 0
+        },
+        {
+          "outEdge": 70,
+          "outLane": 0
+        }
+      ]
+    },
+    {
+      "inEdge": 71,
+      "inLane": 0,
+      "allowed": [
+        {
+          "outEdge": 3,
+          "outLane": 0
+        },
+        {
+          "outEdge": 210,
+          "outLane": 0
+        },
+        {
+          "outEdge": 208,
+          "outLane": 0
+        },
+        {
+          "outEdge": 210,
+          "outLane": 1
+        },
+        {
+          "outEdge": 210,
+          "outLane": 2
+        }
+      ]
+    },
+    {
+      "inEdge": 207,
+      "inLane": 0,
+      "allowed": [
+        {
+          "outEdge": 3,
+          "outLane": 0
+        },
+        {
+          "outEdge": 210,
+          "outLane": 1
+        },
+        {
+          "outEdge": 70,
+          "outLane": 0
+        },
+        {
+          "outEdge": 210,
+          "outLane": 0
+        },
+        {
+          "outEdge": 210,
+          "outLane": 2
+        }
+      ]
+    },
+    {
+      "inEdge": 10,
+      "inLane": 1,
+      "allowed": [
+        {
+          "outEdge": 118,
+          "outLane": 0
+        },
+        {
+          "outEdge": 12,
+          "outLane": 1
+        }
+      ]
+    }
+  ],
+  "trafficControl": {
+    "stopExemptEdges": [],
+    "yieldExemptEdges": [],
+    "signalPhaseRotations": [
+      {
+        "node": 6,
+        "rotation": 4
+      },
+      {
+        "node": 7,
+        "rotation": 4
+      },
+      {
+        "node": 12,
+        "rotation": 1
+      }
+    ]
+  },
+  "vehicles": [
+    {
+      "posX": -56.343662,
+      "posY": -6.6579566,
+      "heading": -0.13082515,
+      "speed": 0,
+      "steeringAngle": -4.1722587E-06,
+      "currentEdge": 25,
+      "edgeProgress": 0.65499663,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 63,
+      "pathIndex": 1,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        208,
+        209,
+        196,
+        197,
+        186,
+        187,
+        181
+      ],
+      "aggressiveness": 0.5666246,
+      "speedBias": 0.97267723,
+      "reactionTime": 0.5355451,
+      "steeringSharpness": 1.1983774,
+      "brakingComfort": 2.3271706,
+      "laneChangeBias": 0.6024863,
+      "patienceTimer": 41.1568,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFC0C0C3"
+    },
+    {
+      "posX": -66.90278,
+      "posY": -5.2686014,
+      "heading": -0.1308259,
+      "speed": 0,
+      "steeringAngle": 1.6687353E-06,
+      "currentEdge": 25,
+      "edgeProgress": 0.5549967,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 16,
+      "pathIndex": 1,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        3,
+        52,
+        53,
+        43,
+        35
+      ],
+      "aggressiveness": 0.15463817,
+      "speedBias": 0.9054033,
+      "reactionTime": 0.6418397,
+      "steeringSharpness": 0.7164862,
+      "brakingComfort": 2.1356697,
+      "laneChangeBias": 0.052914158,
+      "patienceTimer": 80.08108,
+      "preferredVehicle": 2,
+      "archetype": "Trucker",
+      "color": "#FF1C1C1E"
+    },
+    {
+      "posX": -51.07103,
+      "posY": -7.351721,
+      "heading": -0.13082628,
+      "speed": 0,
+      "steeringAngle": -4.1111643E-06,
+      "currentEdge": 25,
+      "edgeProgress": 0.7049966,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 37,
+      "pathIndex": 1,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        70,
+        96,
+        101
+      ],
+      "aggressiveness": 0.4528532,
+      "speedBias": 0.97974783,
+      "reactionTime": 0.5724666,
+      "steeringSharpness": 0.9211024,
+      "brakingComfort": 2.4947774,
+      "laneChangeBias": 0.45350352,
+      "patienceTimer": 41.54191,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FF284B32"
+    },
+    {
+      "posX": -45.804886,
+      "posY": -8.044639,
+      "heading": -0.13082401,
+      "speed": 0,
+      "steeringAngle": -5.275882E-06,
+      "currentEdge": 25,
+      "edgeProgress": 0.75499654,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 30,
+      "pathIndex": 1,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        70,
+        96,
+        97,
+        87,
+        83
+      ],
+      "aggressiveness": 0.45400307,
+      "speedBias": 1.0123144,
+      "reactionTime": 0.69465196,
+      "steeringSharpness": 1.1086847,
+      "brakingComfort": 2.85807,
+      "laneChangeBias": 0.6319201,
+      "patienceTimer": 34.05581,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FF1C1C1E"
+    },
+    {
+      "posX": -40.22796,
+      "posY": -8.778444,
+      "heading": -0.13082704,
+      "speed": 1.1108624,
+      "steeringAngle": 2.2875495E-06,
+      "currentEdge": 25,
+      "edgeProgress": 0.8049965,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 40,
+      "pathIndex": 1,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        70,
+        106
+      ],
+      "aggressiveness": 0.4402215,
+      "speedBias": 1.0530891,
+      "reactionTime": 0.7322696,
+      "steeringSharpness": 1.2749966,
+      "brakingComfort": 2.5683527,
+      "laneChangeBias": 0.67750496,
+      "patienceTimer": 5,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FF828284"
+    },
+    {
+      "posX": 185.9672,
+      "posY": 58.94305,
+      "heading": 2.5672898,
+      "speed": 11.920769,
+      "steeringAngle": 0.016900513,
+      "currentEdge": 9,
+      "edgeProgress": 0.34971875,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 63,
+      "pathIndex": 4,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        208,
+        209,
+        196,
+        197,
+        186,
+        187,
+        181
+      ],
+      "aggressiveness": 0.5302889,
+      "speedBias": 1.0642114,
+      "reactionTime": 0.471326,
+      "steeringSharpness": 0.9265973,
+      "brakingComfort": 1.9776049,
+      "laneChangeBias": 0.5610105,
+      "patienceTimer": 48.01422,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFC31E1E"
+    },
+    {
+      "posX": 28.27383,
+      "posY": 62.736782,
+      "heading": 2.1682484,
+      "speed": 1.4104397,
+      "steeringAngle": -0.0117583405,
+      "currentEdge": 213,
+      "edgeProgress": 0.7988726,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 33,
+      "pathIndex": 12,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        70,
+        96,
+        97,
+        93
+      ],
+      "aggressiveness": 0.46473825,
+      "speedBias": 1.0793425,
+      "reactionTime": 0.6749856,
+      "steeringSharpness": 1.349174,
+      "brakingComfort": 1.8409154,
+      "laneChangeBias": 0.48259324,
+      "patienceTimer": 49.235725,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFA0A0A2"
+    },
+    {
+      "posX": -61.61405,
+      "posY": -5.9644833,
+      "heading": -0.13082401,
+      "speed": 0,
+      "steeringAngle": -5.883014E-06,
+      "currentEdge": 25,
+      "edgeProgress": 0.6049967,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 62,
+      "pathIndex": 1,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        208,
+        209,
+        196,
+        197,
+        186,
+        187,
+        183
+      ],
+      "aggressiveness": 0.5223086,
+      "speedBias": 0.99252623,
+      "reactionTime": 0.5386939,
+      "steeringSharpness": 0.94021326,
+      "brakingComfort": 2.599277,
+      "laneChangeBias": 0.44908875,
+      "patienceTimer": 30.948025,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FF2D559B"
+    },
+    {
+      "posX": 31.717335,
+      "posY": 57.745964,
+      "heading": 2.2017825,
+      "speed": 0,
+      "steeringAngle": -0.020117585,
+      "currentEdge": 213,
+      "edgeProgress": 0.65971804,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 39,
+      "pathIndex": 12,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        70,
+        104
+      ],
+      "aggressiveness": 0.8679715,
+      "speedBias": 1.1844015,
+      "reactionTime": 0.50620735,
+      "steeringSharpness": 1.3031023,
+      "brakingComfort": 3.2787285,
+      "laneChangeBias": 0.7404432,
+      "patienceTimer": 18.486813,
+      "preferredVehicle": 0,
+      "archetype": "LeadFoot",
+      "color": "#FFAFB2B6"
+    },
+    {
+      "posX": 45.01564,
+      "posY": 42.69644,
+      "heading": 2.4384542,
+      "speed": 6.1471663,
+      "steeringAngle": -0.017597467,
+      "currentEdge": 213,
+      "edgeProgress": 0.15993935,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 59,
+      "pathIndex": 7,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        208,
+        209,
+        196,
+        197,
+        186,
+        187,
+        177,
+        173
+      ],
+      "aggressiveness": 0.23192196,
+      "speedBias": 1.0499247,
+      "reactionTime": 0.51718986,
+      "steeringSharpness": 1.0417953,
+      "brakingComfort": 2.1128154,
+      "laneChangeBias": 0.583647,
+      "patienceTimer": 44.86979,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFC0C0C3"
+    },
+    {
+      "posX": 55.85101,
+      "posY": 35.14623,
+      "heading": 2.6796882,
+      "speed": 7.3953204,
+      "steeringAngle": -0.06779823,
+      "currentEdge": 212,
+      "edgeProgress": 0.7788708,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 59,
+      "pathIndex": 6,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        208,
+        209,
+        196,
+        197,
+        186,
+        187,
+        177,
+        173
+      ],
+      "aggressiveness": 0.8783852,
+      "speedBias": 1.3,
+      "reactionTime": 0.3,
+      "steeringSharpness": 1.5025408,
+      "brakingComfort": 3.4560142,
+      "laneChangeBias": 0.67168486,
+      "patienceTimer": 9.335712,
+      "preferredVehicle": 0,
+      "archetype": "LeadFoot",
+      "color": "#FFAFB2B6"
+    },
+    {
+      "posX": 28.09783,
+      "posY": 56.79441,
+      "heading": 2.1896565,
+      "speed": 6.8772783,
+      "steeringAngle": -0.012710179,
+      "currentEdge": 213,
+      "edgeProgress": 0.6797559,
+      "currentLane": 1,
+      "targetLane": 1,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 15,
+      "pathIndex": 12,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        3,
+        52,
+        53,
+        43,
+        37
+      ],
+      "aggressiveness": 0.38405985,
+      "speedBias": 0.9986034,
+      "reactionTime": 0.7548789,
+      "steeringSharpness": 0.76613206,
+      "brakingComfort": 2.370373,
+      "laneChangeBias": 0.54905796,
+      "patienceTimer": 21.170822,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FF828284"
+    },
+    {
+      "posX": 254.04953,
+      "posY": -11.801173,
+      "heading": 0.5012238,
+      "speed": 2.0961418,
+      "steeringAngle": 0.025336917,
+      "currentEdge": 15,
+      "edgeProgress": 0.82975674,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 62,
+      "pathIndex": 6,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        208,
+        209,
+        196,
+        197,
+        186,
+        187,
+        183
+      ],
+      "aggressiveness": 1,
+      "speedBias": 1.2228469,
+      "reactionTime": 0.3,
+      "steeringSharpness": 1.5926119,
+      "brakingComfort": 3.1186144,
+      "laneChangeBias": 0.96130216,
+      "patienceTimer": 24.521286,
+      "preferredVehicle": 0,
+      "archetype": "LeadFoot",
+      "color": "#FF141416"
+    },
+    {
+      "posX": 248.93077,
+      "posY": -14.544747,
+      "heading": 0.4381977,
+      "speed": 0.008313112,
+      "steeringAngle": 0.040442057,
+      "currentEdge": 15,
+      "edgeProgress": 0.70993876,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 43,
+      "pathIndex": 6,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        118,
+        127
+      ],
+      "aggressiveness": 0.90459806,
+      "speedBias": 1.2653466,
+      "reactionTime": 0.42467594,
+      "steeringSharpness": 1.3864785,
+      "brakingComfort": 3.2226222,
+      "laneChangeBias": 0.7843735,
+      "patienceTimer": 13.057484,
+      "preferredVehicle": 0,
+      "archetype": "LeadFoot",
+      "color": "#FFAFB2B6"
+    },
+    {
+      "posX": 71.27617,
+      "posY": 29.992573,
+      "heading": 2.951697,
+      "speed": 9.906139,
+      "steeringAngle": -0.3029707,
+      "currentEdge": 212,
+      "edgeProgress": 0.26902097,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 31,
+      "pathIndex": 6,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        70,
+        96,
+        97,
+        87,
+        81
+      ],
+      "aggressiveness": 1,
+      "speedBias": 1.3,
+      "reactionTime": 0.3,
+      "steeringSharpness": 1.639383,
+      "brakingComfort": 3.5411763,
+      "laneChangeBias": 0.76615584,
+      "patienceTimer": 6.3754177,
+      "preferredVehicle": 0,
+      "archetype": "LeadFoot",
+      "color": "#FFA51919"
+    },
+    {
+      "posX": 95.03714,
+      "posY": 30.29515,
+      "heading": -2.7490819,
+      "speed": 13.158456,
+      "steeringAngle": 0.6211776,
+      "currentEdge": 7,
+      "edgeProgress": 0.8497568,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 21,
+      "pathIndex": 5,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        3,
+        52,
+        57
+      ],
+      "aggressiveness": 0.8676994,
+      "speedBias": 1.2509632,
+      "reactionTime": 0.40002763,
+      "steeringSharpness": 1.7134502,
+      "brakingComfort": 3.7623534,
+      "laneChangeBias": 0.78285486,
+      "patienceTimer": 18.094162,
+      "preferredVehicle": 0,
+      "archetype": "LeadFoot",
+      "color": "#FFF0F0EE"
+    },
+    {
+      "posX": 244.95569,
+      "posY": -16.390617,
+      "heading": 0.36838755,
+      "speed": 0,
+      "steeringAngle": 0.05230771,
+      "currentEdge": 15,
+      "edgeProgress": 0.599757,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 29,
+      "pathIndex": 6,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        70,
+        96,
+        97,
+        87,
+        77
+      ],
+      "aggressiveness": 0.50208974,
+      "speedBias": 1.0506488,
+      "reactionTime": 0.71458846,
+      "steeringSharpness": 1.1516944,
+      "brakingComfort": 2.2868178,
+      "laneChangeBias": 0.52309203,
+      "patienceTimer": 39.167347,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFC0C0C3"
+    },
+    {
+      "posX": 241.19412,
+      "posY": -17.80875,
+      "heading": 0.29489195,
+      "speed": 0,
+      "steeringAngle": 0.046378355,
+      "currentEdge": 15,
+      "edgeProgress": 0.48994094,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 15,
+      "pathIndex": 6,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        3,
+        52,
+        53,
+        43,
+        37
+      ],
+      "aggressiveness": 0.37598535,
+      "speedBias": 0.9767656,
+      "reactionTime": 0.7224805,
+      "steeringSharpness": 1.0313942,
+      "brakingComfort": 2.3415155,
+      "laneChangeBias": 0.5155109,
+      "patienceTimer": 44.143547,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FF232326"
+    },
+    {
+      "posX": 121.623856,
+      "posY": 45.300667,
+      "heading": -2.518319,
+      "speed": 11.050247,
+      "steeringAngle": -0.01136218,
+      "currentEdge": 7,
+      "edgeProgress": 0.54993916,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 34,
+      "pathIndex": 5,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        70,
+        96,
+        97,
+        91
+      ],
+      "aggressiveness": 0.22889344,
+      "speedBias": 1.0083698,
+      "reactionTime": 0.6685028,
+      "steeringSharpness": 0.93368596,
+      "brakingComfort": 2.7820413,
+      "laneChangeBias": 0.4779492,
+      "patienceTimer": 48.178253,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFC0C0C3"
+    },
+    {
+      "posX": 290.30637,
+      "posY": 60.21519,
+      "heading": -2.8836372,
+      "speed": 0,
+      "steeringAngle": -0.001087876,
+      "currentEdge": 116,
+      "edgeProgress": 0.8265285,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 65,
+      "pathIndex": 1,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        208,
+        209,
+        196,
+        197,
+        186,
+        193
+      ],
+      "aggressiveness": 0.4671205,
+      "speedBias": 0.9882279,
+      "reactionTime": 0.42175817,
+      "steeringSharpness": 1.293334,
+      "brakingComfort": 2.3533278,
+      "laneChangeBias": 0.36943072,
+      "patienceTimer": 45.401398,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFAFB2B6"
+    },
+    {
+      "posX": 145.07796,
+      "posY": 61.161236,
+      "heading": -2.6742437,
+      "speed": 10.479435,
+      "steeringAngle": 0.0023194775,
+      "currentEdge": 7,
+      "edgeProgress": 0.2499392,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 71,
+      "pathIndex": 5,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        208,
+        209,
+        196,
+        197,
+        204
+      ],
+      "aggressiveness": 0.30983815,
+      "speedBias": 1.054496,
+      "reactionTime": 0.59458435,
+      "steeringSharpness": 1.0823917,
+      "brakingComfort": 2.325277,
+      "laneChangeBias": 0.52583826,
+      "patienceTimer": 49.99142,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFFFFFFF"
+    },
+    {
+      "posX": 237.13641,
+      "posY": -18.997105,
+      "heading": 0.23100697,
+      "speed": 0,
+      "steeringAngle": 0.034445368,
+      "currentEdge": 15,
+      "edgeProgress": 0.37993932,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 21,
+      "pathIndex": 6,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        3,
+        52,
+        57
+      ],
+      "aggressiveness": 0.1448949,
+      "speedBias": 1.1018074,
+      "reactionTime": 0.6216399,
+      "steeringSharpness": 0.8960991,
+      "brakingComfort": 2.7200718,
+      "laneChangeBias": 0.36018473,
+      "patienceTimer": 16.180195,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFFFFFFF"
+    },
+    {
+      "posX": 232.61768,
+      "posY": -19.996006,
+      "heading": 0.18388796,
+      "speed": 0,
+      "steeringAngle": 0.022395477,
+      "currentEdge": 15,
+      "edgeProgress": 0.26999646,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 71,
+      "pathIndex": 6,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        208,
+        209,
+        196,
+        197,
+        204
+      ],
+      "aggressiveness": 0.89000547,
+      "speedBias": 1.2504127,
+      "reactionTime": 0.4151721,
+      "steeringSharpness": 1.5658364,
+      "brakingComfort": 3.2846375,
+      "laneChangeBias": 0.937253,
+      "patienceTimer": 18.380259,
+      "preferredVehicle": 0,
+      "archetype": "LeadFoot",
+      "color": "#FFAFB2B6"
+    },
+    {
+      "posX": 227.1302,
+      "posY": -20.968403,
+      "heading": 0.14707132,
+      "speed": 0,
+      "steeringAngle": 0.018882066,
+      "currentEdge": 15,
+      "edgeProgress": 0.15999988,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 60,
+      "pathIndex": 6,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        208,
+        209,
+        196,
+        197,
+        186,
+        187,
+        177,
+        171
+      ],
+      "aggressiveness": 0.3474185,
+      "speedBias": 0.99851394,
+      "reactionTime": 0.6860076,
+      "steeringSharpness": 1.0270581,
+      "brakingComfort": 2.5199196,
+      "laneChangeBias": 0.56441414,
+      "patienceTimer": 25.979849,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFA51919"
+    },
+    {
+      "posX": 220.44,
+      "posY": -21.909279,
+      "heading": 0.087829806,
+      "speed": 0,
+      "steeringAngle": 0.044021923,
+      "currentEdge": 15,
+      "edgeProgress": 0.05,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 69,
+      "pathIndex": 6,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        208,
+        209,
+        196,
+        201
+      ],
+      "aggressiveness": 0.51405245,
+      "speedBias": 1.0467135,
+      "reactionTime": 0.59813005,
+      "steeringSharpness": 0.922812,
+      "brakingComfort": 2.5536928,
+      "laneChangeBias": 0.5377183,
+      "patienceTimer": 16.8433,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FF3C64AA"
+    },
+    {
+      "posX": -29.693989,
+      "posY": -9.940727,
+      "heading": -0.06823917,
+      "speed": 4.9623027,
+      "steeringAngle": 0.040595487,
+      "currentEdge": 25,
+      "edgeProgress": 0.8572517,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": 57,
+      "arcProgress": 0.10499263,
+      "destinationNode": 19,
+      "pathIndex": 1,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        3,
+        52,
+        53,
+        45
+      ],
+      "aggressiveness": 0.3409911,
+      "speedBias": 0.9527497,
+      "reactionTime": 0.5191265,
+      "steeringSharpness": 1.0980949,
+      "brakingComfort": 2.4694157,
+      "laneChangeBias": 0.46992317,
+      "patienceTimer": 35.489048,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFE4E1DC"
+    },
+    {
+      "posX": 333.86676,
+      "posY": 70.23305,
+      "heading": -3.007617,
+      "speed": 0,
+      "steeringAngle": -0.0058157085,
+      "currentEdge": 147,
+      "edgeProgress": 0.58999985,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 16,
+      "pathIndex": 0,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        3,
+        52,
+        53,
+        43,
+        35
+      ],
+      "aggressiveness": 0.39230838,
+      "speedBias": 1.027979,
+      "reactionTime": 0.75164473,
+      "steeringSharpness": 0.95655024,
+      "brakingComfort": 2.2480943,
+      "laneChangeBias": 0.7240131,
+      "patienceTimer": 42.65013,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFAFB2B6"
+    },
+    {
+      "posX": 323.76324,
+      "posY": 68.75719,
+      "heading": -2.9655387,
+      "speed": 0,
+      "steeringAngle": 0.03349065,
+      "currentEdge": 147,
+      "edgeProgress": 0.76605964,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 19,
+      "pathIndex": 0,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        3,
+        52,
+        53,
+        45
+      ],
+      "aggressiveness": 0.36499876,
+      "speedBias": 1.0119091,
+      "reactionTime": 0.58192676,
+      "steeringSharpness": 0.7400322,
+      "brakingComfort": 2.9664378,
+      "laneChangeBias": 0.43243346,
+      "patienceTimer": 15.822096,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FF232326"
+    },
+    {
+      "posX": 299.78018,
+      "posY": 62.720947,
+      "heading": -2.8829117,
+      "speed": 0,
+      "steeringAngle": 0.0001337566,
+      "currentEdge": 116,
+      "edgeProgress": 0.67287207,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 57,
+      "pathIndex": 1,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        208,
+        209,
+        196,
+        197,
+        186,
+        187,
+        177,
+        167,
+        161
+      ],
+      "aggressiveness": 0.2421391,
+      "speedBias": 0.9779974,
+      "reactionTime": 0.49644148,
+      "steeringSharpness": 0.9249562,
+      "brakingComfort": 3.3044841,
+      "laneChangeBias": 0.63236904,
+      "patienceTimer": 20.181187,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFE4E1DC"
+    },
+    {
+      "posX": -72.16148,
+      "posY": -4.5766635,
+      "heading": -0.13082628,
+      "speed": 0,
+      "steeringAngle": -1.2864098E-06,
+      "currentEdge": 25,
+      "edgeProgress": 0.5049968,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 57,
+      "pathIndex": 1,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        208,
+        209,
+        196,
+        197,
+        186,
+        187,
+        177,
+        167,
+        161
+      ],
+      "aggressiveness": 0.20714611,
+      "speedBias": 0.8884427,
+      "reactionTime": 0.67820954,
+      "steeringSharpness": 0.7710284,
+      "brakingComfort": 2.2890718,
+      "laneChangeBias": 0.26933876,
+      "patienceTimer": 114.07044,
+      "preferredVehicle": 2,
+      "archetype": "Trucker",
+      "color": "#FF232326"
+    },
+    {
+      "posX": -77.747955,
+      "posY": -3.8415985,
+      "heading": -0.1308259,
+      "speed": 0.5412132,
+      "steeringAngle": -7.148767E-06,
+      "currentEdge": 25,
+      "edgeProgress": 0.44499683,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 22,
+      "pathIndex": 1,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        3,
+        52,
+        55
+      ],
+      "aggressiveness": 0.118941,
+      "speedBias": 0.9827,
+      "reactionTime": 0.8397287,
+      "steeringSharpness": 0.82269835,
+      "brakingComfort": 3.1288693,
+      "laneChangeBias": 0.3396512,
+      "patienceTimer": 104.85354,
+      "preferredVehicle": 2,
+      "archetype": "Trucker",
+      "color": "#FFA0A0A2"
+    },
+    {
+      "posX": 346.50916,
+      "posY": 72.87886,
+      "heading": -2.7276242,
+      "speed": 0.67269665,
+      "steeringAngle": 0.032184098,
+      "currentEdge": 147,
+      "edgeProgress": 0.120000035,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 0,
+      "pathIndex": 0,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        3,
+        52,
+        53,
+        43,
+        33
+      ],
+      "aggressiveness": 0.30404162,
+      "speedBias": 0.8940718,
+      "reactionTime": 0.67576885,
+      "steeringSharpness": 0.7111348,
+      "brakingComfort": 2.5705407,
+      "laneChangeBias": 0.32957613,
+      "patienceTimer": 111.80745,
+      "preferredVehicle": 2,
+      "archetype": "Trucker",
+      "color": "#FFC0C0C3"
+    },
+    {
+      "posX": 348.1608,
+      "posY": 73.77436,
+      "heading": -2.9722416,
+      "speed": 0,
+      "steeringAngle": 0.7,
+      "currentEdge": 147,
+      "edgeProgress": 0.060000002,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 22,
+      "pathIndex": 0,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        3,
+        52,
+        55
+      ],
+      "aggressiveness": 0.50644743,
+      "speedBias": 1.0054573,
+      "reactionTime": 0.6905036,
+      "steeringSharpness": 1.2423706,
+      "brakingComfort": 2.5150766,
+      "laneChangeBias": 0.55721396,
+      "patienceTimer": 5,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFAFB2B6"
+    },
+    {
+      "posX": 348.16122,
+      "posY": 73.77461,
+      "heading": -2.9723961,
+      "speed": 0,
+      "steeringAngle": 0.7,
+      "currentEdge": 147,
+      "edgeProgress": 0.060000002,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 33,
+      "pathIndex": 0,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        70,
+        96,
+        97,
+        93
+      ],
+      "aggressiveness": 0.5732373,
+      "speedBias": 0.9647712,
+      "reactionTime": 0.6920051,
+      "steeringSharpness": 1.1009575,
+      "brakingComfort": 2.7674038,
+      "laneChangeBias": 0.34497765,
+      "patienceTimer": 60.15001,
+      "preferredVehicle": 0,
+      "archetype": "Commuter",
+      "color": "#FFC0C0C3"
+    },
+    {
+      "posX": 348.2082,
+      "posY": 73.8009,
+      "heading": -2.9871666,
+      "speed": 0,
+      "steeringAngle": 0.7,
+      "currentEdge": 147,
+      "edgeProgress": 0.05,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 37,
+      "pathIndex": 0,
+      "path": [
+        147,
+        116,
+        117,
+        11,
+        9,
+        7,
+        212,
+        213,
+        70,
+        96,
+        101
+      ],
+      "aggressiveness": 0.06358968,
+      "speedBias": 0.9516804,
+      "reactionTime": 0.88332075,
+      "steeringSharpness": 0.84256196,
+      "brakingComfort": 2.4217079,
+      "laneChangeBias": 0.36048818,
+      "patienceTimer": 112.144104,
+      "preferredVehicle": 2,
+      "archetype": "Trucker",
+      "color": "#FFA0A0A2"
+    },
+    {
+      "posX": 339.90527,
+      "posY": 71.15796,
+      "heading": -2.9329581,
+      "speed": 0.9843316,
+      "steeringAngle": -0.04201644,
+      "currentEdge": 147,
+      "edgeProgress": 0.36000007,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": -1,
+      "arcProgress": 0,
+      "destinationNode": 51,
+      "pathIndex": 0,
+      "path": [
+        147,
+        144
+      ],
+      "aggressiveness": 0.86590207,
+      "speedBias": 1.1951083,
+      "reactionTime": 0.3,
+      "steeringSharpness": 1.5533928,
+      "brakingComfort": 3.3851998,
+      "laneChangeBias": 0.6925739,
+      "patienceTimer": 5,
+      "preferredVehicle": 0,
+      "archetype": "LeadFoot",
+      "color": "#FFC0C0C3"
+    },
+    {
+      "posX": -117.43526,
+      "posY": 0.90919423,
+      "heading": 0.009111613,
+      "speed": 6.466677,
+      "steeringAngle": -0.020409625,
+      "currentEdge": 27,
+      "edgeProgress": 0.58422095,
+      "currentLane": 0,
+      "targetLane": 0,
+      "laneChangeProgress": 0,
+      "currentArc": 62,
+      "arcProgress": 0.8343451,
+      "destinationNode": 30,
+      "pathIndex": 0,
+      "path": [
+        27,
+        25,
+        23,
+        21,
+        19,
+        17,
+        15,
+        13,
+        11,
+        9,
+        7,
+        212,
+        213,
+        70,
+        96,
+        97,
+        87,
+        83
+      ],
+      "aggressiveness": 0.13423058,
+      "speedBias": 0.9416609,
+      "reactionTime": 0.7240263,
+      "steeringSharpness": 1.0126498,
+      "brakingComfort": 1.9173019,
+      "laneChangeBias": 0.28113934,
+      "patienceTimer": 96.04775,
+      "preferredVehicle": 2,
+      "archetype": "Trucker",
+      "color": "#FF141416"
+    }
+  ],
+  "population": [
+    {
+      "id": 0,
+      "homeNode": 0,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Trucker",
+        "aggressiveness": 0.30404162,
+        "speedBias": 0.8940718,
+        "reactionTime": 0.67576885,
+        "steeringSharpness": 0.7111348,
+        "brakingComfort": 2.5705407,
+        "laneChangeBias": 0.32957613,
+        "patienceTimer": 111.80745,
+        "preferredVehicle": 2
+      },
+      "color": "#FFC0C0C3",
+      "schedule": [
+        {
+          "departureTime": 5.741452,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.533533,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 31
+    },
+    {
+      "id": 1,
+      "homeNode": 0,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.51671976,
+        "speedBias": 0.95545536,
+        "reactionTime": 0.5488119,
+        "steeringSharpness": 0.6477252,
+        "brakingComfort": 2.223578,
+        "laneChangeBias": 0.5939057,
+        "patienceTimer": 16.994518,
+        "preferredVehicle": 0
+      },
+      "color": "#FF828284",
+      "schedule": [
+        {
+          "departureTime": 7.77322,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 11.505796,
+          "destination": "Shop"
+        },
+        {
+          "departureTime": 12.729782,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.187334,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 4,
+      "activity": "Dormant",
+      "currentPOINode": 0,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 2,
+      "homeNode": 15,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.37598535,
+        "speedBias": 0.9767656,
+        "reactionTime": 0.7224805,
+        "steeringSharpness": 1.0313942,
+        "brakingComfort": 2.3415155,
+        "laneChangeBias": 0.5155109,
+        "patienceTimer": 44.143547,
+        "preferredVehicle": 0
+      },
+      "color": "#FF232326",
+      "schedule": [
+        {
+          "departureTime": 7.5440693,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.801788,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 17
+    },
+    {
+      "id": 3,
+      "homeNode": 15,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.38405985,
+        "speedBias": 0.9986034,
+        "reactionTime": 0.7548789,
+        "steeringSharpness": 0.76613206,
+        "brakingComfort": 2.370373,
+        "laneChangeBias": 0.54905796,
+        "patienceTimer": 21.170822,
+        "preferredVehicle": 0
+      },
+      "color": "#FF828284",
+      "schedule": [
+        {
+          "departureTime": 6.7975755,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.53603,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 11
+    },
+    {
+      "id": 4,
+      "homeNode": 16,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Trucker",
+        "aggressiveness": 0.15463817,
+        "speedBias": 0.9054033,
+        "reactionTime": 0.6418397,
+        "steeringSharpness": 0.7164862,
+        "brakingComfort": 2.1356697,
+        "laneChangeBias": 0.052914158,
+        "patienceTimer": 80.08108,
+        "preferredVehicle": 2
+      },
+      "color": "#FF1C1C1E",
+      "schedule": [
+        {
+          "departureTime": 7.0090737,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.421457,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 1
+    },
+    {
+      "id": 5,
+      "homeNode": 16,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.39230838,
+        "speedBias": 1.027979,
+        "reactionTime": 0.75164473,
+        "steeringSharpness": 0.95655024,
+        "brakingComfort": 2.2480943,
+        "laneChangeBias": 0.7240131,
+        "patienceTimer": 42.65013,
+        "preferredVehicle": 0
+      },
+      "color": "#FFAFB2B6",
+      "schedule": [
+        {
+          "departureTime": 8.484348,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 12.044554,
+          "destination": "Shop"
+        },
+        {
+          "departureTime": 12.383429,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.867414,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 4,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 26
+    },
+    {
+      "id": 6,
+      "homeNode": 18,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Trucker",
+        "aggressiveness": 0.12930149,
+        "speedBias": 0.9468069,
+        "reactionTime": 0.6988356,
+        "steeringSharpness": 1.061214,
+        "brakingComfort": 2.2181792,
+        "laneChangeBias": 0.19319028,
+        "patienceTimer": 83.49179,
+        "preferredVehicle": 2
+      },
+      "color": "#FFC0C0C3",
+      "schedule": [
+        {
+          "departureTime": 6.4741592,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.959187,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 1,
+      "activity": "Dormant",
+      "currentPOINode": 52,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 7,
+      "homeNode": 18,
+      "workNode": 52,
+      "traits": {
+        "archetype": "SundayDriver",
+        "aggressiveness": 0.15679038,
+        "speedBias": 0.81925964,
+        "reactionTime": 1.0238531,
+        "steeringSharpness": 0.6220263,
+        "brakingComfort": 1.9856646,
+        "laneChangeBias": 0.27805418,
+        "patienceTimer": 122.96459,
+        "preferredVehicle": 0
+      },
+      "color": "#FFB48228",
+      "schedule": [
+        {
+          "departureTime": 10.925312,
+          "destination": "Leisure"
+        },
+        {
+          "departureTime": 13.056739,
+          "destination": "Shop"
+        },
+        {
+          "departureTime": 14.923388,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 3,
+      "activity": "Dormant",
+      "currentPOINode": 18,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 8,
+      "homeNode": 19,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.36499876,
+        "speedBias": 1.0119091,
+        "reactionTime": 0.58192676,
+        "steeringSharpness": 0.7400322,
+        "brakingComfort": 2.9664378,
+        "laneChangeBias": 0.43243346,
+        "patienceTimer": 15.822096,
+        "preferredVehicle": 0
+      },
+      "color": "#FF232326",
+      "schedule": [
+        {
+          "departureTime": 8.461842,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.910192,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 27
+    },
+    {
+      "id": 9,
+      "homeNode": 19,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.3409911,
+        "speedBias": 0.9527497,
+        "reactionTime": 0.5191265,
+        "steeringSharpness": 1.0980949,
+        "brakingComfort": 2.4694157,
+        "laneChangeBias": 0.46992317,
+        "patienceTimer": 35.489048,
+        "preferredVehicle": 0
+      },
+      "color": "#FFE4E1DC",
+      "schedule": [
+        {
+          "departureTime": 8.136358,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.125326,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 25
+    },
+    {
+      "id": 10,
+      "homeNode": 21,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.1448949,
+        "speedBias": 1.1018074,
+        "reactionTime": 0.6216399,
+        "steeringSharpness": 0.8960991,
+        "brakingComfort": 2.7200718,
+        "laneChangeBias": 0.36018473,
+        "patienceTimer": 16.180195,
+        "preferredVehicle": 0
+      },
+      "color": "#FFFFFFFF",
+      "schedule": [
+        {
+          "departureTime": 8.528515,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.906166,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 21
+    },
+    {
+      "id": 11,
+      "homeNode": 21,
+      "workNode": 52,
+      "traits": {
+        "archetype": "LeadFoot",
+        "aggressiveness": 0.8676994,
+        "speedBias": 1.2509632,
+        "reactionTime": 0.40002763,
+        "steeringSharpness": 1.7134502,
+        "brakingComfort": 3.7623534,
+        "laneChangeBias": 0.78285486,
+        "patienceTimer": 18.094162,
+        "preferredVehicle": 0
+      },
+      "color": "#FFF0F0EE",
+      "schedule": [
+        {
+          "departureTime": 8.670234,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.733068,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 15
+    },
+    {
+      "id": 12,
+      "homeNode": 22,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.50644743,
+        "speedBias": 1.0054573,
+        "reactionTime": 0.6905036,
+        "steeringSharpness": 1.2423706,
+        "brakingComfort": 2.5150766,
+        "laneChangeBias": 0.55721396,
+        "patienceTimer": 5,
+        "preferredVehicle": 0
+      },
+      "color": "#FFAFB2B6",
+      "schedule": [
+        {
+          "departureTime": 7.6380835,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.652985,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 32
+    },
+    {
+      "id": 13,
+      "homeNode": 22,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Trucker",
+        "aggressiveness": 0.118941,
+        "speedBias": 0.9827,
+        "reactionTime": 0.8397287,
+        "steeringSharpness": 0.82269835,
+        "brakingComfort": 3.1288693,
+        "laneChangeBias": 0.3396512,
+        "patienceTimer": 104.85354,
+        "preferredVehicle": 2
+      },
+      "color": "#FFA0A0A2",
+      "schedule": [
+        {
+          "departureTime": 6.4232693,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.702469,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 30
+    },
+    {
+      "id": 14,
+      "homeNode": 29,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.50208974,
+        "speedBias": 1.0506488,
+        "reactionTime": 0.71458846,
+        "steeringSharpness": 1.1516944,
+        "brakingComfort": 2.2868178,
+        "laneChangeBias": 0.52309203,
+        "patienceTimer": 39.167347,
+        "preferredVehicle": 0
+      },
+      "color": "#FFC0C0C3",
+      "schedule": [
+        {
+          "departureTime": 7.92522,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.771652,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 16
+    },
+    {
+      "id": 15,
+      "homeNode": 29,
+      "workNode": 14,
+      "traits": {
+        "archetype": "NervousNellie",
+        "aggressiveness": 0.17954287,
+        "speedBias": 0.93614113,
+        "reactionTime": 0.41305873,
+        "steeringSharpness": 1.5598148,
+        "brakingComfort": 1.6318146,
+        "laneChangeBias": 0.37543088,
+        "patienceTimer": 52.504566,
+        "preferredVehicle": 0
+      },
+      "color": "#FFAFB2B6",
+      "schedule": [
+        {
+          "departureTime": 7.482067,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 16.41512,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Dormant",
+      "currentPOINode": 29,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 16,
+      "homeNode": 30,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.45400307,
+        "speedBias": 1.0123144,
+        "reactionTime": 0.69465196,
+        "steeringSharpness": 1.1086847,
+        "brakingComfort": 2.85807,
+        "laneChangeBias": 0.6319201,
+        "patienceTimer": 34.05581,
+        "preferredVehicle": 0
+      },
+      "color": "#FF1C1C1E",
+      "schedule": [
+        {
+          "departureTime": 8.398005,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.248531,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 3
+    },
+    {
+      "id": 17,
+      "homeNode": 30,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Trucker",
+        "aggressiveness": 0.13423058,
+        "speedBias": 0.9416609,
+        "reactionTime": 0.7240263,
+        "steeringSharpness": 1.0126498,
+        "brakingComfort": 1.9173019,
+        "laneChangeBias": 0.28113934,
+        "patienceTimer": 96.04775,
+        "preferredVehicle": 2
+      },
+      "color": "#FF141416",
+      "schedule": [
+        {
+          "departureTime": 6.04673,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.91863,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 36
+    },
+    {
+      "id": 18,
+      "homeNode": 31,
+      "workNode": 52,
+      "traits": {
+        "archetype": "LeadFoot",
+        "aggressiveness": 1,
+        "speedBias": 1.3,
+        "reactionTime": 0.3,
+        "steeringSharpness": 1.639383,
+        "brakingComfort": 3.5411763,
+        "laneChangeBias": 0.76615584,
+        "patienceTimer": 6.3754177,
+        "preferredVehicle": 0
+      },
+      "color": "#FFA51919",
+      "schedule": [
+        {
+          "departureTime": 7.9630237,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.724094,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 14
+    },
+    {
+      "id": 19,
+      "homeNode": 31,
+      "workNode": 14,
+      "traits": {
+        "archetype": "LeadFoot",
+        "aggressiveness": 1,
+        "speedBias": 1.2535226,
+        "reactionTime": 0.46983647,
+        "steeringSharpness": 1.6759479,
+        "brakingComfort": 3.3819966,
+        "laneChangeBias": 0.80868894,
+        "patienceTimer": 5,
+        "preferredVehicle": 0
+      },
+      "color": "#FFFFFFFF",
+      "schedule": [
+        {
+          "departureTime": 8.411328,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.276003,
+          "destination": "Leisure"
+        },
+        {
+          "departureTime": 21.660812,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Dormant",
+      "currentPOINode": 43,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 20,
+      "homeNode": 33,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.5732373,
+        "speedBias": 0.9647712,
+        "reactionTime": 0.6920051,
+        "steeringSharpness": 1.1009575,
+        "brakingComfort": 2.7674038,
+        "laneChangeBias": 0.34497765,
+        "patienceTimer": 60.15001,
+        "preferredVehicle": 0
+      },
+      "color": "#FFC0C0C3",
+      "schedule": [
+        {
+          "departureTime": 7.0062103,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.260292,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 33
+    },
+    {
+      "id": 21,
+      "homeNode": 33,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.46473825,
+        "speedBias": 1.0793425,
+        "reactionTime": 0.6749856,
+        "steeringSharpness": 1.349174,
+        "brakingComfort": 1.8409154,
+        "laneChangeBias": 0.48259324,
+        "patienceTimer": 49.235725,
+        "preferredVehicle": 0
+      },
+      "color": "#FFA0A0A2",
+      "schedule": [
+        {
+          "departureTime": 8.254396,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.359047,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 6
+    },
+    {
+      "id": 22,
+      "homeNode": 34,
+      "workNode": 14,
+      "traits": {
+        "archetype": "SundayDriver",
+        "aggressiveness": 0.042794134,
+        "speedBias": 0.89858407,
+        "reactionTime": 0.974508,
+        "steeringSharpness": 0.8045761,
+        "brakingComfort": 1.5244291,
+        "laneChangeBias": 0.27904874,
+        "patienceTimer": 118.28457,
+        "preferredVehicle": 0
+      },
+      "color": "#FF141416",
+      "schedule": [
+        {
+          "departureTime": 10.7408285,
+          "destination": "Leisure"
+        },
+        {
+          "departureTime": 16.822918,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Dormant",
+      "currentPOINode": 34,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 23,
+      "homeNode": 34,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.22889344,
+        "speedBias": 1.0083698,
+        "reactionTime": 0.6685028,
+        "steeringSharpness": 0.93368596,
+        "brakingComfort": 2.7820413,
+        "laneChangeBias": 0.4779492,
+        "patienceTimer": 48.178253,
+        "preferredVehicle": 0
+      },
+      "color": "#FFC0C0C3",
+      "schedule": [
+        {
+          "departureTime": 7.62498,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 11.36798,
+          "destination": "Shop"
+        },
+        {
+          "departureTime": 12.136735,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.790817,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 4,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 18
+    },
+    {
+      "id": 24,
+      "homeNode": 36,
+      "workNode": 14,
+      "traits": {
+        "archetype": "SundayDriver",
+        "aggressiveness": 0.23633254,
+        "speedBias": 0.8,
+        "reactionTime": 1.2,
+        "steeringSharpness": 0.5150995,
+        "brakingComfort": 1.8166286,
+        "laneChangeBias": 0.19078152,
+        "patienceTimer": 119.851456,
+        "preferredVehicle": 0
+      },
+      "color": "#FFE4E1DC",
+      "schedule": [
+        {
+          "departureTime": 9.6898775,
+          "destination": "Leisure"
+        },
+        {
+          "departureTime": 12.814811,
+          "destination": "Shop"
+        },
+        {
+          "departureTime": 15.296857,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 3,
+      "activity": "Dormant",
+      "currentPOINode": 36,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 25,
+      "homeNode": 36,
+      "workNode": 52,
+      "traits": {
+        "archetype": "LeadFoot",
+        "aggressiveness": 0.941577,
+        "speedBias": 1.25271,
+        "reactionTime": 0.4716667,
+        "steeringSharpness": 1.5644696,
+        "brakingComfort": 3.143855,
+        "laneChangeBias": 0.7502717,
+        "patienceTimer": 5,
+        "preferredVehicle": 0
+      },
+      "color": "#FFC0C0C3",
+      "schedule": [
+        {
+          "departureTime": 8.514702,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.769346,
+          "destination": "Leisure"
+        },
+        {
+          "departureTime": 20.80905,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Dormant",
+      "currentPOINode": 51,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 26,
+      "homeNode": 37,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Trucker",
+        "aggressiveness": 0.06358968,
+        "speedBias": 0.9516804,
+        "reactionTime": 0.88332075,
+        "steeringSharpness": 0.84256196,
+        "brakingComfort": 2.4217079,
+        "laneChangeBias": 0.36048818,
+        "patienceTimer": 112.144104,
+        "preferredVehicle": 2
+      },
+      "color": "#FFA0A0A2",
+      "schedule": [
+        {
+          "departureTime": 6.612817,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.864996,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 34
+    },
+    {
+      "id": 27,
+      "homeNode": 37,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.4528532,
+        "speedBias": 0.97974783,
+        "reactionTime": 0.5724666,
+        "steeringSharpness": 0.9211024,
+        "brakingComfort": 2.4947774,
+        "laneChangeBias": 0.45350352,
+        "patienceTimer": 41.54191,
+        "preferredVehicle": 0
+      },
+      "color": "#FF284B32",
+      "schedule": [
+        {
+          "departureTime": 8.004695,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.33433,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 2
+    },
+    {
+      "id": 28,
+      "homeNode": 39,
+      "workNode": 14,
+      "traits": {
+        "archetype": "LeadFoot",
+        "aggressiveness": 0.8679715,
+        "speedBias": 1.1844015,
+        "reactionTime": 0.50620735,
+        "steeringSharpness": 1.3031023,
+        "brakingComfort": 3.2787285,
+        "laneChangeBias": 0.7404432,
+        "patienceTimer": 18.486813,
+        "preferredVehicle": 0
+      },
+      "color": "#FFAFB2B6",
+      "schedule": [
+        {
+          "departureTime": 8.917576,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.399887,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 8
+    },
+    {
+      "id": 29,
+      "homeNode": 39,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.273081,
+        "speedBias": 1.1067853,
+        "reactionTime": 0.5040796,
+        "steeringSharpness": 1.0424634,
+        "brakingComfort": 2.7512822,
+        "laneChangeBias": 0.6479366,
+        "patienceTimer": 24.800459,
+        "preferredVehicle": 0
+      },
+      "color": "#FF1C1C1E",
+      "schedule": [
+        {
+          "departureTime": 8.89911,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.363081,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Dormant",
+      "currentPOINode": 39,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 30,
+      "homeNode": 40,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.4402215,
+        "speedBias": 1.0530891,
+        "reactionTime": 0.7322696,
+        "steeringSharpness": 1.2749966,
+        "brakingComfort": 2.5683527,
+        "laneChangeBias": 0.67750496,
+        "patienceTimer": 5,
+        "preferredVehicle": 0
+      },
+      "color": "#FF828284",
+      "schedule": [
+        {
+          "departureTime": 7.44543,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.233791,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 4
+    },
+    {
+      "id": 31,
+      "homeNode": 40,
+      "workNode": 52,
+      "traits": {
+        "archetype": "LeadFoot",
+        "aggressiveness": 0.86590207,
+        "speedBias": 1.1951083,
+        "reactionTime": 0.3,
+        "steeringSharpness": 1.5533928,
+        "brakingComfort": 3.3851998,
+        "laneChangeBias": 0.6925739,
+        "patienceTimer": 5,
+        "preferredVehicle": 0
+      },
+      "color": "#FFC0C0C3",
+      "schedule": [
+        {
+          "departureTime": 7.9946747,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.224277,
+          "destination": "Leisure"
+        },
+        {
+          "departureTime": 19.86329,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 35
+    },
+    {
+      "id": 32,
+      "homeNode": 55,
+      "workNode": 52,
+      "traits": {
+        "archetype": "NervousNellie",
+        "aggressiveness": 0.12045606,
+        "speedBias": 0.97606707,
+        "reactionTime": 0.54457784,
+        "steeringSharpness": 1.4044912,
+        "brakingComfort": 1.898057,
+        "laneChangeBias": 0.063245416,
+        "patienceTimer": 48.426453,
+        "preferredVehicle": 0
+      },
+      "color": "#FF646467",
+      "schedule": [
+        {
+          "departureTime": 7.153816,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 16.522093,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Dormant",
+      "currentPOINode": 55,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 33,
+      "homeNode": 55,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.40142867,
+        "speedBias": 0.98649114,
+        "reactionTime": 0.5543771,
+        "steeringSharpness": 1.107159,
+        "brakingComfort": 2.1721084,
+        "laneChangeBias": 0.52134913,
+        "patienceTimer": 22.113237,
+        "preferredVehicle": 0
+      },
+      "color": "#FFF0F0EE",
+      "schedule": [
+        {
+          "departureTime": 8.211477,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.296629,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 1,
+      "activity": "Dormant",
+      "currentPOINode": 52,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 34,
+      "homeNode": 56,
+      "workNode": 14,
+      "traits": {
+        "archetype": "NervousNellie",
+        "aggressiveness": 0.117460616,
+        "speedBias": 0.9124129,
+        "reactionTime": 0.4824622,
+        "steeringSharpness": 1.4478083,
+        "brakingComfort": 1.875721,
+        "laneChangeBias": 0.23008078,
+        "patienceTimer": 56.120056,
+        "preferredVehicle": 0
+      },
+      "color": "#FFA51919",
+      "schedule": [
+        {
+          "departureTime": 7.4598675,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 16.449736,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Dormant",
+      "currentPOINode": 56,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 35,
+      "homeNode": 56,
+      "workNode": 14,
+      "traits": {
+        "archetype": "LeadFoot",
+        "aggressiveness": 0.90459806,
+        "speedBias": 1.2653466,
+        "reactionTime": 0.42467594,
+        "steeringSharpness": 1.3864785,
+        "brakingComfort": 3.2226222,
+        "laneChangeBias": 0.7843735,
+        "patienceTimer": 13.057484,
+        "preferredVehicle": 0
+      },
+      "color": "#FFAFB2B6",
+      "schedule": [
+        {
+          "departureTime": 8.568936,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.659384,
+          "destination": "Leisure"
+        },
+        {
+          "departureTime": 20.955751,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 13
+    },
+    {
+      "id": 36,
+      "homeNode": 57,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Trucker",
+        "aggressiveness": 0.20714611,
+        "speedBias": 0.8884427,
+        "reactionTime": 0.67820954,
+        "steeringSharpness": 0.7710284,
+        "brakingComfort": 2.2890718,
+        "laneChangeBias": 0.26933876,
+        "patienceTimer": 114.07044,
+        "preferredVehicle": 2
+      },
+      "color": "#FF232326",
+      "schedule": [
+        {
+          "departureTime": 5.9087853,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.68796,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 29
+    },
+    {
+      "id": 37,
+      "homeNode": 57,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.2421391,
+        "speedBias": 0.9779974,
+        "reactionTime": 0.49644148,
+        "steeringSharpness": 0.9249562,
+        "brakingComfort": 3.3044841,
+        "laneChangeBias": 0.63236904,
+        "patienceTimer": 20.181187,
+        "preferredVehicle": 0
+      },
+      "color": "#FFE4E1DC",
+      "schedule": [
+        {
+          "departureTime": 8.35201,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.074787,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 28
+    },
+    {
+      "id": 38,
+      "homeNode": 59,
+      "workNode": 52,
+      "traits": {
+        "archetype": "LeadFoot",
+        "aggressiveness": 0.8783852,
+        "speedBias": 1.3,
+        "reactionTime": 0.3,
+        "steeringSharpness": 1.5025408,
+        "brakingComfort": 3.4560142,
+        "laneChangeBias": 0.67168486,
+        "patienceTimer": 9.335712,
+        "preferredVehicle": 0
+      },
+      "color": "#FFAFB2B6",
+      "schedule": [
+        {
+          "departureTime": 7.745384,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.444065,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 10
+    },
+    {
+      "id": 39,
+      "homeNode": 59,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.23192196,
+        "speedBias": 1.0499247,
+        "reactionTime": 0.51718986,
+        "steeringSharpness": 1.0417953,
+        "brakingComfort": 2.1128154,
+        "laneChangeBias": 0.583647,
+        "patienceTimer": 44.86979,
+        "preferredVehicle": 0
+      },
+      "color": "#FFC0C0C3",
+      "schedule": [
+        {
+          "departureTime": 8.193226,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.364595,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 9
+    },
+    {
+      "id": 40,
+      "homeNode": 60,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.3474185,
+        "speedBias": 0.99851394,
+        "reactionTime": 0.6860076,
+        "steeringSharpness": 1.0270581,
+        "brakingComfort": 2.5199196,
+        "laneChangeBias": 0.56441414,
+        "patienceTimer": 25.979849,
+        "preferredVehicle": 0
+      },
+      "color": "#FFA51919",
+      "schedule": [
+        {
+          "departureTime": 7.310311,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.015192,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 23
+    },
+    {
+      "id": 41,
+      "homeNode": 60,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.4125199,
+        "speedBias": 1.0941925,
+        "reactionTime": 0.5020717,
+        "steeringSharpness": 1.170485,
+        "brakingComfort": 2.0265682,
+        "laneChangeBias": 0.7320663,
+        "patienceTimer": 24.12962,
+        "preferredVehicle": 0
+      },
+      "color": "#FF646467",
+      "schedule": [
+        {
+          "departureTime": 8.367871,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.855082,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 1,
+      "activity": "Dormant",
+      "currentPOINode": 52,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 42,
+      "homeNode": 62,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.5223086,
+        "speedBias": 0.99252623,
+        "reactionTime": 0.5386939,
+        "steeringSharpness": 0.94021326,
+        "brakingComfort": 2.599277,
+        "laneChangeBias": 0.44908875,
+        "patienceTimer": 30.948025,
+        "preferredVehicle": 0
+      },
+      "color": "#FF2D559B",
+      "schedule": [
+        {
+          "departureTime": 8.133527,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.404016,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 7
+    },
+    {
+      "id": 43,
+      "homeNode": 62,
+      "workNode": 14,
+      "traits": {
+        "archetype": "LeadFoot",
+        "aggressiveness": 1,
+        "speedBias": 1.2228469,
+        "reactionTime": 0.3,
+        "steeringSharpness": 1.5926119,
+        "brakingComfort": 3.1186144,
+        "laneChangeBias": 0.96130216,
+        "patienceTimer": 24.521286,
+        "preferredVehicle": 0
+      },
+      "color": "#FF141416",
+      "schedule": [
+        {
+          "departureTime": 9.477513,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.635391,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 12
+    },
+    {
+      "id": 44,
+      "homeNode": 63,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.5302889,
+        "speedBias": 1.0642114,
+        "reactionTime": 0.471326,
+        "steeringSharpness": 0.9265973,
+        "brakingComfort": 1.9776049,
+        "laneChangeBias": 0.5610105,
+        "patienceTimer": 48.01422,
+        "preferredVehicle": 0
+      },
+      "color": "#FFC31E1E",
+      "schedule": [
+        {
+          "departureTime": 7.586734,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.959398,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 5
+    },
+    {
+      "id": 45,
+      "homeNode": 63,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.5666246,
+        "speedBias": 0.97267723,
+        "reactionTime": 0.5355451,
+        "steeringSharpness": 1.1983774,
+        "brakingComfort": 2.3271706,
+        "laneChangeBias": 0.6024863,
+        "patienceTimer": 41.1568,
+        "preferredVehicle": 0
+      },
+      "color": "#FFC0C0C3",
+      "schedule": [
+        {
+          "departureTime": 8.824275,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.344847,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 0
+    },
+    {
+      "id": 46,
+      "homeNode": 65,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Trucker",
+        "aggressiveness": 0.38540834,
+        "speedBias": 0.99491733,
+        "reactionTime": 0.8369775,
+        "steeringSharpness": 0.6776107,
+        "brakingComfort": 2.0337422,
+        "laneChangeBias": 0.4700063,
+        "patienceTimer": 99.39368,
+        "preferredVehicle": 2
+      },
+      "color": "#FFFFFFFF",
+      "schedule": [
+        {
+          "departureTime": 5.8865914,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 19.702705,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 1,
+      "activity": "Dormant",
+      "currentPOINode": 52,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 47,
+      "homeNode": 65,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.4671205,
+        "speedBias": 0.9882279,
+        "reactionTime": 0.42175817,
+        "steeringSharpness": 1.293334,
+        "brakingComfort": 2.3533278,
+        "laneChangeBias": 0.36943072,
+        "patienceTimer": 45.401398,
+        "preferredVehicle": 0
+      },
+      "color": "#FFAFB2B6",
+      "schedule": [
+        {
+          "departureTime": 7.87024,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.984518,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 19
+    },
+    {
+      "id": 48,
+      "homeNode": 66,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.415814,
+        "speedBias": 1.0493522,
+        "reactionTime": 0.61130625,
+        "steeringSharpness": 1.2369506,
+        "brakingComfort": 3.077022,
+        "laneChangeBias": 0.3179157,
+        "patienceTimer": 78.456024,
+        "preferredVehicle": 0
+      },
+      "color": "#FFF0F0EE",
+      "schedule": [
+        {
+          "departureTime": 7.667985,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.154613,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 1,
+      "activity": "Dormant",
+      "currentPOINode": 52,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 49,
+      "homeNode": 66,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.4121773,
+        "speedBias": 0.98795736,
+        "reactionTime": 0.5516859,
+        "steeringSharpness": 1.0025299,
+        "brakingComfort": 2.9437523,
+        "laneChangeBias": 0.39418116,
+        "patienceTimer": 36.9636,
+        "preferredVehicle": 0
+      },
+      "color": "#FF141416",
+      "schedule": [
+        {
+          "departureTime": 8.531273,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.171133,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 1,
+      "activity": "Dormant",
+      "currentPOINode": 52,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 50,
+      "homeNode": 68,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.3923128,
+        "speedBias": 0.9975939,
+        "reactionTime": 0.62275577,
+        "steeringSharpness": 0.96468055,
+        "brakingComfort": 2.4913547,
+        "laneChangeBias": 0.67536217,
+        "patienceTimer": 12.705414,
+        "preferredVehicle": 0
+      },
+      "color": "#FF646467",
+      "schedule": [
+        {
+          "departureTime": 8.159812,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 12.200937,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 12.504086,
+          "destination": "Shop"
+        },
+        {
+          "departureTime": 17.500458,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 1,
+      "activity": "Dormant",
+      "currentPOINode": 14,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 51,
+      "homeNode": 68,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Trucker",
+        "aggressiveness": 0.23193634,
+        "speedBias": 0.956262,
+        "reactionTime": 0.92693245,
+        "steeringSharpness": 0.84633607,
+        "brakingComfort": 2.4049842,
+        "laneChangeBias": 0.21232998,
+        "patienceTimer": 113.16776,
+        "preferredVehicle": 2
+      },
+      "color": "#FFE4E1DC",
+      "schedule": [
+        {
+          "departureTime": 6.3452144,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.547712,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 1,
+      "activity": "Dormant",
+      "currentPOINode": 52,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 52,
+      "homeNode": 69,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.51405245,
+        "speedBias": 1.0467135,
+        "reactionTime": 0.59813005,
+        "steeringSharpness": 0.922812,
+        "brakingComfort": 2.5536928,
+        "laneChangeBias": 0.5377183,
+        "patienceTimer": 16.8433,
+        "preferredVehicle": 0
+      },
+      "color": "#FF3C64AA",
+      "schedule": [
+        {
+          "departureTime": 8.381613,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 18.120258,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 24
+    },
+    {
+      "id": 53,
+      "homeNode": 69,
+      "workNode": 14,
+      "traits": {
+        "archetype": "Trucker",
+        "aggressiveness": 0.23409301,
+        "speedBias": 0.89566696,
+        "reactionTime": 0.6981586,
+        "steeringSharpness": 0.6078786,
+        "brakingComfort": 2.142914,
+        "laneChangeBias": 0.29320273,
+        "patienceTimer": 88.16447,
+        "preferredVehicle": 2
+      },
+      "color": "#FF141416",
+      "schedule": [
+        {
+          "departureTime": 6.5623693,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 20.111652,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 1,
+      "activity": "Dormant",
+      "currentPOINode": 14,
+      "vehicleIndex": -1
+    },
+    {
+      "id": 54,
+      "homeNode": 71,
+      "workNode": 52,
+      "traits": {
+        "archetype": "Commuter",
+        "aggressiveness": 0.30983815,
+        "speedBias": 1.054496,
+        "reactionTime": 0.59458435,
+        "steeringSharpness": 1.0823917,
+        "brakingComfort": 2.325277,
+        "laneChangeBias": 0.52583826,
+        "patienceTimer": 49.99142,
+        "preferredVehicle": 0
+      },
+      "color": "#FFFFFFFF",
+      "schedule": [
+        {
+          "departureTime": 8.30981,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.841993,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 20
+    },
+    {
+      "id": 55,
+      "homeNode": 71,
+      "workNode": 14,
+      "traits": {
+        "archetype": "LeadFoot",
+        "aggressiveness": 0.89000547,
+        "speedBias": 1.2504127,
+        "reactionTime": 0.4151721,
+        "steeringSharpness": 1.5658364,
+        "brakingComfort": 3.2846375,
+        "laneChangeBias": 0.937253,
+        "patienceTimer": 18.380259,
+        "preferredVehicle": 0
+      },
+      "color": "#FFAFB2B6",
+      "schedule": [
+        {
+          "departureTime": 8.771049,
+          "destination": "Work"
+        },
+        {
+          "departureTime": 17.969337,
+          "destination": "Home"
+        }
+      ],
+      "scheduleIndex": 2,
+      "activity": "Driving",
+      "currentPOINode": -1,
+      "vehicleIndex": 22
+    }
+  ]
+}
