@@ -23,6 +23,11 @@ public class RoadRenderer
     private int _cachedVersion = -1;
     /// <summary>Ambient lighting factor for the current frame (1.0 = full day). Set at the start of Draw.</summary>
     private float _ambient = 1f;
+    /// <summary>
+    /// Heat-map overlay active for the current frame, or null when the overlay is disabled.
+    /// Set at the start of <see cref="Draw"/> and consumed by <see cref="DrawRoadSurface"/>.
+    /// </summary>
+    private CongestionHeatMap? _heatMap;
 
     // Reusable paints (avoid per-frame allocation)
     private readonly SKPaint _surfacePaint = new()
@@ -77,10 +82,17 @@ public class RoadRenderer
     /// Draws all active road edges in two passes (surfaces first, then markings) so that
     /// connecting roads don't overlap each other's lines. Also draws stop lines and nodes.
     /// For paired edges (forward/reverse), only the lower-index edge is drawn to avoid overdraw.
+    /// When <paramref name="heatMap"/> is non-null and <see cref="CongestionHeatMap.Enabled"/>
+    /// is true, a congestion tint is alpha-blended over each road surface after the base
+    /// color is applied, without affecting lane markings or the road type styling.
     /// </summary>
-    public void Draw(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom, float darkness = 0f)
+    public void Draw(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom,
+        float darkness = 0f, CongestionHeatMap? heatMap = null)
     {
         if (graph.Edges.Count == 0) return;
+
+        // Store heat-map reference for use inside DrawRoadSurface (cleared after the pass)
+        _heatMap = (heatMap != null && heatMap.Enabled) ? heatMap : null;
 
         // Dim road colors at night
         _ambient = 1f - darkness * 0.45f;
@@ -104,6 +116,10 @@ public class RoadRenderer
             if (reverse >= 0 && reverse < i) continue;
             DrawRoadSurface(canvas, edge, i);
         }
+
+        // Heat-map field is only valid during Pass 1; clear it so stale data is never
+        // accidentally accessed by intersection-fill or marking passes.
+        _heatMap = null;
 
         // Pass 1.5: fill intersection interiors and draw corner curves
         DrawIntersectionFills(canvas, graph, stopLines, zoom);
@@ -266,13 +282,29 @@ public class RoadRenderer
     /// Draws the asphalt surface for a single road edge. Surface color and stroke width
     /// are derived from the edge's <see cref="RoadType"/> via <see cref="RoadTypeVisuals"/>
     /// so each classification is visually distinct; lane geometry is not affected.
+    /// When a <see cref="CongestionHeatMap"/> is active, a semi-transparent congestion tint
+    /// is drawn over the base surface on the same path. At zero congestion the tint is fully
+    /// transparent so the road looks exactly as it does without the heat-map.
     /// </summary>
     private void DrawRoadSurface(SKCanvas canvas, RoadEdge edge, int edgeIndex)
     {
         var cached = _cache[edgeIndex];
+        float strokeWidth = cached.TotalWidth * RoadTypeVisuals.GetWidthMultiplier(edge.RoadType);
         _surfacePaint.Color = RoadTypeVisuals.GetSurfaceColor(edge.RoadType, _ambient);
-        _surfacePaint.StrokeWidth = cached.TotalWidth * RoadTypeVisuals.GetWidthMultiplier(edge.RoadType);
+        _surfacePaint.StrokeWidth = strokeWidth;
         canvas.DrawPath(cached.CenterPath, _surfacePaint);
+
+        // Blend congestion tint over the base surface (skipped when overlay is off or
+        // congestion is zero/near-zero so alpha is effectively 0).
+        if (_heatMap != null)
+        {
+            float congestion = _heatMap.GetCongestion(edgeIndex);
+            if (congestion > 0.005f)
+            {
+                var overlayPaint = _heatMap.GetOverlayPaint(congestion, strokeWidth);
+                canvas.DrawPath(cached.CenterPath, overlayPaint);
+            }
+        }
     }
 
     /// <summary>

@@ -25,6 +25,23 @@ public class SceneRenderer
     private readonly StatisticsPanel _statisticsPanel;
 
     /// <summary>
+    /// Congestion heat-map overlay. Recomputed once per frame in <see cref="Render"/>
+    /// before the road draw pass and forwarded to the road renderer.
+    /// </summary>
+    private readonly CongestionHeatMap _heatMap = new();
+
+    /// <summary>
+    /// Enables or disables the congestion heat-map overlay. Forwards to
+    /// <see cref="CongestionHeatMap.Enabled"/> so the director can wire a keyboard
+    /// toggle without touching MainForm.cs.
+    /// </summary>
+    public bool HeatMapEnabled
+    {
+        get => _heatMap.Enabled;
+        set => _heatMap.Enabled = value;
+    }
+
+    /// <summary>
     /// Constructs the SceneRenderer and wires all sub-renderers and UI panels.
     /// Call order dependency: <see cref="Render"/> must be called only after all
     /// sub-renderers are fully initialized.
@@ -66,8 +83,13 @@ public class SceneRenderer
         // Draw grid
         DrawGrid(canvas, camera, info, gridColor);
 
-        // Draw roads
-        _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness);
+        // Update congestion heat-map before the road draw pass so values are current.
+        // Update is cheap even when Enabled is false: it still zeroes counts and normalises,
+        // but the renderer skips blending when the overlay is disabled.
+        _heatMap.Update(vehicles, graph);
+
+        // Draw roads (heat-map forwarded so the renderer can tint surfaces)
+        _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness, _heatMap);
         _roadRenderer.DrawSignals(canvas, graph, trafficSignals, stopLineCache, camera.Zoom);
         _roadRenderer.DrawStopSigns(canvas, graph, stopSigns, stopLineCache, camera.Zoom);
         _roadRenderer.DrawYieldSigns(canvas, graph, yieldSigns, stopLineCache, camera.Zoom);
