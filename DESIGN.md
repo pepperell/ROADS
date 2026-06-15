@@ -671,7 +671,7 @@ Phases are built by an Opus "director" that hands self-contained milestones to l
 **Goal:** Complete editor, visual polish, save/load, quality-of-life features.
 
 - [X] Save/Load (binary format)
-- [ ] JSON export
+- [X] JSON export
 - [ ] Auto-save with rotating backups
 - [ ] Undo/Redo system (command pattern)
 - [X] Minimap
@@ -770,7 +770,7 @@ Roads/
 │   │
 │   └── Persistence/
 │       ├── MapSerializer.cs      # Save/Load binary
-│       ├── JsonExporter.cs       # JSON export
+│       ├── MapJsonSerializer.cs  # JSON export
 │       └── AutoSave.cs           # Timed auto-save
 │
 └── Roads.Tests/                  # Unit test project
