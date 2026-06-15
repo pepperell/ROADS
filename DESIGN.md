@@ -672,7 +672,7 @@ Phases are built by an Opus "director" that hands self-contained milestones to l
 
 - [X] Save/Load (binary format)
 - [X] JSON export
-- [ ] Auto-save with rotating backups
+- [X] Auto-save with rotating backups
 - [ ] Undo/Redo system (command pattern)
 - [X] Minimap
 - [X] Statistics panel (vehicle count, avg speed, congestion)
