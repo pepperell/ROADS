@@ -58,6 +58,19 @@ public class SimulationLoop
     /// <summary>Gets the population manager for resident/schedule info.</summary>
     public PopulationManager Population => _populationManager;
 
+    /// <summary>
+    /// Per-tick wall-clock breakdown of the simulation subsystems in milliseconds,
+    /// summed across all fixed substeps executed in the most recent active <see cref="Tick"/>.
+    /// Pure profiling instrumentation — has no effect on behavior. The buckets sum to
+    /// approximately the total sim-tick time (minus small un-instrumented bookkeeping).
+    /// </summary>
+    public readonly record struct SimTimingBreakdown(
+        double GridMs, double CachesMs, double SignalsMs, double LaneChangeMs,
+        double SteeringMs, double PhysicsMs, double RerouteMs, double PopulationMs);
+
+    /// <summary>Subsystem timing from the most recent active <see cref="Tick"/> (substeps &gt; 0).</summary>
+    public SimTimingBreakdown LastTiming { get; private set; }
+
     public SimulationLoop(RoadGraph graph, VehicleStore vehicles,
         SpatialGrid vehicleGrid, StopLineCache stopLineCache,
         IntersectionArcCache intersectionArcs, EdgeSpatialGrid edgeSpatialGrid,
@@ -125,30 +138,70 @@ public class SimulationLoop
             return;
         }
 
-        _simAccumulator += wallElapsed * TimeScale;
+        // Spiral-of-death guard: cap the real frame time we account for in one Tick. Without this,
+        // a slow frame (heavy load) injects a huge backlog, the loop runs up to MaxStepsPerFrame
+        // substeps to "catch up", and the sim advances many ticks between renders — vehicles jump.
+        // Capping wallElapsed keeps an overloaded sim smooth (a few substeps/frame, slow-motion)
+        // while preserving fast-forward: a high TimeScale still scales the injected sim-time up,
+        // because the spiral comes from a slow frame, not from a high TimeScale.
         const int MaxStepsPerFrame = 128;
+        const double MaxFrameTime = 2.0 / 30.0; // ≈ at most 2 substeps of backlog per frame at 1x
+        _simAccumulator += Math.Min(wallElapsed, MaxFrameTime) * TimeScale;
         int steps = 0;
+
+        // Per-subsystem timing accumulators (Stopwatch ticks), summed over all substeps
+        // this Tick. Converted to ms and published in LastTiming after the loop.
+        long gridT = 0, cacheT = 0, sigT = 0, laneT = 0, steerT = 0, physT = 0, rerouteT = 0, popT = 0;
 
         while (_simAccumulator >= SimDt && steps < MaxStepsPerFrame)
         {
+            long ts = Stopwatch.GetTimestamp();
             _vehicleGrid.Rebuild(_vehicles.PosX, _vehicles.PosY, _vehicles.Count);
+            long t1 = Stopwatch.GetTimestamp(); gridT += t1 - ts;
+
             RebuildWorldCaches();
+            long t2 = Stopwatch.GetTimestamp(); cacheT += t2 - t1;
+
             _trafficSignals.Update(_graph, SimDt);
             _stopSigns.Update(_graph, _vehicles, _stopLineCache, SimDt);
             _yieldSigns.Update(_graph, _vehicles, _stopLineCache, _intersectionArcs, SimDt);
+            long t3 = Stopwatch.GetTimestamp(); sigT += t3 - t2;
+
             LaneChangeLogic.UpdateAll(_vehicles, _graph, _vehicleGrid, _intersectionArcs, _stopLineCache, SimDt);
             LaneChangeLogic.ApplyMergeSpeedBias(_vehicles, _graph, _vehicleGrid, _intersectionArcs, _stopLineCache);
+            long t4 = Stopwatch.GetTimestamp(); laneT += t4 - t3;
+
             SteeringController.UpdateAll(_vehicles, _graph, _vehicleGrid, _stopLineCache, _intersectionArcs, _trafficSignals, _stopSigns, _yieldSigns, SimDt);
+            long t5 = Stopwatch.GetTimestamp(); steerT += t5 - t4;
+
             VehiclePhysics.UpdateAll(_vehicles, SimDt);
+            long t6 = Stopwatch.GetTimestamp(); physT += t6 - t5;
 
             _spawner.RerouteFinished();
+            long t7 = Stopwatch.GetTimestamp(); rerouteT += t7 - t6;
+
             _populationManager.Update(SimDt, Clock.TimeOfDay, Clock.DayNumber);
             _spawner.ScheduleModeActive = _populationManager.ScheduleModeEnabled;
             _spawner.AutoSpawn(SimDt, MaxVehicles);
+            long t8 = Stopwatch.GetTimestamp(); popT += t8 - t7;
+
             Clock.Advance(SimDt);
 
             _simAccumulator -= SimDt;
             steps++;
+        }
+
+        // If we hit the step cap, the sim can't keep up: drop the residual backlog so it runs in
+        // smooth slow-motion rather than accumulating unbounded debt (the spiral).
+        if (steps >= MaxStepsPerFrame)
+            _simAccumulator = 0;
+
+        if (steps > 0)
+        {
+            double toMs = 1000.0 / Stopwatch.Frequency;
+            LastTiming = new SimTimingBreakdown(
+                gridT * toMs, cacheT * toMs, sigT * toMs, laneT * toMs,
+                steerT * toMs, physT * toMs, rerouteT * toMs, popT * toMs);
         }
 
         // Watchdog: centralized removal fixup (VehicleStore.VehicleRemoving /

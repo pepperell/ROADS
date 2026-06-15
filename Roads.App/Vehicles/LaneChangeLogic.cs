@@ -45,6 +45,14 @@ public static class LaneChangeLogic
     [ThreadStatic] private static List<int>? _nearbyBuffer;
 
     /// <summary>
+    /// Per-pass arc-occupancy snapshot, rebuilt at each public entry point. CurrentArc is stable
+    /// throughout the lane-change phase (only SteeringController writes it, and that runs later in
+    /// the tick), so a single snapshot per entry is exact. Lets <see cref="ScanTargetLaneGaps"/>
+    /// find vehicles on arcs exiting onto a target lane without an O(n) full-vehicle scan.
+    /// </summary>
+    private static readonly ArcOccupancyIndex _arcOccupancy = new();
+
+    /// <summary>
     /// Updates lane change state for all active vehicles: ticks cooldowns,
     /// advances in-progress changes, and evaluates new lane change decisions.
     /// </summary>
@@ -54,6 +62,9 @@ public static class LaneChangeLogic
     /// <param name="dt">Delta time in seconds.</param>
     public static void UpdateAll(VehicleStore store, RoadGraph graph, SpatialGrid grid, IntersectionArcCache arcCache, StopLineCache stopLines, float dt)
     {
+        // Snapshot arc occupancy once for this pass (CurrentArc is stable until steering runs).
+        _arcOccupancy.Rebuild(store, arcCache.ArcCount);
+
         for (int i = 0; i < store.Count; i++)
         {
             if (store.State[i] != VehicleState.Driving) continue;
@@ -482,24 +493,34 @@ public static class LaneChangeLogic
 
         // Check vehicles on arcs that will exit onto our edge in the target lane.
         // They count as approaching from behind (they'll arrive at the edge start).
-        if (arcCache != null && stopLines != null)
+        // Arcs exiting onto myEdge all live at myEdge.FromNode, so we look up only that node's
+        // arcs and their occupants instead of scanning every vehicle.
+        if (arcCache != null && stopLines != null && myEdge >= 0)
         {
             float fromStopT = stopLines.GetStopTAtFromNode(myEdge);
             float distFromStart = (myProgress - fromStopT) * edgeLength;
 
-            for (int j = 0; j < store.Count; j++)
+            int fromNode = graph.Edges[myEdge].FromNode;
+            if (fromNode >= 0)
             {
-                if (j == index || store.State[j] != VehicleState.Driving) continue;
-                int otherArc = store.CurrentArc[j];
-                if (otherArc < 0) continue;
-                var otherArcData = arcCache.GetArc(otherArc);
-                if (otherArcData.OutgoingEdge != myEdge) continue;
-                if (otherArcData.OutgoingLane != targetLane) continue;
+                foreach (int arc in arcCache.GetArcsAtNode(fromNode))
+                {
+                    var otherArcData = arcCache.GetArc(arc);
+                    if (otherArcData.OutgoingEdge != myEdge) continue;
+                    if (otherArcData.OutgoingLane != targetLane) continue;
 
-                float otherRemaining = (1f - store.ArcProgress[j]) * otherArcData.Length;
-                float behindDist = distFromStart + otherRemaining;
-                if (behindDist < nearestBehind)
-                    nearestBehind = behindDist;
+                    int occCount = _arcOccupancy.OccupantCount(arc);
+                    for (int k = 0; k < occCount; k++)
+                    {
+                        int j = _arcOccupancy.OccupantAt(arc, k);
+                        if (j == index || store.State[j] != VehicleState.Driving) continue;
+
+                        float otherRemaining = (1f - store.ArcProgress[j]) * otherArcData.Length;
+                        float behindDist = distFromStart + otherRemaining;
+                        if (behindDist < nearestBehind)
+                            nearestBehind = behindDist;
+                    }
+                }
             }
         }
 
@@ -538,6 +559,10 @@ public static class LaneChangeLogic
     /// <param name="grid">Spatial grid for nearby vehicle queries.</param>
     public static void ApplyMergeSpeedBias(VehicleStore store, RoadGraph graph, SpatialGrid grid, IntersectionArcCache arcCache, StopLineCache stopLines)
     {
+        // Refresh the arc-occupancy snapshot (UpdateAll's lane-change state changes don't touch
+        // CurrentArc, but rebuilding here keeps this entry point independently correct).
+        _arcOccupancy.Rebuild(store, arcCache.ArcCount);
+
         for (int i = 0; i < store.Count; i++)
         {
             // Only apply when: driving, on edge, wants a different lane, not mid-change, has urgency

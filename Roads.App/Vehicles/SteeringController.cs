@@ -57,6 +57,48 @@ public static class SteeringController
     private static int[] _prevEdge = Array.Empty<int>();
 
     /// <summary>
+    /// Per-pass arc-occupancy index, reused across ticks. Rebuilt at the top of <see cref="UpdateAll"/>
+    /// and kept live as vehicles enter/exit arcs during the pass — every CurrentArc write in this class
+    /// goes through <see cref="SetArc"/>, so the arc-conflict check (formerly an O(n) full-vehicle scan)
+    /// observes mid-pass arc entries and stays exactly equivalent.
+    /// </summary>
+    private static readonly ArcOccupancyIndex _arcOccupancy = new();
+
+    /// <summary>Thread-local buffer for the merge-into-exit-lane spatial query.</summary>
+    [ThreadStatic] private static List<int>? _scan2Buffer;
+
+    /// <summary>
+    /// DEBUG tripwire: ordered count of vehicle pairs simultaneously occupying mutually-conflicting
+    /// arcs after the last <see cref="UpdateAll"/>. On an uncontrolled network this must stay 0 — a
+    /// nonzero value means two vehicles are inside conflicting intersection arcs at once (a collision
+    /// regression). Computed only in DEBUG builds (0 in Release); surfaced in benchmark.log.
+    /// </summary>
+    public static int LastConflictCoOccupancy;
+
+    /// <summary>
+    /// Sets a vehicle's CurrentArc and keeps <see cref="_arcOccupancy"/> consistent in lock-step.
+    /// EVERY CurrentArc write during the steering pass must route through here — otherwise the
+    /// occupancy index goes stale and scan #1 misses a conflict (→ vehicles cross at intersections).
+    /// <paramref name="newArc"/> = -1 means the vehicle has left all arcs (back on an edge).
+    /// </summary>
+    private static void SetArc(VehicleStore store, int index, int newArc)
+    {
+        int old = store.CurrentArc[index];
+        if (old >= 0) _arcOccupancy.Exit(old, index);
+        store.CurrentArc[index] = newArc;
+        if (newArc >= 0) _arcOccupancy.Enter(newArc, index);
+    }
+
+    // --- TEMP diagnostic: per-vehicle steering sub-phase timing, to locate the dominant cost.
+    // Remove once the hot phase is identified and fixed. ---
+    /// <summary>Per-tick steering sub-phase wall time in ms (summed over substeps) from the last UpdateAll.</summary>
+    public struct SteeringProfile { public double ArcMs, ProjectMs, SignalsMs, TransitionMs, SteerMs, SpeedMs; }
+    /// <summary>Most recent steering sub-phase breakdown (TEMP diagnostic).</summary>
+    public static SteeringProfile LastProfile;
+    private static long _tArc, _tProject, _tSignals, _tTransition, _tSteer, _tSpeed;
+    // --- end TEMP diagnostic ---
+
+    /// <summary>
     /// Updates a vehicle's steering angle, throttle, brake, and edge/arc progress.
     /// Combines PD heading control, lateral error correction, IDM car-following,
     /// signal/stop-sign/yield compliance, and proximity-based collision avoidance.
@@ -70,7 +112,9 @@ public static class SteeringController
         if (store.CurrentArc[index] >= 0)
         {
             store.DistToRoadSq[index] = 0f; // arc vehicles are always on-road
+            long tsArc = System.Diagnostics.Stopwatch.GetTimestamp();           // TEMP
             UpdateOnArc(store, index, graph, grid, stopLines, arcCache, dt);
+            _tArc += System.Diagnostics.Stopwatch.GetTimestamp() - tsArc;       // TEMP
             return;
         }
 
@@ -87,6 +131,7 @@ public static class SteeringController
         float edgeLength = edge.Length;
         if (edgeLength < 0.01f) edgeLength = 0.01f;
 
+        long _ts = System.Diagnostics.Stopwatch.GetTimestamp();                 // TEMP
         // Project vehicle position onto the Bezier to compute actual progress
         float vx = store.PosX[index];
         float vy = store.PosY[index];
@@ -104,9 +149,12 @@ public static class SteeringController
             float rdy = vy - laneCenter.Y;
             store.DistToRoadSq[index] = rdx * rdx + rdy * rdy;
         }
+        _tProject += System.Diagnostics.Stopwatch.GetTimestamp() - _ts;         // TEMP
 
+        _ts = System.Diagnostics.Stopwatch.GetTimestamp();                      // TEMP
         // Evaluate signals, stop signs, and yield signs
         var (signal, yieldSignal) = EvaluateSignals(store, index, edgeIdx, graph, signals, stopSigns, yieldSigns);
+        _tSignals += System.Diagnostics.Stopwatch.GetTimestamp() - _ts;         // TEMP
 
         // Compute stop-line position in t-space
         float stopT = stopLines.GetStopTAtToNode(edgeIdx);
@@ -117,17 +165,23 @@ public static class SteeringController
         if (CheckRedLightBlocking(store, index, signal, speed, progress, stopAtT, edgeLength, store.BrakingComfort[index]))
             return;
 
+        _ts = System.Diagnostics.Stopwatch.GetTimestamp();                      // TEMP
         // Handle edge transitions (arc entrance, direct jump, or end-of-path stop)
-        var transition = HandleEdgeTransition(store, index, graph, stopLines, arcCache, signals, ref edgeIdx, ref edge, ref edgeLength, ref progress, ref rawProgress, ref baseSpeedLimit, ref targetSpeed, ref stopT, ref halfVehT, ref stopAtT, speed, vx, vy);
+        var transition = HandleEdgeTransition(store, index, graph, stopLines, arcCache, signals, grid, ref edgeIdx, ref edge, ref edgeLength, ref progress, ref rawProgress, ref baseSpeedLimit, ref targetSpeed, ref stopT, ref halfVehT, ref stopAtT, speed, vx, vy);
+        _tTransition += System.Diagnostics.Stopwatch.GetTimestamp() - _ts;      // TEMP
         if (transition == TransitionResult.Returned) return;
 
         store.EdgeProgress[index] = progress;
 
+        _ts = System.Diagnostics.Stopwatch.GetTimestamp();                      // TEMP
         // PD steering
         ComputeSteering(store, index, graph, edgeIdx, rawProgress, progress, edgeLength, minProgressT, vx, vy, dt);
+        _tSteer += System.Diagnostics.Stopwatch.GetTimestamp() - _ts;           // TEMP
 
+        _ts = System.Diagnostics.Stopwatch.GetTimestamp();                      // TEMP
         // IDM car-following + throttle/brake
         ApplySpeedControl(store, index, graph, grid, stopLines, edgeIdx, edgeLength, speed, targetSpeed, progress, stopAtT, signal, yieldSignal);
+        _tSpeed += System.Diagnostics.Stopwatch.GetTimestamp() - _ts;           // TEMP
 
         // Detect multi-segment skip within a single tick
         int exitPathIdx = store.PathIndex[index];
@@ -194,7 +248,7 @@ public static class SteeringController
     /// Returns <see cref="TransitionResult.Returned"/> if the caller should return immediately.
     /// </summary>
     private static TransitionResult HandleEdgeTransition(VehicleStore store, int index, RoadGraph graph,
-        StopLineCache stopLines, IntersectionArcCache arcCache, TrafficSignalSystem signals,
+        StopLineCache stopLines, IntersectionArcCache arcCache, TrafficSignalSystem signals, SpatialGrid grid,
         ref int edgeIdx, ref RoadEdge edge, ref float edgeLength, ref float progress,
         ref float rawProgress, ref float baseSpeedLimit, ref float targetSpeed,
         ref float stopT, ref float halfVehT, ref float stopAtT,
@@ -241,42 +295,49 @@ public static class SteeringController
                     bool isTrafficLightNode = signals.IsTrafficLight(arc.NodeIndex);
                     var mySignal = isTrafficLightNode ? signals.GetSignal(arc.IncomingEdge) : SignalState.Green;
 
-                    for (int j = 0; j < store.Count; j++)
+                    // Look up only the vehicles occupying conflicting arcs (via the occupancy index)
+                    // instead of scanning every vehicle. Equivalent to the former O(n) scan: the set
+                    // { j : CurrentArc[j] ∈ conflicts } is exactly the union of those arcs' occupants,
+                    // and the index is kept live mid-pass via SetArc so entries earlier this pass show.
+                    bool conflictBlocked = false;
+                    int blockerJ = -1, blockerArc = -1;
+                    foreach (int conflictArc in conflicts)
                     {
-                        if (j == index || store.State[j] != VehicleState.Driving) continue;
-                        int otherArc = store.CurrentArc[j];
-                        if (otherArc < 0) continue;
-
-                        bool blocked = false;
-                        foreach (int conflictArc in conflicts)
+                        int occCount = _arcOccupancy.OccupantCount(conflictArc);
+                        for (int k = 0; k < occCount; k++)
                         {
-                            if (otherArc == conflictArc) { blocked = true; break; }
-                        }
+                            int j = _arcOccupancy.OccupantAt(conflictArc, k);
+                            if (j == index || store.State[j] != VehicleState.Driving) continue;
 
-                        if (blocked)
-                        {
-                            // At traffic-light nodes, same-phase vehicles should not block
-                            // each other — the signal already manages inter-phase right-of-way.
-                            // Only block if arcs come from different phases (e.g. a stale
-                            // vehicle from the previous red phase still clearing the intersection).
+                            // At traffic-light nodes, same-phase vehicles should not block each other —
+                            // the signal already manages inter-phase right-of-way. Only block if arcs come
+                            // from different phases (e.g. a stale vehicle still clearing from a prior red).
                             if (isTrafficLightNode && mySignal == SignalState.Green)
                             {
-                                var otherArcData = arcCache.GetArc(otherArc);
-                                var otherSignal = signals.GetSignal(otherArcData.IncomingEdge);
-                                if (otherSignal == SignalState.Green)
+                                var otherArcData = arcCache.GetArc(conflictArc);
+                                if (signals.GetSignal(otherArcData.IncomingEdge) == SignalState.Green)
                                     continue; // same phase, both green — proceed
                             }
 
-                            store.EdgeProgress[index] = stopAtT;
-                            store.Throttle[index] = 0f;
-                            store.Brake[index] = 1.0f;
-                            store.Speed[index] = 0f;
-                            LogArcConflict(store, index,
-                                $"ARC_BLOCKED arcIdx={arcIdx} node={arc.NodeIndex} " +
-                                $"conflictArc={otherArc} blockedByV={j}",
-                                blockerIndex: j);
-                            return TransitionResult.Returned;
+                            conflictBlocked = true;
+                            blockerJ = j;
+                            blockerArc = conflictArc;
+                            break;
                         }
+                        if (conflictBlocked) break;
+                    }
+
+                    if (conflictBlocked)
+                    {
+                        store.EdgeProgress[index] = stopAtT;
+                        store.Throttle[index] = 0f;
+                        store.Brake[index] = 1.0f;
+                        store.Speed[index] = 0f;
+                        LogArcConflict(store, index,
+                            $"ARC_BLOCKED arcIdx={arcIdx} node={arc.NodeIndex} " +
+                            $"conflictArc={blockerArc} blockedByV={blockerJ}",
+                            blockerIndex: blockerJ);
+                        return TransitionResult.Returned;
                     }
 
                     // Check if a vehicle on the outgoing edge is mid-lane-change into our lane.
@@ -291,8 +352,19 @@ public static class SteeringController
                         {
                             float outLength = MathF.Max(outEdgeData.Length, 0.01f);
                             float outStartT = stopLines.GetStopTAtFromNode(outEdge);
-                            for (int j = 0; j < store.Count; j++)
+                            // Candidates lie within VehicleLength*2 of the exit point (arc.P3 = the
+                            // out-lane start), so query the grid around P3 instead of scanning every
+                            // vehicle. The exact edgeDist cutoff is re-applied below, so this is an
+                            // exact superset of the original full scan (no false negatives).
+                            var exitPoint = arc.P3;
+                            var scan2 = _scan2Buffer ??= new List<int>();
+                            scan2.Clear();
+                            grid.QueryFiltered(exitPoint.X, exitPoint.Y,
+                                VehicleLength * 2f + SpatialGrid.CellSize,
+                                store.PosX, store.PosY, scan2);
+                            for (int bi = 0; bi < scan2.Count; bi++)
                             {
+                                int j = scan2[bi];
                                 if (j == index || store.State[j] != VehicleState.Driving) continue;
                                 if (store.CurrentEdge[j] != outEdge || store.CurrentArc[j] >= 0) continue;
                                 // Skip vehicles already in our lane — they're handled by arc IDM look-ahead
@@ -318,8 +390,9 @@ public static class SteeringController
                         }
                     }
 
-                    // Enter the intersection arc
-                    store.CurrentArc[index] = arcIdx;
+                    // Enter the intersection arc (SetArc keeps the occupancy index live so later
+                    // vehicles this pass see this entry).
+                    SetArc(store, index, arcIdx);
                     store.ArcProgress[index] = 0f;
                     store.EdgeProgress[index] = stopAtT;
 
@@ -684,7 +757,7 @@ public static class SteeringController
             int nextEdge = arc.OutgoingEdge;
             if (nextEdge < 0 || nextEdge >= graph.Edges.Count || graph.Edges[nextEdge].FromNode < 0)
             {
-                store.CurrentArc[index] = -1;
+                SetArc(store, index, -1);
                 store.ArcProgress[index] = 0f;
                 store.Path[index] = null;
                 store.PathIndex[index] = 0;
@@ -724,7 +797,7 @@ public static class SteeringController
                 float nextLength = nextEdgeData.Length;
                 if (nextLength < 0.01f) nextLength = 0.01f;
 
-                store.CurrentArc[index] = -1;
+                SetArc(store, index, -1);
                 store.ArcProgress[index] = 0f;
                 store.CurrentEdge[index] = nextEdge;
                 float nextStartT = stopLines.GetStopTAtFromNode(nextEdge);
@@ -1144,6 +1217,12 @@ public static class SteeringController
             Array.Resize(ref _prevEdge, needed);
         }
 
+        // Rebuild the arc-occupancy index from the current arc state, then keep it live during this
+        // pass via SetArc as vehicles enter/exit arcs (scan #1 reads it instead of scanning all vehicles).
+        _arcOccupancy.Rebuild(store, arcCache.ArcCount);
+
+        _tArc = _tProject = _tSignals = _tTransition = _tSteer = _tSpeed = 0; // TEMP diagnostic reset
+
         // Ensure conflict-tracking arrays are sized
         if (DebugLoggingEnabled)
             EnsureConflictArrays(store.Count);
@@ -1199,6 +1278,36 @@ public static class SteeringController
             _prevEdgeProg[i] = afterProg;
             _prevEdge[i] = afterEdge;
         }
+
+        // TEMP diagnostic: publish the steering sub-phase breakdown for this tick.
+        double _toMs = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        LastProfile = new SteeringProfile
+        {
+            ArcMs = _tArc * _toMs,
+            ProjectMs = _tProject * _toMs,
+            SignalsMs = _tSignals * _toMs,
+            TransitionMs = _tTransition * _toMs,
+            SteerMs = _tSteer * _toMs,
+            SpeedMs = _tSpeed * _toMs,
+        };
+
+#if DEBUG
+        // Collision tripwire: count vehicle pairs simultaneously on mutually-conflicting arcs.
+        // On an uncontrolled network this must remain 0 — nonzero means two vehicles are inside
+        // conflicting intersection arcs at once (a regression in the arc-conflict logic). Cheap via
+        // the occupancy index. (Signalized nodes may show legitimate same-phase green pairs, so this
+        // is a clean assertion only on the unsignalized stress grid.)
+        int conflictPairs = 0;
+        for (int i = 0; i < store.Count; i++)
+        {
+            if (store.State[i] != VehicleState.Driving) continue;
+            int a = store.CurrentArc[i];
+            if (a < 0) continue;
+            foreach (int c in arcCache.GetConflictingArcs(a))
+                conflictPairs += _arcOccupancy.OccupantCount(c);
+        }
+        LastConflictCoOccupancy = conflictPairs;
+#endif
     }
 
     /// <summary>

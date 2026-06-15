@@ -7,17 +7,18 @@ namespace Roads.App.Rendering;
 /// <summary>
 /// Displays a performance HUD with FPS, vehicle count, and a linear stacked bar graph
 /// showing frame time breakdown: simulation (blue), drawing (orange), and idle (gray).
-/// Uses a rolling average over 60 frames for stable display.
+/// Values are instantaneous per-frame (no averaging), so the readout reflects the current
+/// frame immediately — it does not ramp while a buffer refills after an unpause.
 /// Also reads pathfinding timing from <see cref="Pathfinder.ReadPathfindStatsAndReset"/>
 /// once per HUD update (the HUD is the single consumer/resetter of those accumulators).
 /// </summary>
 public class PerformanceHud
 {
-    private const int SampleCount = 60;
-    private readonly double[] _simTimes = new double[SampleCount];
-    private readonly double[] _drawTimes = new double[SampleCount];
-    private readonly double[] _frameTimes = new double[SampleCount];
-    private int _sampleIndex;
+    // Instantaneous per-frame metrics — deliberately NOT a rolling average, so the HUD reflects
+    // the true current cost immediately after an unpause instead of ramping while a buffer refills.
+    private double _lastSim;
+    private double _lastDraw;
+    private double _lastFrame;
     private long _lastFrameTick;
 
     // Last-read pathfind snapshot (consumed once per Draw call).
@@ -43,18 +44,19 @@ public class PerformanceHud
     public bool Visible { get; set; }
 
     // ---------------------------------------------------------------------------
-    // Public read-only accessors — expose the same rolling-average values that
-    // are displayed in the HUD. Callers (e.g. BenchmarkCapture) read these after
-    // Draw() has been called for the frame so the values are current.
+    // Public read-only accessors — expose the same instantaneous per-frame values
+    // shown in the HUD. Callers (e.g. BenchmarkCapture) read these after Draw() has
+    // run for the frame so the values are current. (Named "Avg*" for source
+    // compatibility; they are last-frame values, not averages.)
     // ---------------------------------------------------------------------------
 
-    /// <summary>Rolling 60-frame averaged frames per second.</summary>
+    /// <summary>Most recent frame's FPS (instantaneous, not averaged).</summary>
     public double AvgFps { get; private set; }
 
-    /// <summary>Rolling 60-frame averaged simulation time in milliseconds.</summary>
+    /// <summary>Most recent frame's simulation time in milliseconds (instantaneous).</summary>
     public double AvgSimMs { get; private set; }
 
-    /// <summary>Rolling 60-frame averaged draw time in milliseconds.</summary>
+    /// <summary>Most recent frame's draw time in milliseconds (instantaneous).</summary>
     public double AvgDrawMs { get; private set; }
 
     /// <summary>
@@ -74,23 +76,21 @@ public class PerformanceHud
     /// <summary>Records the simulation time for the current frame in milliseconds.</summary>
     public void RecordSimTime(double milliseconds)
     {
-        _simTimes[_sampleIndex] = milliseconds;
+        _lastSim = milliseconds;
     }
 
     /// <summary>
-    /// Records the draw time for the current frame in milliseconds and advances
-    /// the sample ring buffer. Also computes the total frame time from wall clock.
+    /// Records the draw time for the current frame in milliseconds and computes the
+    /// total frame time from wall clock. No averaging — values are per-frame.
     /// </summary>
     public void RecordDrawTime(double milliseconds)
     {
-        _drawTimes[_sampleIndex] = milliseconds;
+        _lastDraw = milliseconds;
 
         long now = _stopwatch.ElapsedTicks;
         if (_lastFrameTick > 0)
-            _frameTimes[_sampleIndex] = (now - _lastFrameTick) * 1000.0 / Stopwatch.Frequency;
+            _lastFrame = (now - _lastFrameTick) * 1000.0 / Stopwatch.Frequency;
         _lastFrameTick = now;
-
-        _sampleIndex = (_sampleIndex + 1) % SampleCount;
     }
 
     /// <summary>
@@ -110,21 +110,14 @@ public class PerformanceHud
         _lastPathfindMs = pathfindMs;
         _lastPathfindCalls = pathfindCalls;
 
-        // Compute rolling averages
-        double avgSim = 0, avgDraw = 0, avgFrame = 0;
-        for (int i = 0; i < SampleCount; i++)
-        {
-            avgSim += _simTimes[i];
-            avgDraw += _drawTimes[i];
-            avgFrame += _frameTimes[i];
-        }
-        avgSim /= SampleCount;
-        avgDraw /= SampleCount;
-        avgFrame /= SampleCount;
+        // Instantaneous per-frame values (no averaging — reflects the current frame immediately).
+        double avgSim = _lastSim;
+        double avgDraw = _lastDraw;
+        double avgFrame = _lastFrame;
 
         double fps = avgFrame > 0 ? 1000.0 / avgFrame : 0;
 
-        // Publish averaged values for external readers (e.g. BenchmarkCapture).
+        // Publish current-frame values for external readers (e.g. BenchmarkCapture).
         AvgFps = fps;
         AvgSimMs = avgSim;
         AvgDrawMs = avgDraw;
