@@ -31,7 +31,8 @@ public static class BenchmarkCapture
     /// <param name="timing">Per-subsystem sim-tick breakdown from the most recent active tick.</param>
     /// <param name="steering">TEMP: per-vehicle steering sub-phase breakdown (diagnostic).</param>
     public static void Capture(double fps, double simMs, double drawMs,
-                               double pathfindMs, int pathfindCalls, int vehicleCount, int arcConflicts,
+                               double pathfindMs, int pathfindCalls, int vehicleCount,
+                               int arcConflicts, int offroad,
                                Roads.App.SimulationLoop.SimTimingBreakdown timing,
                                Roads.App.Vehicles.SteeringController.SteeringProfile steering)
     {
@@ -45,7 +46,7 @@ public static class BenchmarkCapture
 
             string line = $"ts={timestamp}, fps={fps:F1}, sim={simMs:F2}ms, draw={drawMs:F2}ms, " +
                           $"pathfind={pathfindMs:F3}ms, pathfind_calls={pathfindCalls}, " +
-                          $"vehicles={vehicleCount}, arc_conflicts={arcConflicts}, gc0={gc0}, gc1={gc1}, gc2={gc2}, " +
+                          $"vehicles={vehicleCount}, arc_conflicts={arcConflicts}, offroad={offroad}, gc0={gc0}, gc1={gc1}, gc2={gc2}, " +
                           $"[sim breakdown] grid={timing.GridMs:F2}ms, caches={timing.CachesMs:F2}ms, " +
                           $"signals={timing.SignalsMs:F2}ms, lanechange={timing.LaneChangeMs:F2}ms, " +
                           $"steering={timing.SteeringMs:F2}ms, physics={timing.PhysicsMs:F2}ms, " +

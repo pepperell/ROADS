@@ -68,8 +68,14 @@ public class MainForm : Form
     private bool _dragActive;
     private const int DragDeadZone = 5;
 
-    public MainForm()
+    /// <summary>Autobench (see Program <c>--autobench</c>): target frame count (0 = disabled).</summary>
+    private readonly int _autoBenchFrames;
+    /// <summary>Frames elapsed since the autobench run started.</summary>
+    private int _autoBenchFrameCount;
+
+    public MainForm(int autoBenchFrames = 0)
     {
+        _autoBenchFrames = autoBenchFrames;
         Text = "ROADS - Traffic Simulation";
         Width = 1280;
         Height = 720;
@@ -138,6 +144,28 @@ public class MainForm : Form
         _autoSave.MaybeSave(tickWall);
 
         _canvas.Invalidate();
+
+        if (_autoBenchFrames > 0)
+            AutoBenchStep();
+    }
+
+    /// <summary>
+    /// Drives the headless 10K benchmark (Program <c>--autobench</c>): builds the stress scene on
+    /// the first frame, appends metrics to benchmark.log over the final 30 frames (so a parser can
+    /// average a stable window), then closes the app at the target frame count.
+    /// </summary>
+    private void AutoBenchStep()
+    {
+        if (_autoBenchFrameCount == 0)
+            GenerateStressScene();
+
+        _autoBenchFrameCount++;
+
+        if (_autoBenchFrameCount > _autoBenchFrames - 30)
+            CaptureBaseline();
+
+        if (_autoBenchFrameCount >= _autoBenchFrames)
+            Close();
     }
 
     /// <summary>
@@ -1201,10 +1229,19 @@ public class MainForm : Form
     /// </summary>
     private void CaptureBaseline()
     {
+        // Off-road correctness tripwire: count Driving vehicles more than ~2 lanes off their lane
+        // center. ~0 normally; a spike flags steering/projection drift from an optimization.
+        int offroad = 0;
+        const float offRoadDistSq = 49f; // (~7 m)^2
+        var distToRoad = _vehicles.DistToRoadSq;
+        for (int i = 0; i < _vehicles.Count; i++)
+            if (_vehicles.State[i] == Roads.App.Vehicles.VehicleState.Driving && distToRoad[i] > offRoadDistSq)
+                offroad++;
+
         Roads.App.Rendering.BenchmarkCapture.Capture(
             _perfHud.AvgFps, _perfHud.AvgSimMs, _perfHud.AvgDrawMs,
             _perfHud.LastPathfindMs, _perfHud.LastPathfindCalls,
-            _vehicles.Count, Roads.App.Vehicles.SteeringController.LastConflictCoOccupancy,
+            _vehicles.Count, Roads.App.Vehicles.SteeringController.LastConflictCoOccupancy, offroad,
             _simLoop.LastTiming, Roads.App.Vehicles.SteeringController.LastProfile);
         System.Diagnostics.Debug.WriteLine($"[Baseline] captured: fps={_perfHud.AvgFps:F1}, vehicles={_vehicles.Count}");
     }

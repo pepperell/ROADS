@@ -67,6 +67,16 @@ public static class SteeringController
     /// <summary>Thread-local buffer for the merge-into-exit-lane spatial query.</summary>
     [ThreadStatic] private static List<int>? _scan2Buffer;
 
+    /// <summary>Thread-local buffer for the arc-mode outgoing-edge leader query.</summary>
+    [ThreadStatic] private static List<int>? _arcLeaderBuffer;
+
+    /// <summary>
+    /// Search radius (m) around an arc's exit point used to find a car-following leader on the
+    /// outgoing edge. Covers the IDM-relevant range; a leader beyond it yields a gap too large to
+    /// constrain following, so ignoring it is behaviorally equivalent to the former full scan.
+    /// </summary>
+    private const float ArcLeaderSearchRadius = 80f;
+
     /// <summary>
     /// DEBUG tripwire: ordered count of vehicle pairs simultaneously occupying mutually-conflicting
     /// arcs after the last <see cref="UpdateAll"/>. On an uncontrolled network this must stay 0 — a
@@ -878,11 +888,14 @@ public static class SteeringController
         var (aheadDist, leaderSpeed) = FindVehicleAhead(store, index, grid, graph);
         int leaderIndex = -1; // track leader for conflict logging
 
-        // Same-arc look-ahead: if another vehicle is ahead on this arc, use path distance
-        for (int j = 0; j < store.Count; j++)
+        // Same-arc look-ahead: if another vehicle is ahead on this arc, use path distance.
+        // The occupancy index holds exactly the vehicles whose CurrentArc == arcIdx, so this is
+        // an exact replacement for the former full-vehicle scan.
+        int sameArcCount = _arcOccupancy.OccupantCount(arcIdx);
+        for (int k = 0; k < sameArcCount; k++)
         {
+            int j = _arcOccupancy.OccupantAt(arcIdx, k);
             if (j == index || store.State[j] != VehicleState.Driving) continue;
-            if (store.CurrentArc[j] != arcIdx) continue;
             if (store.ArcProgress[j] <= arcProgress) continue;
 
             float pathDist = (store.ArcProgress[j] - arcProgress) * arcLength;
@@ -907,8 +920,17 @@ public static class SteeringController
                 float outStartT = stopLines.GetStopTAtFromNode(outEdge);
                 byte myOutLane = arc.OutgoingLane;
 
-                for (int j = 0; j < store.Count; j++)
+                // The binding leader on the outgoing edge is near its start (small edgeDist), so
+                // query the grid around the arc exit point (P3) rather than scanning every vehicle.
+                // Re-apply the exact original filters; a leader beyond the radius would have a gap
+                // too large to affect IDM, so the result is behaviorally equivalent.
+                var arcExit = arc.P3;
+                var arcLeaders = _arcLeaderBuffer ??= new List<int>();
+                arcLeaders.Clear();
+                grid.QueryFiltered(arcExit.X, arcExit.Y, ArcLeaderSearchRadius, store.PosX, store.PosY, arcLeaders);
+                for (int bi = 0; bi < arcLeaders.Count; bi++)
                 {
+                    int j = arcLeaders[bi];
                     if (j == index || store.State[j] != VehicleState.Driving) continue;
                     if (store.CurrentEdge[j] != outEdge || store.CurrentArc[j] >= 0) continue;
                     if (store.CurrentLane[j] != myOutLane && store.TargetLane[j] != myOutLane) continue;
@@ -1352,14 +1374,56 @@ public static class SteeringController
     /// Finds the parametric t on the Bézier closest to (px, py), searching in a window near currentT.
     /// </summary>
     private static float FindNearestT(RoadGraph graph, int edgeIdx, float px, float py, float currentT)
-        => FindNearestTGeneric(px, py, currentT, 0.05f, 0.15f, t => graph.EvaluateBezier(edgeIdx, t));
+    {
+        // Cache the four control points once (instead of re-fetching the edge + both node structs
+        // 21x via EvaluateBezier), then run the window search via the shared Horner evaluator.
+        var edge = graph.Edges[edgeIdx];
+        var p0 = graph.Nodes[edge.FromNode].Position;
+        var p3 = graph.Nodes[edge.ToNode].Position;
+        return NearestTOnBezier(p0, edge.ControlPoint1, edge.ControlPoint2, p3, px, py, currentT, 0.05f, 0.15f);
+    }
+
+    /// <summary>
+    /// Window nearest-point search on a cubic Bézier, evaluated via cached monomial coefficients
+    /// (Horner form) — no delegate, no per-step control-point fetch. Searches [t-back, t+fwd]
+    /// clamped to [0,1] in 21 steps; returns the t with the closest curve point to (px, py).
+    /// </summary>
+    private static float NearestTOnBezier(Vector2 p0, Vector2 p1, Vector2 p2, Vector2 p3,
+        float px, float py, float currentT, float windowBack, float windowForward)
+    {
+        // B(t) = a + b t + c t^2 + d t^3
+        Vector2 a = p0;
+        Vector2 b = 3f * (p1 - p0);
+        Vector2 c = 3f * (p0 - 2f * p1 + p2);
+        Vector2 d = p3 - p0 + 3f * (p1 - p2);
+
+        float searchMin = MathF.Max(0f, currentT - windowBack);
+        float searchMax = MathF.Min(1f, currentT + windowForward);
+        const int steps = 20;
+        float bestT = currentT, bestDist = float.MaxValue;
+        for (int i = 0; i <= steps; i++)
+        {
+            float t = searchMin + (searchMax - searchMin) * i / steps;
+            float bx = a.X + t * (b.X + t * (c.X + t * d.X));
+            float by = a.Y + t * (b.Y + t * (c.Y + t * d.Y));
+            float dx = bx - px, dy = by - py;
+            float dist = dx * dx + dy * dy;
+            if (dist < bestDist) { bestDist = dist; bestT = t; }
+        }
+        return bestT;
+    }
 
     /// <summary>
     /// Finds the parametric t on an intersection arc Bezier closest to (px, py).
     /// Uses a wider search window than edges since arcs are short and vehicle may lag behind.
     /// </summary>
     private static float FindNearestTOnArc(IntersectionArcCache arcCache, int arcIdx, float px, float py, float currentT)
-        => FindNearestTGeneric(px, py, currentT, 0.1f, 0.25f, t => arcCache.EvaluateArc(arcIdx, t));
+    {
+        // Cache the arc's control points once, then search via the shared Horner evaluator. Wider
+        // window than edges since arcs are short and the vehicle may lag behind.
+        var arc = arcCache.GetArc(arcIdx);
+        return NearestTOnBezier(arc.P0, arc.P1, arc.P2, arc.P3, px, py, currentT, 0.1f, 0.25f);
+    }
 
     /// <summary>Normalizes an angle to the range [-pi, pi].</summary>
     private static float NormalizeAngle(float angle)
