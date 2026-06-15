@@ -118,17 +118,27 @@ public class UIRenderer
     }
 
     private static readonly string[] ShortcutLines = {
-        "Space  Pause / Resume",
-        "<  >   Speed Down / Up",
-        "V      Spawn Vehicle",
-        "+  -   Lane Count",
-        "[  ]   Speed Limit",
-        "R      Cycle Road Type",
-        "T      Toggle Sliders",
-        "P      Perf HUD",
-        "Del    Delete Node",
-        "Ctrl+S Save Map",
-        "Ctrl+O Load Map",
+        "Space   Pause / Resume",
+        "<  >    Sim Speed - / +",
+        "V       Spawn Vehicle",
+        "+  -    Lane Count",
+        "[  ]    Speed Limit",
+        "R       Cycle Road Type",
+        "Del     Delete Node",
+        "L       Lane-Restrict Mode",
+        "C       Default Restrictions",
+        "1-4     Select Lane",
+        "Esc     Exit Lane Mode",
+        "T       Sliders",
+        "P       Perf HUD",
+        "M       Minimap",
+        "N       Statistics Panel",
+        "H       Heat-map",
+        "G       Arc-Conflict Debug",
+        "D       Dump Vehicle Diag",
+        "F       Frame Diag Log",
+        "Ctrl+S  Save Map",
+        "Ctrl+O  Load Map",
     };
 
     /// <summary>
@@ -241,7 +251,7 @@ public class UIRenderer
             using var legendFont = new SKFont { Size = 12 };
             float lineHeight = 16f;
             float padding = 8f;
-            float legendWidth = 190f;
+            float legendWidth = 240f;
             float legendHeight = ShortcutLines.Length * lineHeight + padding * 2;
             float lx = 10f;
             float ly = canvasHeight - legendHeight - 10f;
