@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Roads.App.World;
 using SkiaSharp;
 
 namespace Roads.App.Rendering;
@@ -7,6 +8,8 @@ namespace Roads.App.Rendering;
 /// Displays a performance HUD with FPS, vehicle count, and a linear stacked bar graph
 /// showing frame time breakdown: simulation (blue), drawing (orange), and idle (gray).
 /// Uses a rolling average over 60 frames for stable display.
+/// Also reads pathfinding timing from <see cref="Pathfinder.ReadPathfindStatsAndReset"/>
+/// once per HUD update (the HUD is the single consumer/resetter of those accumulators).
 /// </summary>
 public class PerformanceHud
 {
@@ -16,6 +19,10 @@ public class PerformanceHud
     private readonly double[] _frameTimes = new double[SampleCount];
     private int _sampleIndex;
     private long _lastFrameTick;
+
+    // Last-read pathfind snapshot (consumed once per Draw call).
+    private double _lastPathfindMs;
+    private int _lastPathfindCalls;
 
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
@@ -29,10 +36,26 @@ public class PerformanceHud
     private readonly SKPaint _simTextPaint = new() { Color = new SKColor(80, 140, 220), IsAntialias = true };
     private readonly SKPaint _drawTextPaint = new() { Color = new SKColor(220, 160, 50), IsAntialias = true };
     private readonly SKPaint _idleTextPaint = new() { Color = new SKColor(120, 120, 120), IsAntialias = true };
+    private readonly SKPaint _pathfindTextPaint = new() { Color = new SKColor(160, 220, 140), IsAntialias = true };
     private readonly SKFont _font = new() { Size = 11 };
 
     /// <summary>Whether the performance HUD is visible.</summary>
     public bool Visible { get; set; }
+
+    // ---------------------------------------------------------------------------
+    // Public read-only accessors — expose the same rolling-average values that
+    // are displayed in the HUD. Callers (e.g. BenchmarkCapture) read these after
+    // Draw() has been called for the frame so the values are current.
+    // ---------------------------------------------------------------------------
+
+    /// <summary>Rolling 60-frame averaged frames per second.</summary>
+    public double AvgFps { get; private set; }
+
+    /// <summary>Rolling 60-frame averaged simulation time in milliseconds.</summary>
+    public double AvgSimMs { get; private set; }
+
+    /// <summary>Rolling 60-frame averaged draw time in milliseconds.</summary>
+    public double AvgDrawMs { get; private set; }
 
     /// <summary>Records the simulation time for the current frame in milliseconds.</summary>
     public void RecordSimTime(double milliseconds)
@@ -58,12 +81,20 @@ public class PerformanceHud
 
     /// <summary>
     /// Draws the performance HUD in screen space at the bottom-left corner.
-    /// Shows FPS, vehicle count, per-category millisecond values, and a single
-    /// stacked bar colored by sim/draw/idle proportions.
+    /// Shows FPS, vehicle count, per-category millisecond values, pathfinding stats,
+    /// GC collection counts, and a single stacked bar colored by sim/draw/idle proportions.
+    /// Reads pathfinding stats from <see cref="Pathfinder.ReadPathfindStatsAndReset"/> once
+    /// per call — the HUD is the single consumer/resetter of those accumulators.
+    /// Also updates <see cref="AvgFps"/>, <see cref="AvgSimMs"/>, <see cref="AvgDrawMs"/>
+    /// so callers may read them after this method returns.
     /// </summary>
     public void Draw(SKCanvas canvas, int vehicleCount, float canvasWidth, float canvasHeight)
     {
-        if (!Visible) return;
+        // Always consume pathfind stats each frame to keep the accumulators from growing
+        // unboundedly, even when the HUD is hidden.
+        var (pathfindMs, pathfindCalls) = Pathfinder.ReadPathfindStatsAndReset();
+        _lastPathfindMs = pathfindMs;
+        _lastPathfindCalls = pathfindCalls;
 
         // Compute rolling averages
         double avgSim = 0, avgDraw = 0, avgFrame = 0;
@@ -78,14 +109,27 @@ public class PerformanceHud
         avgFrame /= SampleCount;
 
         double fps = avgFrame > 0 ? 1000.0 / avgFrame : 0;
+
+        // Publish averaged values for external readers (e.g. BenchmarkCapture).
+        AvgFps = fps;
+        AvgSimMs = avgSim;
+        AvgDrawMs = avgDraw;
+
+        if (!Visible) return;
+
         double idleMs = Math.Max(0, avgFrame - avgSim - avgDraw);
+
+        // Read GC collection counts
+        int gc0 = GC.CollectionCount(0);
+        int gc1 = GC.CollectionCount(1);
+        int gc2 = GC.CollectionCount(2);
 
         // Layout constants
         const float barWidth = 240f;
         const float barHeight = 14f;
         const float padding = 8f;
         const float panelWidth = barWidth + padding * 2;
-        const float panelHeight = 68f;
+        const float panelHeight = 100f;  // extra height for pathfind + GC lines
         float px = 10f;
         float py = canvasHeight - panelHeight - 10f;
 
@@ -103,6 +147,16 @@ public class PerformanceHud
         canvas.DrawText($"Sim: {avgSim:F1}ms", labelX, textY, SKTextAlign.Left, _font, _simTextPaint);
         canvas.DrawText($"Draw: {avgDraw:F1}ms", labelX + 80, textY, SKTextAlign.Left, _font, _drawTextPaint);
         canvas.DrawText($"Idle: {idleMs:F1}ms", labelX + 170, textY, SKTextAlign.Left, _font, _idleTextPaint);
+
+        // Pathfind stats line (green-ish text)
+        textY += 16f;
+        canvas.DrawText($"Path: {_lastPathfindMs:F2}ms  calls: {_lastPathfindCalls}",
+            labelX, textY, SKTextAlign.Left, _font, _pathfindTextPaint);
+
+        // GC collection counts line
+        textY += 14f;
+        canvas.DrawText($"GC  gen0: {gc0}  gen1: {gc1}  gen2: {gc2}",
+            labelX, textY, SKTextAlign.Left, _font, _idleTextPaint);
 
         // Stacked bar graph
         float barX = px + padding;
