@@ -654,8 +654,8 @@ Phases are built by an Opus "director" that hands self-contained milestones to l
 - [ ] Contraction Hierarchies (replace A* for long-distance paths)
 - [ ] Path caching and batch pathfinding (background thread)
 - [ ] Double-buffered simulation state (sim thread decoupled from render)
-- [ ] LOD rendering (dots at far zoom, full detail up close)
-- [ ] Frustum culling via spatil grid (don't draw off-screen entities)
+- [X] LOD rendering (dots at far zoom, full detail up close)
+- [X] Frustum culling (don't draw off-screen entities)
 - [X] Parked vehicle optimization (remove from physics loop)
 - [ ] Profile and optimize hot loops (SIMD where beneficial)
 - [ ] Memory pooling for paths and temporary allocations
