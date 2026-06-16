@@ -30,6 +30,74 @@ public static class GeometryUtil
     }
 
     /// <summary>
+    /// Signed rightward lateral offset (meters) of a lane's center from the edge's Bézier
+    /// path, in the travel-direction frame. This is the single source of truth for lane
+    /// placement — steering, lane-change, the intersection-arc cache, and the renderer all
+    /// route through it so the three road kinds stay consistent:
+    /// <list type="bullet">
+    /// <item><b>Single-lane two-way</b> (<see cref="EdgeFlags.SharedLane"/>): 0 — both
+    /// directions drive on the path itself.</item>
+    /// <item><b>One-way</b> (no reverse edge): lanes are <i>centered</i> on the path, so
+    /// the asphalt sits symmetrically over the node-to-node line.</item>
+    /// <item><b>Two-way</b> (paired): lanes sit to the right of the path, which is the
+    /// center divider — <c>LaneWidth * (0.5 + lane)</c>, unchanged from the original model.</item>
+    /// </list>
+    /// </summary>
+    public static float LaneLateralOffset(RoadGraph graph, int edgeIdx, int lane)
+    {
+        var edge = graph.Edges[edgeIdx];
+        float lw = SimConstants.LaneWidth;
+        if ((edge.Flags & EdgeFlags.SharedLane) != 0) return 0f;
+        bool oneWay = graph.FindReverseEdge(edgeIdx) < 0;
+        if (oneWay) return lw * (lane + 0.5f - edge.LaneCount * 0.5f);
+        return lw * (0.5f + lane);
+    }
+
+    /// <summary>
+    /// Half of the road's full asphalt width in meters — i.e. the magnitude of the boundary
+    /// offset from the path center. Two-way <c>LaneCount * LaneWidth</c> (unchanged), one-way
+    /// <c>LaneCount * LaneWidth / 2</c> (centered), single-lane two-way <c>LaneWidth / 2</c>.
+    /// </summary>
+    public static float RoadHalfWidth(RoadGraph graph, int edgeIdx)
+    {
+        var edge = graph.Edges[edgeIdx];
+        float lw = SimConstants.LaneWidth;
+        if ((edge.Flags & EdgeFlags.SharedLane) != 0) return lw * 0.5f;
+        bool oneWay = graph.FindReverseEdge(edgeIdx) < 0;
+        return oneWay ? edge.LaneCount * lw * 0.5f : edge.LaneCount * lw;
+    }
+
+    /// <summary>Full asphalt width in meters (= 2 × <see cref="RoadHalfWidth"/>).</summary>
+    public static float RoadSurfaceWidth(RoadGraph graph, int edgeIdx)
+        => 2f * RoadHalfWidth(graph, edgeIdx);
+
+    /// <summary>
+    /// Lateral extent (min,max signed rightward offset) covered by THIS edge's own lanes,
+    /// used to draw a stop line across exactly the approaching lanes. Two-way returns
+    /// <c>(0, LaneCount*LaneWidth)</c> — the right half only; one-way / single-lane return
+    /// the full centered span.
+    /// </summary>
+    public static (float min, float max) LaneSpan(RoadGraph graph, int edgeIdx)
+    {
+        var edge = graph.Edges[edgeIdx];
+        float lw = SimConstants.LaneWidth;
+        float first = LaneLateralOffset(graph, edgeIdx, 0);
+        float last = LaneLateralOffset(graph, edgeIdx, Math.Max(0, edge.LaneCount - 1));
+        return (MathF.Min(first, last) - lw * 0.5f, MathF.Max(first, last) + lw * 0.5f);
+    }
+
+    /// <summary>
+    /// True only for a two-way road, where the edge path is the center divider and a yellow
+    /// center line is painted. One-way and single-lane-two-way roads have no center divider.
+    /// </summary>
+    public static bool HasCenterDivider(RoadGraph graph, int edgeIdx)
+    {
+        var edge = graph.Edges[edgeIdx];
+        if ((edge.Flags & EdgeFlags.SharedLane) != 0) return false;
+        return graph.FindReverseEdge(edgeIdx) >= 0;
+    }
+
+    /// <summary>
     /// Estimates the arc length of a cubic Bezier curve using a 16-segment polyline approximation.
     /// </summary>
     public static float EstimateBezierLength(Vector2 p0, Vector2 p1, Vector2 p2, Vector2 p3)

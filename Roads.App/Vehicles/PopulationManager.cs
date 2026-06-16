@@ -223,7 +223,11 @@ public class PopulationManager
             }
         }
 
-        ScheduleModeEnabled = true;
+        // Only enter schedule mode if the map actually has Home POIs to drive residents from.
+        // A map with no homes is a legacy free-spawn map; leaving schedule mode OFF preserves the
+        // loaded (non-resident) vehicles, which the next Update would otherwise wipe via
+        // ClearPopulation the moment it sees no homes while schedule mode is on.
+        ScheduleModeEnabled = _poiRegistry.GetNodesOfType(POIType.Home).Count > 0;
         _poiGraphVersion = _graph.Version;
         _lastDayNumber = -1; // first Update sets the day baseline without a spurious rollover
     }

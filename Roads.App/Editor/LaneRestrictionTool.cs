@@ -19,7 +19,6 @@ public class LaneRestrictionTool
     public void DrawOverlay(SKCanvas canvas, int nodeIdx, RoadGraph graph,
         EditorState state, StopLineCache stopLines, float cameraZoom)
     {
-        const float LaneWidth = SimConstants.LaneWidth;
         float dotRadius = MathF.Max(0.8f, 1.5f / cameraZoom);
         float lineWidth = MathF.Max(0.5f, 1f / cameraZoom);
 
@@ -48,7 +47,7 @@ public class LaneRestrictionTool
 
             for (byte lane = 0; lane < edge.LaneCount; lane++)
             {
-                float offset = LaneWidth * (0.5f + lane);
+                float offset = GeometryUtil.LaneLateralOffset(graph, edgeIdx, lane);
                 var pos = graph.EvaluateBezier(edgeIdx, sampleT) + right * offset;
                 bool isActive = edgeIdx == activeInEdge && lane == activeInLane;
                 canvas.DrawCircle(pos.X, pos.Y, isActive ? dotRadius * 1.5f : dotRadius,
@@ -69,7 +68,7 @@ public class LaneRestrictionTool
 
             for (byte lane = 0; lane < edge.LaneCount; lane++)
             {
-                float offset = LaneWidth * (0.5f + lane);
+                float offset = GeometryUtil.LaneLateralOffset(graph, edgeIdx, lane);
                 var pos = graph.EvaluateBezier(edgeIdx, sampleT) + right * offset;
 
                 SKPaint paint;
@@ -96,7 +95,7 @@ public class LaneRestrictionTool
             {
                 var inDir = inTangent / inTanLen;
                 var inRight = new Vector2(-inTangent.Y, inTangent.X) / inTanLen;
-                float inOffset = LaneWidth * (0.5f + activeInLane);
+                float inOffset = GeometryUtil.LaneLateralOffset(graph, activeInEdge, activeInLane);
                 var p0 = graph.EvaluateBezier(activeInEdge, inStopT) + inRight * inOffset;
 
                 var restrictions = graph.GetLaneRestrictions(activeInEdge, activeInLane)
@@ -117,7 +116,7 @@ public class LaneRestrictionTool
                     {
                         if (!restrictions.Contains((outEdgeIdx, outLane))) continue;
 
-                        float outOffset = LaneWidth * (0.5f + outLane);
+                        float outOffset = GeometryUtil.LaneLateralOffset(graph, outEdgeIdx, outLane);
                         var p3 = graph.EvaluateBezier(outEdgeIdx, outStartT) + outRight * outOffset;
                         float dist = Vector2.Distance(p0, p3);
                         float arm = MathF.Max(1.5f, MathF.Min(dist / 3f, 15f));
@@ -174,7 +173,7 @@ public class LaneRestrictionTool
 
             for (byte lane = 0; lane < edge.LaneCount; lane++)
             {
-                float offset = SimConstants.LaneWidth * (0.5f + lane);
+                float offset = GeometryUtil.LaneLateralOffset(graph, edgeIdx, lane);
                 var lanePos = graph.EvaluateBezier(edgeIdx, sampleT) + right * offset;
                 float dist = Vector2.Distance(worldPos, lanePos);
                 if (dist < bestDist) { bestDist = dist; bestEdge = edgeIdx; bestLane = lane; bestIsIncoming = true; }
@@ -194,7 +193,7 @@ public class LaneRestrictionTool
 
             for (byte lane = 0; lane < edge.LaneCount; lane++)
             {
-                float offset = SimConstants.LaneWidth * (0.5f + lane);
+                float offset = GeometryUtil.LaneLateralOffset(graph, edgeIdx, lane);
                 var lanePos = graph.EvaluateBezier(edgeIdx, sampleT) + right * offset;
                 float dist = Vector2.Distance(worldPos, lanePos);
                 if (dist < bestDist) { bestDist = dist; bestEdge = edgeIdx; bestLane = lane; bestIsIncoming = false; }

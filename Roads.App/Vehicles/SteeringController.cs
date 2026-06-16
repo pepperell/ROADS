@@ -64,6 +64,13 @@ public static class SteeringController
     /// </summary>
     private static readonly ArcOccupancyIndex _arcOccupancy = new();
 
+    /// <summary>
+    /// Per-pass count of driving vehicles on each edge (those NOT on an arc), rebuilt at the top of
+    /// <see cref="UpdateAll"/>. Only consulted by the single-lane two-way (shared-lane) entry gate to
+    /// detect oncoming traffic on the shared segment; the O(n) rebuild is cheap relative to steering.
+    /// </summary>
+    private static int[] _edgeOccupancy = Array.Empty<int>();
+
     /// <summary>Thread-local buffer for the merge-into-exit-lane spatial query.</summary>
     [ThreadStatic] private static List<int>? _scan2Buffer;
 
@@ -97,6 +104,52 @@ public static class SteeringController
         if (old >= 0) _arcOccupancy.Exit(old, index);
         store.CurrentArc[index] = newArc;
         if (newArc >= 0) _arcOccupancy.Enter(newArc, index);
+    }
+
+    /// <summary>
+    /// Rebuilds <see cref="_edgeOccupancy"/> — the count of driving vehicles currently on each edge
+    /// (excluding those on intersection arcs). One O(n) pass; consulted only by the shared-lane gate.
+    /// </summary>
+    private static void RebuildEdgeOccupancy(VehicleStore store, int edgeCount)
+    {
+        if (_edgeOccupancy.Length < edgeCount)
+            _edgeOccupancy = new int[edgeCount];
+        else
+            Array.Clear(_edgeOccupancy, 0, edgeCount);
+
+        for (int i = 0; i < store.Count; i++)
+        {
+            if (store.State[i] != VehicleState.Driving) continue;
+            if (store.CurrentArc[i] >= 0) continue; // on an arc, not an edge
+            int e = store.CurrentEdge[i];
+            if ((uint)e < (uint)edgeCount) _edgeOccupancy[e]++;
+        }
+    }
+
+    /// <summary>
+    /// True if the single-lane two-way segment whose oncoming direction is <paramref name="reverseEdge"/>
+    /// currently has a vehicle travelling that opposite direction — either already on that edge, or
+    /// committed to entering it via an intersection arc at its start node. Used to gate entry onto a
+    /// <see cref="EdgeFlags.SharedLane"/> edge so two vehicles never meet head-on on the one shared lane.
+    /// The arc-occupancy check (kept live mid-pass via <see cref="SetArc"/>) also resolves the symmetric
+    /// both-ends-at-once case: whoever commits to its arc first is seen by the other, which then waits.
+    /// </summary>
+    private static bool OncomingOnSharedLane(VehicleStore store, RoadGraph graph, IntersectionArcCache arcCache, int reverseEdge)
+    {
+        // A vehicle physically on the oncoming direction.
+        if ((uint)reverseEdge < (uint)_edgeOccupancy.Length && _edgeOccupancy[reverseEdge] > 0)
+            return true;
+
+        // A vehicle committed to entering the oncoming direction (on an arc exiting onto it). Arcs
+        // feeding reverseEdge live in its FromNode's bucket.
+        int rFromNode = graph.Edges[reverseEdge].FromNode;
+        if (rFromNode < 0) return false;
+        foreach (int arc in arcCache.GetArcsAtNode(rFromNode))
+        {
+            if (arcCache.GetArc(arc).OutgoingEdge == reverseEdge && _arcOccupancy.OccupantCount(arc) > 0)
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -141,7 +194,7 @@ public static class SteeringController
 
         // Compute squared distance from vehicle to its lane center for off-road detection
         {
-            float laneOff = LaneWidth * (0.5f + store.CurrentLane[index]);
+            float laneOff = GeometryUtil.LaneLateralOffset(graph, edgeIdx, store.CurrentLane[index]);
             var laneCenter = OffsetRight(graph, edgeIdx, progress, laneOff);
             float rdx = vx - laneCenter.X;
             float rdy = vy - laneCenter.Y;
@@ -379,6 +432,23 @@ public static class SteeringController
                         }
                     }
 
+                    // Single-lane two-way (shared-lane) gate: don't enter a one-lane shared segment
+                    // while a vehicle is travelling the OPPOSITE direction on it (already on the edge,
+                    // or committed to entering it from the far end). Same-direction following is fine —
+                    // normal car-following handles spacing. Prevents a head-on on the one shared lane.
+                    if ((graph.Edges[arc.OutgoingEdge].Flags & EdgeFlags.SharedLane) != 0)
+                    {
+                        int rev = graph.FindReverseEdge(arc.OutgoingEdge);
+                        if (rev >= 0 && OncomingOnSharedLane(store, graph, arcCache, rev))
+                        {
+                            store.EdgeProgress[index] = stopAtT;
+                            store.Throttle[index] = 0f;
+                            store.Brake[index] = 1.0f;
+                            store.Speed[index] = 0f;
+                            return TransitionResult.Returned;
+                        }
+                    }
+
                     // Enter the intersection arc (SetArc keeps the occupancy index live so later
                     // vehicles this pass see this entry).
                     SetArc(store, index, arcIdx);
@@ -527,7 +597,7 @@ public static class SteeringController
         // heading seed below so normal steering continues smoothly from the pivoted pose.
         if (nextEdgeData.ToNode == edge.FromNode)
         {
-            float pivotOffset = LaneChangeLogic.ComputeCurrentLaneOffset(store, index);
+            float pivotOffset = LaneChangeLogic.ComputeCurrentLaneOffset(store, index, graph, nextEdge);
             var pivotPos = OffsetRight(graph, nextEdge, nextStartT, pivotOffset);
             vx = pivotPos.X;
             vy = pivotPos.Y;
@@ -540,7 +610,7 @@ public static class SteeringController
 
         // Seed PrevHeadingError using vehicle's actual position (no teleport)
         float newLookaheadT = MathF.Min(nextStartT + (LookaheadBase + speed * LookaheadPerSpeed) / nextLength, 1f);
-        float newLaneOffset = LaneChangeLogic.ComputeCurrentLaneOffset(store, index);
+        float newLaneOffset = LaneChangeLogic.ComputeCurrentLaneOffset(store, index, graph, nextEdge);
         var newTarget = OffsetRight(graph, nextEdge, newLookaheadT, newLaneOffset);
         float newDesired = MathF.Atan2(newTarget.Y - vy, newTarget.X - vx);
         store.PrevHeadingError[index] = NormalizeAngle(newDesired - store.Heading[index]);
@@ -583,7 +653,7 @@ public static class SteeringController
         float minProgressT, float vx, float vy, float dt)
     {
         Vector2 targetPos = ComputeEdgeLookahead(store, index, graph, edgeIdx, rawProgress, edgeLength, checkCollinearity: true);
-        float laneOffset = LaneChangeLogic.ComputeCurrentLaneOffset(store, index);
+        float laneOffset = LaneChangeLogic.ComputeCurrentLaneOffset(store, index, graph, edgeIdx);
         if (store.DiagVehicle == index)
         {
             var edgePos = graph.EvaluateBezier(edgeIdx, progress);
@@ -794,7 +864,7 @@ public static class SteeringController
 
                 // Seed PrevHeadingError using vehicle's actual position (no teleport)
                 float newLookaheadT = MathF.Min(nextStartT + (LookaheadBase + speed * LookaheadPerSpeed) / nextLength, 1f);
-                float newLaneOffset = LaneChangeLogic.ComputeCurrentLaneOffset(store, index);
+                float newLaneOffset = LaneChangeLogic.ComputeCurrentLaneOffset(store, index, graph, nextEdge);
                 var newTarget = OffsetRight(graph, nextEdge, newLookaheadT, newLaneOffset);
                 float newDesired = MathF.Atan2(newTarget.Y - vy, newTarget.X - vx);
                 store.PrevHeadingError[index] = NormalizeAngle(newDesired - heading);
@@ -1029,7 +1099,7 @@ public static class SteeringController
         }
 
         float lookaheadT = rawProgress + effectiveLookahead / edgeLength;
-        float laneOffset = LaneChangeLogic.ComputeCurrentLaneOffset(store, index);
+        float laneOffset = LaneChangeLogic.ComputeCurrentLaneOffset(store, index, graph, edgeIdx);
 
         if (lookaheadT > 1f)
         {
@@ -1161,10 +1231,10 @@ public static class SteeringController
                 if (otherProgress > myProgress)
                 {
                     float pathDist = (otherProgress - myProgress) * edgeLength;
-                    float myCurrentOff = LaneWidth * (0.5f + store.CurrentLane[index]);
-                    float myTargetOff = LaneWidth * (0.5f + store.TargetLane[index]);
-                    float otherCurrentOff = LaneWidth * (0.5f + store.CurrentLane[other]);
-                    float otherTargetOff = LaneWidth * (0.5f + store.TargetLane[other]);
+                    float myCurrentOff = GeometryUtil.LaneLateralOffset(graph, myEdge, store.CurrentLane[index]);
+                    float myTargetOff = GeometryUtil.LaneLateralOffset(graph, myEdge, store.TargetLane[index]);
+                    float otherCurrentOff = GeometryUtil.LaneLateralOffset(graph, myEdge, store.CurrentLane[other]);
+                    float otherTargetOff = GeometryUtil.LaneLateralOffset(graph, myEdge, store.TargetLane[other]);
                     float threshold = LaneWidth * 0.7f;
                     bool inLane = MathF.Abs(myCurrentOff - otherCurrentOff) < threshold ||
                                   MathF.Abs(myCurrentOff - otherTargetOff) < threshold ||
@@ -1221,6 +1291,9 @@ public static class SteeringController
         // Rebuild the arc-occupancy index from the current arc state, then keep it live during this
         // pass via SetArc as vehicles enter/exit arcs (scan #1 reads it instead of scanning all vehicles).
         _arcOccupancy.Rebuild(store, arcCache.ArcCount);
+
+        // Per-pass on-edge occupancy (for the shared-lane entry gate).
+        RebuildEdgeOccupancy(store, graph.Edges.Count);
 
         // Ensure conflict-tracking arrays are sized
         if (DebugLoggingEnabled)

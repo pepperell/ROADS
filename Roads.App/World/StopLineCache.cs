@@ -13,7 +13,6 @@ namespace Roads.App.World;
 public class StopLineCache
 {
     /// <summary>Assumed lane width in meters for stop line offset calculations.</summary>
-    private const float LaneWidth = SimConstants.LaneWidth;
     /// <summary>
     /// Lower edge (~15 degrees) of the crossing taper. Below this a leg is a through-continuation
     /// and contributes no setback; above it the contribution ramps in (see <see cref="ContinuationBand"/>).
@@ -178,7 +177,7 @@ public class StopLineCache
         // smooth through-road as a continuation (not a crossing) — see AccumulateCrossingDistances.
         var selfTangent = EndpointTangentDir(graph, edgeIndex, atToNode);
 
-        float halfWidthSelf = edge.LaneCount * LaneWidth;
+        float halfWidthSelf = GeometryUtil.RoadHalfWidth(graph, edgeIndex);
         float maxLeftDist = 0f;
         float maxRightDist = 0f;
 
@@ -269,7 +268,7 @@ public class StopLineCache
         float sinAngle = MathF.Max(MathF.Sin(angle), MinSinAngle);
         float cosAngle = absDot; // cos of the acute angle
 
-        float halfWidthOther = other.LaneCount * LaneWidth;
+        float halfWidthOther = GeometryUtil.RoadHalfWidth(graph, otherEdge);
 
         // Near-side: boundary facing the crossing road needs full geometric setback
         float dNear = weight * (halfWidthSelf * cosAngle + halfWidthOther) / sinAngle;

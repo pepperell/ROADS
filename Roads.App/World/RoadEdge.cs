@@ -20,6 +20,16 @@ public enum RoadType : byte
 public enum EdgeFlags : ushort
 {
     None = 0,
+    /// <summary>
+    /// Single-lane two-way road: one physical lane shared by both directions (e.g. a
+    /// driveway lead-in). Set on BOTH edges of the pair; <see cref="RoadEdge.LaneCount"/>
+    /// is forced to 1. Both directions drive on the edge path itself (lateral offset 0),
+    /// the road renders one lane wide, and a vehicle may only enter when no vehicle is
+    /// travelling the opposite direction on the segment (see SteeringController's
+    /// shared-lane entry gate). A normal one-way road needs no flag — it is simply a
+    /// directed edge with no reverse (FindReverseEdge &lt; 0).
+    /// </summary>
+    SharedLane = 1,
 }
 
 /// <summary>

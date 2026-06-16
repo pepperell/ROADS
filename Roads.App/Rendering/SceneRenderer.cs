@@ -238,7 +238,7 @@ public class SceneRenderer
         using var hoverPaint = new SKPaint
         {
             Color = fillColor,
-            StrokeWidth = graph.Edges[idx].LaneCount * 2 * 3.5f + 2f,
+            StrokeWidth = GeometryUtil.RoadSurfaceWidth(graph, idx) + 2f,
             Style = SKPaintStyle.Stroke,
             StrokeCap = SKStrokeCap.Round,
             IsAntialias = true,
@@ -264,7 +264,7 @@ public class SceneRenderer
         using var highlightPaint = new SKPaint
         {
             Color = new SKColor(100, 200, 255, 80),
-            StrokeWidth = graph.Edges[editorState.SelectedEdge].LaneCount * 2 * 3.5f + 2f,
+            StrokeWidth = GeometryUtil.RoadSurfaceWidth(graph, editorState.SelectedEdge) + 2f,
             Style = SKPaintStyle.Stroke,
             StrokeCap = SKStrokeCap.Round,
             IsAntialias = true,

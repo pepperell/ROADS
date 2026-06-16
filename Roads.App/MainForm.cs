@@ -328,6 +328,46 @@ public class MainForm : Form
             }
         }
 
+        // O key: cycle the selected road two-way → one-way → one-way reversed → two-way.
+        // The two one-way states are topologically identical, so the cycle step is tracked
+        // in EditorState and reset when a different edge is cycled.
+        if (e.KeyCode == Keys.O && !e.Control && _editorState.ActiveTool == EditorTool.Select
+            && _editorState.SelectedEdge >= 0
+            && _roadGraph.Edges[_editorState.SelectedEdge].FromNode >= 0)
+        {
+            int sel = _editorState.SelectedEdge;
+            if (_editorState.OneWayCycleEdge != sel)
+            {
+                _editorState.OneWayCycleEdge = sel;
+                // Seed the step from the current topology so a loaded/just-selected road
+                // cycles sensibly: two-way starts at 0, an existing one-way at 1.
+                _editorState.OneWayCycleStep = _roadGraph.FindReverseEdge(sel) >= 0 ? 0 : 1;
+            }
+
+            switch (_editorState.OneWayCycleStep)
+            {
+                case 0: _roadGraph.MakeOneWay(sel); _editorState.OneWayCycleStep = 1; break;
+                case 1: _roadGraph.ReverseOneWay(sel); _editorState.OneWayCycleStep = 2; break;
+                default: _roadGraph.MakeTwoWay(sel); _editorState.OneWayCycleStep = 0; break;
+            }
+            e.Handled = true;
+        }
+
+        // J key: toggle single-lane two-way (shared lane) on a selected two-way road. Valid only
+        // on a two-way road (a pair); one physical lane shared both ways, gated against oncoming.
+        if (e.KeyCode == Keys.J && !e.Control && _editorState.ActiveTool == EditorTool.Select
+            && _editorState.SelectedEdge >= 0
+            && _roadGraph.Edges[_editorState.SelectedEdge].FromNode >= 0)
+        {
+            int sel = _editorState.SelectedEdge;
+            if (_roadGraph.FindReverseEdge(sel) >= 0)
+            {
+                bool isShared = (_roadGraph.Edges[sel].Flags & EdgeFlags.SharedLane) != 0;
+                _roadGraph.SetSharedLane(sel, !isShared);
+            }
+            e.Handled = true;
+        }
+
         // Delete key to delete selected node
         if (e.KeyCode == Keys.Delete && _editorState.ActiveTool == EditorTool.Select
             && _editorState.SelectedNode >= 0)

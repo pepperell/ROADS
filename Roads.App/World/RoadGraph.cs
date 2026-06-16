@@ -785,6 +785,41 @@ public class RoadGraph
     }
 
     /// <summary>
+    /// Toggles single-lane two-way (<see cref="EdgeFlags.SharedLane"/>) on a two-way road: sets or
+    /// clears the flag on BOTH edges of the pair and, when enabling, forces the lane count to 1 (one
+    /// physical lane shared by both directions). No-op on a one-way road (no reverse edge), where the
+    /// flag has no meaning. Vehicles entering a shared edge are gated against oncoming traffic by the
+    /// steering controller's shared-lane gate.
+    /// </summary>
+    public void SetSharedLane(int edgeIndex, bool shared)
+    {
+        if (edgeIndex < 0 || edgeIndex >= _edges.Count) return;
+        if (_edges[edgeIndex].FromNode < 0) return;
+        int reverse = FindReverseEdge(edgeIndex);
+        if (reverse < 0) return; // shared-lane is a two-way concept
+
+        ApplySharedLaneFlag(edgeIndex, shared);
+        ApplySharedLaneFlag(reverse, shared);
+        Version++;
+    }
+
+    /// <summary>Sets or clears <see cref="EdgeFlags.SharedLane"/> on one edge, forcing 1 lane when set.</summary>
+    private void ApplySharedLaneFlag(int edgeIndex, bool shared)
+    {
+        var e = _edges[edgeIndex];
+        if (shared)
+        {
+            e.Flags |= EdgeFlags.SharedLane;
+            e.LaneCount = 1;
+        }
+        else
+        {
+            e.Flags &= ~EdgeFlags.SharedLane;
+        }
+        _edges[edgeIndex] = e;
+    }
+
+    /// <summary>
     /// Sets the speed limit for an edge and its reverse edge, clamped to ~5–100 mph.
     /// </summary>
     /// <param name="edgeIndex">Index of the edge to modify.</param>
@@ -835,6 +870,98 @@ public class RoadGraph
             _edges[reverse] = rev;
         }
         Version++;
+    }
+
+    // ── One-way / two-way conversion ───────────────────────────────────
+    //
+    // A one-way road is simply a directed edge with no reverse partner — there is no
+    // EdgeFlags bit, because topology (FindReverseEdge &lt; 0) is the single source of
+    // truth and cannot drift out of sync. These three operations form the editor's
+    // single-key cycle: two-way → one-way (selected direction) → one-way (reversed) →
+    // two-way. The selected edge index is preserved across all three so the editor's
+    // selection and cycle state stay valid.
+
+    /// <summary>
+    /// Converts a two-way road to one-way in the direction of <paramref name="edgeIndex"/>
+    /// by removing its reverse edge. Vehicles stranded on the removed direction are
+    /// re-snapped or removed by <see cref="GraphChangeHandler"/> on the next tick (the same
+    /// path used for any edge deletion). No-op (returns false) if the edge is already one-way.
+    /// </summary>
+    public bool MakeOneWay(int edgeIndex)
+    {
+        if (edgeIndex < 0 || edgeIndex >= _edges.Count) return false;
+        if (_edges[edgeIndex].FromNode < 0) return false;
+        int reverse = FindReverseEdge(edgeIndex);
+        if (reverse < 0) return false; // already one-way
+        // edgeIndex keeps both endpoints connected, so removing the reverse cannot orphan
+        // either node. RemoveEdge rebuilds adjacency/turn matrices and bumps Version.
+        RemoveEdge(reverse);
+        return true;
+    }
+
+    /// <summary>
+    /// Flips the travel direction of a one-way road in place (swaps its end nodes and mirrors
+    /// its Bézier control points). The edge index is unchanged. Its per-lane turn restrictions
+    /// are cleared (they described turns at the old downstream node and no longer apply); auto
+    /// defaults re-derive on the next normalize pass. No-op (returns false) if the edge is not
+    /// one-way (a paired/two-way edge must not have its direction flipped independently).
+    /// </summary>
+    public bool ReverseOneWay(int edgeIndex)
+    {
+        if (edgeIndex < 0 || edgeIndex >= _edges.Count) return false;
+        var e = _edges[edgeIndex];
+        if (e.FromNode < 0) return false;
+        if (FindReverseEdge(edgeIndex) >= 0) return false; // not one-way
+
+        // Drop restrictions keyed on this edge (as an incoming edge) and any that target it
+        // (as an outgoing edge); both are tied to the pre-flip direction.
+        ClearLaneRestrictions(edgeIndex);
+        PruneLaneRestrictionTarget(edgeIndex);
+
+        (e.FromNode, e.ToNode) = (e.ToNode, e.FromNode);
+        (e.ControlPoint1, e.ControlPoint2) = (e.ControlPoint2, e.ControlPoint1);
+        _edges[edgeIndex] = e;
+
+        RebuildAdjacency();
+        RebuildTurnMatrix(e.FromNode);
+        RebuildTurnMatrix(e.ToNode);
+        Version++;
+        return true;
+    }
+
+    /// <summary>
+    /// Converts a one-way road back to two-way by adding a reverse edge that mirrors the
+    /// existing one (mirrored control points; same lanes, speed, type, and flags — preserving
+    /// <see cref="EdgeFlags.SharedLane"/>). No-op (returns false) if the edge already has a
+    /// reverse partner.
+    /// </summary>
+    public bool MakeTwoWay(int edgeIndex)
+    {
+        if (edgeIndex < 0 || edgeIndex >= _edges.Count) return false;
+        var e = _edges[edgeIndex];
+        if (e.FromNode < 0) return false;
+        if (FindReverseEdge(edgeIndex) >= 0) return false; // already two-way
+
+        var rev = new RoadEdge
+        {
+            FromNode = e.ToNode,
+            ToNode = e.FromNode,
+            Length = e.Length,
+            SpeedLimit = e.SpeedLimit,
+            LaneCount = e.LaneCount,
+            RoadType = e.RoadType,
+            Flags = e.Flags,
+            ControlPoint1 = e.ControlPoint2,
+            ControlPoint2 = e.ControlPoint1,
+        };
+        _edges.Add(rev);
+        ActiveEdgeCount++;
+        Version++;
+
+        RebuildAdjacency();
+        RebuildTurnMatrix(e.FromNode);
+        RebuildTurnMatrix(e.ToNode);
+        return true;
     }
 
     /// <summary>

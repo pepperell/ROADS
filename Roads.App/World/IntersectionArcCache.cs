@@ -10,7 +10,6 @@ namespace Roads.App.World;
 /// </summary>
 public class IntersectionArcCache
 {
-    private const float LaneWidth = SimConstants.LaneWidth;
     private const float MinArmLength = 1.5f;
     private const float MaxArmLength = 15f;
 
@@ -377,8 +376,8 @@ public class IntersectionArcCache
 
         foreach (var (inLane, outLane) in lanePairs)
         {
-            float inLaneOffset = LaneWidth * (0.5f + inLane);
-            float outLaneOffset = LaneWidth * (0.5f + outLane);
+            float inLaneOffset = GeometryUtil.LaneLateralOffset(graph, inEdge, inLane);
+            float outLaneOffset = GeometryUtil.LaneLateralOffset(graph, outEdge, outLane);
 
             var p0 = OffsetRight(graph, inEdge, inStopT, inLaneOffset);
             var p3 = OffsetRight(graph, outEdge, outStartT, outLaneOffset);

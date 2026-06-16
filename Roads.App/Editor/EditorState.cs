@@ -72,6 +72,17 @@ public class EditorState
     /// <summary>Preview positions for intersections detected during node drag.</summary>
     public List<System.Numerics.Vector2> DragCrossingPreviews { get; } = new();
 
+    /// <summary>
+    /// Edge whose one-way cycle (the <c>O</c> key) is mid-progress, or -1. Tracks where the
+    /// three-state cycle (two-way → one-way → one-way reversed → two-way) is, since the two
+    /// one-way states are topologically identical. Reset lazily when a different edge is cycled.
+    /// </summary>
+    public int OneWayCycleEdge { get; set; } = -1;
+
+    /// <summary>Step within the one-way cycle for <see cref="OneWayCycleEdge"/>: 0 = two-way,
+    /// 1 = one-way (selected direction), 2 = one-way reversed.</summary>
+    public int OneWayCycleStep { get; set; }
+
     /// <summary>Whether lane restriction editing mode is active (node must be selected).</summary>
     public bool LaneRestrictionMode { get; set; }
 
@@ -96,5 +107,7 @@ public class EditorState
         DragControlPointIndex = -1;
         LaneRestrictionMode = false;
         LaneRestrictionEdge = -1;
+        OneWayCycleEdge = -1;
+        OneWayCycleStep = 0;
     }
 }

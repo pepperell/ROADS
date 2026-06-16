@@ -266,12 +266,15 @@ public static class LaneChangeLogic
     }
 
     /// <summary>
-    /// Looks ahead in the vehicle's path (scanning across multiple edges) to determine if
-    /// a specific lane is needed for an upcoming turn. For the current edge it uses the arc
-    /// cache's per-lane reachability (which honors explicit restrictions and auto/geometry
-    /// lanes alike — the same paths the vehicle can actually drive); for farther-ahead edges
-    /// it falls back to the cross-product geometry heuristic. Also computes merge urgency
-    /// based on distance remaining and lanes to cross.
+    /// Looks ahead along the vehicle's path — across as many edges as needed, ignoring segment
+    /// boundaries — to find the nearest turn that constrains which lane the vehicle must be in,
+    /// and returns the lane it should move toward on the current edge (or
+    /// <see cref="byte.MaxValue"/> if none within range). Every transition's reachable lanes
+    /// come from the arc cache (which honors explicit restrictions and auto/geometry lanes
+    /// alike — the same paths the vehicle can actually drive); transitions where every lane can
+    /// continue are skipped as lane-preserving. The merge is triggered purely by distance to
+    /// that binding turn, so a turn beyond a short feeder segment is prepared for early enough
+    /// to actually reach the required lane. Also outputs merge urgency.
     /// </summary>
     /// <param name="store">Vehicle data store.</param>
     /// <param name="index">Index of the vehicle.</param>
@@ -301,13 +304,22 @@ public static class LaneChangeLogic
         float aggrPrepFactor = 1.5f - store.Aggressiveness[index];
         float adjustedPrepBase = TurnPrepBaseDistance * aggrPrepFactor;
 
-        // Maximum prep distance for scanning (use max lanes for upper bound)
+        // Beyond this distance even the widest merge (crossing every lane of the current edge)
+        // wouldn't begin yet, so it bounds how far ahead we ever scan.
         float maxPrepDistance = adjustedPrepBase + TurnPrepPerLane * maxLane;
 
-        // Accumulate distance from current position, scanning ahead through path edges
-        float accumulatedDist = (1f - progress) * edgeLength;
+        // Physical distance from the vehicle to the END of the current edge (the first
+        // transition). Accumulated across edges as we scan forward — segment boundaries are
+        // invisible to the driver; only distance-to-the-turn matters.
+        float distToTurn = (1f - progress) * edgeLength;
 
-        // Scan forward through path to find the first upcoming turn or restriction
+        // Walk forward along the path to the first turn that constrains which lane we must be
+        // in. A transition where EVERY lane can continue is straight-through (lane-preserving
+        // in this model), so we skip past it, keep accumulating distance, and the required lane
+        // at the eventual binding turn maps straight back onto the current edge. Reachability
+        // comes from the arc cache for every edge — near or far — so a turn two segments ahead
+        // that needs a specific lane is prepared for now, on a short feeder it might otherwise
+        // be impossible to reach in time.
         for (int scan = pathIdx; scan + 1 < path.Count; scan++)
         {
             int scanEdgeIdx = path[scan];
@@ -319,97 +331,57 @@ public static class LaneChangeLogic
             var nextEdge = graph.Edges[nextEdgeIdx];
             if (scanEdge.FromNode < 0 || nextEdge.FromNode < 0) break;
 
-            // Only check lane restrictions / turn direction on the CURRENT edge
-            // (the one the vehicle is actually on), since that's where lane changes happen
-            if (scan == pathIdx)
+            byte scanMaxLane = (byte)(scanEdge.LaneCount - 1);
+
+            // Which lanes of scanEdge continue onto nextEdge (authoritative arc reachability —
+            // honors explicit restrictions and auto/geometry lanes alike). Count them (to tell
+            // whether this turn constrains lanes) and keep the one nearest the current lane,
+            // mapped onto the current edge by identity (clamped); valid because any transitions
+            // we skipped to get here were lane-preserving.
+            byte requiredLane = byte.MaxValue;
+            int bestDist = int.MaxValue;
+            int reachableCount = 0;
+            for (byte lane = 0; lane <= scanMaxLane; lane++)
             {
-                // Find which lane can actually reach the next edge, using the arc cache's
-                // per-lane reachability — the SAME source the vehicle drives and the L-mode
-                // overlay shows, which already honors explicit restrictions AND auto/geometry
-                // lanes. (Consulting only explicit restrictions and skipping null/auto lanes
-                // meant a turn reachable only from an unrestricted lane was never prepared
-                // for — cars never merged into it.) Pick the reachable lane closest to current.
-                byte requiredLane = byte.MaxValue;
-                int bestDist = int.MaxValue;
-                for (byte lane = 0; lane <= maxLane; lane++)
-                {
-                    var reach = arcCache.GetReachableFromLane(currentEdgeIdx, lane);
-                    if (reach == null) continue;
-                    bool canReach = false;
-                    foreach (var (outEdge, _, _) in reach)
-                        if (outEdge == nextEdgeIdx) { canReach = true; break; }
-                    if (!canReach) continue;
-                    int dist = Math.Abs(lane - currentLane);
-                    if (dist < bestDist) { bestDist = dist; requiredLane = lane; }
-                }
-
-                if (requiredLane != byte.MaxValue)
-                {
-                    int lanesToCross = Math.Abs(requiredLane - currentLane);
-                    float prepDistance = adjustedPrepBase + TurnPrepPerLane * lanesToCross;
-                    if (accumulatedDist <= prepDistance)
-                    {
-                        urgency = 1f - Math.Clamp(accumulatedDist / prepDistance, 0f, 1f);
-                        urgency = Math.Clamp(urgency * (1f + 0.3f * lanesToCross), 0f, 1f);
-                        return requiredLane;
-                    }
-                }
-            }
-            else
-            {
-                // For future edges, just check if a turn exists (geometry-based).
-                // If a turn is detected within lookahead range, the vehicle needs
-                // to be in the correct lane on the CURRENT edge to handle it.
-                byte turnLane = ClassifyTurnLane(graph, scanEdgeIdx, nextEdgeIdx, maxLane);
-                if (turnLane != byte.MaxValue)
-                {
-                    // A turn is coming on a future edge — get into the right lane now.
-                    // Use same lane index (left=0, right=maxLane) for current edge.
-                    byte requiredLane = Math.Min(turnLane, maxLane);
-
-                    // Also check explicit restrictions on current edge if available
-                    if (graph.HasLaneRestrictions(currentEdgeIdx))
-                    {
-                        // Restrictions already encode which lane can reach which exit,
-                        // but for multi-hop they may not directly apply.
-                        // Still prefer the geometry-based direction as a guide.
-                    }
-
-                    int lanesToCross = Math.Abs(requiredLane - currentLane);
-                    float prepDistance = adjustedPrepBase + TurnPrepPerLane * lanesToCross;
-                    if (accumulatedDist <= prepDistance)
-                    {
-                        urgency = 1f - Math.Clamp(accumulatedDist / prepDistance, 0f, 1f);
-                        urgency = Math.Clamp(urgency * (1f + 0.3f * lanesToCross), 0f, 1f);
-                        return requiredLane;
-                    }
-                }
+                var reach = arcCache.GetReachableFromLane(scanEdgeIdx, lane);
+                if (reach == null) continue;
+                bool canReach = false;
+                foreach (var (outEdge, _, _) in reach)
+                    if (outEdge == nextEdgeIdx) { canReach = true; break; }
+                if (!canReach) continue;
+                reachableCount++;
+                byte laneOnCurrent = (byte)Math.Min((int)lane, (int)maxLane);
+                int dist = Math.Abs(laneOnCurrent - currentLane);
+                if (dist < bestDist) { bestDist = dist; requiredLane = laneOnCurrent; }
             }
 
-            // Stop scanning if we've looked far enough ahead
-            if (accumulatedDist > maxPrepDistance) break;
+            if (requiredLane == byte.MaxValue) break; // path edge unreachable — handled at the arc
 
-            // Add the next edge's length to accumulated distance
-            accumulatedDist += nextEdge.Length;
+            // A binding turn is one where not every lane can continue. Non-binding transitions
+            // impose no constraint, so look past them to the next turn.
+            bool binding = reachableCount < scanEdge.LaneCount;
+            if (binding)
+            {
+                int lanesToCross = Math.Abs(requiredLane - currentLane);
+                float prepDistance = adjustedPrepBase + TurnPrepPerLane * lanesToCross;
+                if (distToTurn <= prepDistance)
+                {
+                    urgency = 1f - Math.Clamp(distToTurn / prepDistance, 0f, 1f);
+                    urgency = Math.Clamp(urgency * (1f + 0.3f * lanesToCross), 0f, 1f);
+                    return requiredLane;
+                }
+                // The nearest binding turn is still beyond prep range — nothing to do yet, and
+                // it dominates any farther turn, so stop and re-evaluate as we close on it.
+                return byte.MaxValue;
+            }
+
+            // Non-binding: advance to the next transition (the end of nextEdge) and continue,
+            // unless that already exceeds the farthest distance we would ever prep for.
+            if (distToTurn > maxPrepDistance) break;
+            distToTurn += MathF.Max(nextEdge.Length, 0.01f);
         }
 
-        return byte.MaxValue; // no upcoming turn within lookahead range
-    }
-
-    /// <summary>
-    /// Classifies the turn direction from one edge to the next and returns the required
-    /// lane index (0 for left, maxLane for right), or byte.MaxValue for straight.
-    /// Delegates to <see cref="GeometryUtil.ClassifyTurn"/> for the direction classification.
-    /// </summary>
-    private static byte ClassifyTurnLane(RoadGraph graph, int fromEdgeIdx, int toEdgeIdx, byte maxLane)
-    {
-        var turn = GeometryUtil.ClassifyTurn(graph, fromEdgeIdx, toEdgeIdx);
-        return turn switch
-        {
-            GeometryUtil.TurnDirection.Right => maxLane,
-            GeometryUtil.TurnDirection.Left => 0,
-            _ => byte.MaxValue,
-        };
+        return byte.MaxValue; // no binding turn within lookahead range
     }
 
     /// <summary>
@@ -447,8 +419,8 @@ public static class LaneChangeLogic
         nearby.Clear();
         grid.QueryFiltered(vx, vy, CollisionSearchRadius, store.PosX, store.PosY, nearby);
 
-        float targetLaneOffset = LaneWidth * (0.5f + targetLane);
-        float myLaneOffset = ComputeCurrentLaneOffset(store, index);
+        float targetLaneOffset = GeometryUtil.LaneLateralOffset(graph, myEdge, targetLane);
+        float myLaneOffset = ComputeCurrentLaneOffset(store, index, graph, myEdge);
 
         float nearestAhead = float.MaxValue;
         float nearestBehind = float.MaxValue;
@@ -468,8 +440,8 @@ public static class LaneChangeLogic
             if (store.CurrentEdge[other] == myEdge && store.CurrentArc[other] < 0)
             {
                 dist = (store.EdgeProgress[other] - myProgress) * edgeLength;
-                float otherCurrentOff = LaneWidth * (0.5f + store.CurrentLane[other]);
-                float otherTargetOff = LaneWidth * (0.5f + store.TargetLane[other]);
+                float otherCurrentOff = GeometryUtil.LaneLateralOffset(graph, myEdge, store.CurrentLane[other]);
+                float otherTargetOff = GeometryUtil.LaneLateralOffset(graph, myEdge, store.TargetLane[other]);
                 float threshold = LaneWidth * 0.7f;
                 inTargetLane = MathF.Abs(targetLaneOffset - otherCurrentOff) < threshold
                             || MathF.Abs(targetLaneOffset - otherTargetOff) < threshold;
@@ -642,18 +614,20 @@ public static class LaneChangeLogic
     /// </summary>
     /// <param name="store">Vehicle data store.</param>
     /// <param name="index">Index of the vehicle.</param>
-    /// <returns>Rightward offset from the road edge in meters.</returns>
-    public static float ComputeCurrentLaneOffset(VehicleStore store, int index)
+    /// <param name="graph">Road graph (for the lane-offset convention of the vehicle's edge).</param>
+    /// <param name="edgeIdx">The edge the vehicle is currently on.</param>
+    /// <returns>Rightward offset from the edge path in meters.</returns>
+    public static float ComputeCurrentLaneOffset(VehicleStore store, int index, RoadGraph graph, int edgeIdx)
     {
         byte currentLane = store.CurrentLane[index];
         byte targetLane = store.TargetLane[index];
         float progress = store.LaneChangeProgress[index];
 
-        float currentOffset = LaneWidth * (0.5f + currentLane);
+        float currentOffset = GeometryUtil.LaneLateralOffset(graph, edgeIdx, currentLane);
         if (currentLane == targetLane || progress <= 0f)
             return currentOffset;
 
-        float targetOffset = LaneWidth * (0.5f + targetLane);
+        float targetOffset = GeometryUtil.LaneLateralOffset(graph, edgeIdx, targetLane);
         // Smoothstep interpolation for natural motion
         float t = progress * progress * (3f - 2f * progress);
         return currentOffset + (targetOffset - currentOffset) * t;

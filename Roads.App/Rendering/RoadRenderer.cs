@@ -77,6 +77,15 @@ public class RoadRenderer
         PathEffect = SKPathEffect.CreateDash(new[] { 1.5f, 1.5f }, 0),
         IsAntialias = true
     };
+    // White chevrons drawn down each lane of a one-way road to show travel direction.
+    private readonly SKPaint _arrowPaint = new()
+    {
+        Color = new SKColor(210, 210, 210, 220),
+        Style = SKPaintStyle.Stroke,
+        StrokeCap = SKStrokeCap.Round,
+        StrokeJoin = SKStrokeJoin.Round,
+        IsAntialias = true
+    };
 
     /// <summary>
     /// Draws all active road edges in two passes (surfaces first, then markings) so that
@@ -151,7 +160,7 @@ public class RoadRenderer
                 {
                     var from = graph.Nodes[edge.FromNode].Position;
                     var to   = graph.Nodes[edge.ToNode].Position;
-                    float halfW = edge.LaneCount * SimConstants.LaneWidth;
+                    float halfW = GeometryUtil.RoadHalfWidth(graph, i);
                     if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to, halfW), viewRect))
                         continue;
                 }
@@ -176,7 +185,7 @@ public class RoadRenderer
             {
                 var from = graph.Nodes[edge.FromNode].Position;
                 var to   = graph.Nodes[edge.ToNode].Position;
-                float halfW = edge.LaneCount * SimConstants.LaneWidth;
+                float halfW = GeometryUtil.RoadHalfWidth(graph, i);
                 if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to, halfW), viewRect))
                     continue;
             }
@@ -205,16 +214,59 @@ public class RoadRenderer
             {
                 var from = graph.Nodes[edge.FromNode].Position;
                 var to   = graph.Nodes[edge.ToNode].Position;
-                float halfW = edge.LaneCount * SimConstants.LaneWidth;
+                float halfW = GeometryUtil.RoadHalfWidth(graph, i);
                 if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to, halfW), viewRect))
                     continue;
             }
 
             DrawRoadLines(canvas, edge, i, zoom);
+
+            // One-way roads (no reverse edge) get direction chevrons down each lane.
+            if (reverse < 0 && RoadTypeVisuals.HasPaintedLines(edge.RoadType))
+                DrawOneWayArrows(canvas, graph, i, zoom);
         }
 
         DrawStopLines(canvas, graph, stopLines, zoom, viewRect);
         DrawNodes(canvas, graph, zoom, viewRect);
+    }
+
+    /// <summary>
+    /// Draws white direction chevrons along each lane of a one-way road so the travel
+    /// direction is visible. Chevrons are placed at a couple of points between the edge's
+    /// stop-line trims (so they never sit inside an intersection) and oriented along the
+    /// curve tangent. Lane positions come from <see cref="GeometryUtil.LaneLateralOffset"/>,
+    /// so they sit on the centered one-way lanes.
+    /// </summary>
+    private void DrawOneWayArrows(SKCanvas canvas, RoadGraph graph, int edgeIndex, float zoom)
+    {
+        var edge = graph.Edges[edgeIndex];
+        float size = MathF.Max(2.5f, 4f / zoom);
+        _arrowPaint.StrokeWidth = Math.Max(0.3f, 0.5f / zoom);
+
+        // Keep chevrons clear of the intersection by sampling inside the trimmed range.
+        // (Two markers per lane reads clearly without cluttering short driveways.)
+        ReadOnlySpan<float> ts = stackalloc float[] { 0.4f, 0.7f };
+        foreach (float t in ts)
+        {
+            var pos = graph.EvaluateBezier(edgeIndex, t);
+            var tan = graph.EvaluateBezierTangent(edgeIndex, t);
+            float len = tan.Length();
+            if (len < 0.001f) continue;
+            float dx = tan.X / len, dy = tan.Y / len;
+            float rx = -dy, ry = dx; // right normal (Y-down)
+
+            for (int lane = 0; lane < edge.LaneCount; lane++)
+            {
+                float off = GeometryUtil.LaneLateralOffset(graph, edgeIndex, lane);
+                float cx = pos.X + rx * off, cy = pos.Y + ry * off;
+                // Chevron ">" pointing in travel direction.
+                float tipX = cx + dx * size * 0.5f, tipY = cy + dy * size * 0.5f;
+                float baseX = cx - dx * size * 0.5f, baseY = cy - dy * size * 0.5f;
+                float halfBarb = size * 0.45f;
+                canvas.DrawLine(tipX, tipY, baseX + rx * halfBarb, baseY + ry * halfBarb, _arrowPaint);
+                canvas.DrawLine(tipX, tipY, baseX - rx * halfBarb, baseY - ry * halfBarb, _arrowPaint);
+            }
+        }
     }
 
     /// <summary>Rebuilds the per-edge path cache if the graph version has changed.</summary>
@@ -247,7 +299,10 @@ public class RoadRenderer
     private CachedEdgePaths BuildEdgePaths(RoadGraph graph, int edgeIndex, StopLineCache stopLines)
     {
         var edge = graph.Edges[edgeIndex];
-        float totalWidth = edge.LaneCount * 2 * LaneWidth;
+        float totalWidth = GeometryUtil.RoadSurfaceWidth(graph, edgeIndex);
+        float halfWidth = totalWidth * 0.5f;
+        bool hasCenterLine = GeometryUtil.HasCenterDivider(graph, edgeIndex);
+        bool dashedEdges = (edge.Flags & EdgeFlags.SharedLane) != 0;
 
         // Build center path (full length — surface needs to extend into intersection)
         var centerPath = BuildBezierPath(graph, edgeIndex);
@@ -263,26 +318,45 @@ public class RoadRenderer
         float tMinRight = stopLines.GetRightTrimAtFromNode(edgeIndex);
         float tMaxRight = stopLines.GetRightTrimAtToNode(edgeIndex);
 
-        // Trimmed center line for markings (separate from surface center path)
-        var centerLinePath = BuildOffsetPath(graph, edgeIndex, 0f, tMin, tMax);
+        // Yellow center line exists only on a two-way road, where the edge path is the
+        // center divider. One-way and single-lane two-way roads have no divider — keep an
+        // empty path so the cache shape is uniform.
+        var centerLinePath = hasCenterLine
+            ? BuildOffsetPath(graph, edgeIndex, 0f, tMin, tMax)
+            : new SKPath();
 
         // Build edge boundary paths with per-side trims
-        var leftPath = BuildOffsetPath(graph, edgeIndex, -totalWidth / 2f, tMinLeft, tMaxLeft);
-        var rightPath = BuildOffsetPath(graph, edgeIndex, totalWidth / 2f, tMinRight, tMaxRight);
+        var leftPath = BuildOffsetPath(graph, edgeIndex, -halfWidth, tMinLeft, tMaxLeft);
+        var rightPath = BuildOffsetPath(graph, edgeIndex, halfWidth, tMinRight, tMaxRight);
 
-        // Build lane divider paths (trimmed to overall stop-T, multi-lane only)
+        // Build lane divider paths (trimmed to overall stop-T, multi-lane only).
         var lanePaths = new List<SKPath>();
         if (edge.LaneCount > 1)
         {
-            for (int lane = 1; lane < edge.LaneCount; lane++)
+            if (hasCenterLine)
             {
-                float offset = lane * LaneWidth;
-                lanePaths.Add(BuildOffsetPath(graph, edgeIndex, offset, tMin, tMax));
-                lanePaths.Add(BuildOffsetPath(graph, edgeIndex, -offset, tMin, tMax));
+                // Two-way: dividers mirrored on each side of the center divider (the lanes
+                // of this direction and the opposing direction).
+                for (int lane = 1; lane < edge.LaneCount; lane++)
+                {
+                    float offset = lane * LaneWidth;
+                    lanePaths.Add(BuildOffsetPath(graph, edgeIndex, offset, tMin, tMax));
+                    lanePaths.Add(BuildOffsetPath(graph, edgeIndex, -offset, tMin, tMax));
+                }
+            }
+            else
+            {
+                // One-way: dividers at the interior boundaries of the centered lane set.
+                for (int lane = 1; lane < edge.LaneCount; lane++)
+                {
+                    float offset = (lane - edge.LaneCount * 0.5f) * LaneWidth;
+                    lanePaths.Add(BuildOffsetPath(graph, edgeIndex, offset, tMin, tMax));
+                }
             }
         }
 
-        return new CachedEdgePaths(centerPath, centerLinePath, leftPath, rightPath, lanePaths, totalWidth);
+        return new CachedEdgePaths(centerPath, centerLinePath, leftPath, rightPath, lanePaths,
+            totalWidth, hasCenterLine, dashedEdges);
     }
 
     /// <summary>
@@ -398,15 +472,22 @@ public class RoadRenderer
         // Unpaved roads (dirt) have no painted edge lines, center line, or lane dividers.
         if (!RoadTypeVisuals.HasPaintedLines(edge.RoadType)) return;
 
-        // Edge boundary lines (white) — update zoom-dependent stroke width
+        // Edge boundary lines (white) — update zoom-dependent stroke width. Single-lane
+        // two-way roads dash both edges to signal a shared single track.
         _edgeLinePaint.StrokeWidth = Math.Max(0.3f, 0.5f / zoom);
+        _edgeLinePaint.PathEffect = cached.DashedEdges ? _centerLineDash : null;
         canvas.DrawPath(cached.LeftEdgePath, _edgeLinePaint);
         canvas.DrawPath(cached.RightEdgePath, _edgeLinePaint);
+        _edgeLinePaint.PathEffect = null;
 
-        // Center line (yellow dashed) — shared effect, no per-frame allocation.
-        _centerLinePaint.StrokeWidth = Math.Max(0.3f, 0.4f / zoom);
-        _centerLinePaint.PathEffect = _centerLineDash;
-        canvas.DrawPath(cached.CenterLinePath, _centerLinePaint);
+        // Center line (yellow dashed) — only on two-way roads, where the edge path is the
+        // center divider. Shared effect, no per-frame allocation.
+        if (cached.HasCenterLine)
+        {
+            _centerLinePaint.StrokeWidth = Math.Max(0.3f, 0.4f / zoom);
+            _centerLinePaint.PathEffect = _centerLineDash;
+            canvas.DrawPath(cached.CenterLinePath, _centerLinePaint);
+        }
 
         // Lane dividers (white dashed, multi-lane only)
         if (cached.LanePaths.Count > 0)
@@ -478,11 +559,11 @@ public class RoadRenderer
         float nx = -tangent.Y / len;
         float ny = tangent.X / len;
 
-        float halfWidth = edge.LaneCount * LaneWidth;
-
-        // Draw across right half only (our travel lanes)
-        canvas.DrawLine(center.X, center.Y,
-            center.X + nx * halfWidth, center.Y + ny * halfWidth, paint);
+        // Span exactly this edge's approaching lanes: two-way is the right half (0..+halfWidth);
+        // one-way / single-lane two-way span the full centered width.
+        var (spanMin, spanMax) = GeometryUtil.LaneSpan(graph, edgeIndex);
+        canvas.DrawLine(center.X + nx * spanMin, center.Y + ny * spanMin,
+            center.X + nx * spanMax, center.Y + ny * spanMax, paint);
     }
 
     /// <summary>Draws small circles at each active intersection/endpoint node.</summary>
@@ -534,7 +615,7 @@ public class RoadRenderer
 
                 float rx = -tangent.Y / len;
                 float ry = tangent.X / len;
-                float offset = edge.LaneCount * LaneWidth + 2f;
+                float offset = GeometryUtil.RoadHalfWidth(graph, edgeIdx) + 2f;
                 float sx = pos.X + rx * offset;
                 float sy = pos.Y + ry * offset;
 
@@ -672,7 +753,7 @@ public class RoadRenderer
 
             float rx = -tangent.Y / len;
             float ry = tangent.X / len;
-            float offset = edge.LaneCount * LaneWidth + 3f;
+            float offset = GeometryUtil.RoadHalfWidth(graph, i) + 3f;
             float sx = pos.X + rx * offset;
             float sy = pos.Y + ry * offset;
 
@@ -835,8 +916,7 @@ public class RoadRenderer
         float len = tangent.Length();
         if (len < 0.001f) return null;
 
-        var edge = graph.Edges[edgeIdx];
-        float halfWidth = edge.LaneCount * LaneWidth;
+        float halfWidth = GeometryUtil.RoadHalfWidth(graph, edgeIdx);
 
         // Compute left boundary point at its own trim-t (negative offset in tangent frame)
         var posL = graph.EvaluateBezier(edgeIdx, leftTrimT);
@@ -960,10 +1040,15 @@ public class RoadRenderer
         public readonly SKPath RightEdgePath;
         /// <summary>Paths for lane divider markings, trimmed at intersections (empty for single-lane roads).</summary>
         public readonly List<SKPath> LanePaths;
-        /// <summary>Total road width in meters (LaneCount * 2 * LaneWidth for two-way).</summary>
+        /// <summary>Total road width in meters (2 × <see cref="GeometryUtil.RoadHalfWidth"/>).</summary>
         public readonly float TotalWidth;
+        /// <summary>True if a yellow center line should be drawn (two-way roads only).</summary>
+        public readonly bool HasCenterLine;
+        /// <summary>True if the outer edge lines should be dashed (single-lane two-way roads).</summary>
+        public readonly bool DashedEdges;
 
-        public CachedEdgePaths(SKPath center, SKPath centerLine, SKPath left, SKPath right, List<SKPath> lanes, float totalWidth)
+        public CachedEdgePaths(SKPath center, SKPath centerLine, SKPath left, SKPath right, List<SKPath> lanes,
+            float totalWidth, bool hasCenterLine, bool dashedEdges)
         {
             CenterPath = center;
             CenterLinePath = centerLine;
@@ -971,6 +1056,8 @@ public class RoadRenderer
             RightEdgePath = right;
             LanePaths = lanes;
             TotalWidth = totalWidth;
+            HasCenterLine = hasCenterLine;
+            DashedEdges = dashedEdges;
         }
 
         public void Dispose()
