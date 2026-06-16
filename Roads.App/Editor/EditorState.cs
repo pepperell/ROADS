@@ -73,6 +73,25 @@ public class EditorState
     public List<System.Numerics.Vector2> DragCrossingPreviews { get; } = new();
 
     /// <summary>
+    /// Destination-placement ghost: world position of the new destination node (the cursor),
+    /// or <c>null</c> when not in placement mode this frame (e.g. cursor is over an existing
+    /// eligible node, or no nearby road exists). Set each mouse-move by the Destination hover case.
+    /// </summary>
+    public System.Numerics.Vector2? GhostDestPos { get; set; }
+
+    /// <summary>
+    /// Destination-placement ghost: world position of the perpendicular foot on the nearest
+    /// edge (the connector's on-road end / future split point), or <c>null</c> when inactive.
+    /// </summary>
+    public System.Numerics.Vector2? GhostFootPos { get; set; }
+
+    /// <summary>Nearest edge index for the placement ghost, or -1 when inactive.</summary>
+    public int GhostEdge { get; set; } = -1;
+
+    /// <summary>Parametric position of the foot on <see cref="GhostEdge"/> (already endpoint-clamped).</summary>
+    public float GhostT { get; set; }
+
+    /// <summary>
     /// Edge whose one-way cycle (the <c>O</c> key) is mid-progress, or -1. Tracks where the
     /// three-state cycle (two-way → one-way → one-way reversed → two-way) is, since the two
     /// one-way states are topologically identical. Reset lazily when a different edge is cycled.
@@ -109,5 +128,9 @@ public class EditorState
         LaneRestrictionEdge = -1;
         OneWayCycleEdge = -1;
         OneWayCycleStep = 0;
+        GhostDestPos = null;
+        GhostFootPos = null;
+        GhostEdge = -1;
+        GhostT = 0f;
     }
 }

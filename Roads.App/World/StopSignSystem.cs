@@ -97,6 +97,22 @@ public class StopSignSystem
     }
 
     /// <summary>
+    /// Migrates an edge exemption across a <see cref="RoadGraph.SplitEdge"/> (subscribe to
+    /// <see cref="RoadGraph.EdgeSplit"/>). The exemption means "do not stop at this edge's ToNode",
+    /// so it follows <paramref name="secondHalf"/> (Mid→ToNode) — the new approach to that node.
+    /// Without this, splitting an exempt main-road approach (e.g. when a new driveway is attached to
+    /// that road) would silently re-stop the main road at the existing intersection.
+    /// </summary>
+    public void OnEdgeSplit(int oldEdge, int firstHalf, int secondHalf)
+    {
+        if (oldEdge < 0 || oldEdge >= _edgeExempt.Length || !_edgeExempt[oldEdge]) return;
+        EnsureExemptCapacity(secondHalf);
+        _edgeExempt[secondHalf] = true;
+        _edgeExempt[oldEdge] = false; // old edge is now defunct
+        _dirty = true;
+    }
+
+    /// <summary>
     /// Checks whether an edge is exempt from its node's stop sign.
     /// </summary>
     public bool IsEdgeExempt(int edgeIndex)

@@ -88,6 +88,20 @@ public class YieldSignSystem
     }
 
     /// <summary>
+    /// Migrates an edge exemption across a <see cref="RoadGraph.SplitEdge"/> (subscribe to
+    /// <see cref="RoadGraph.EdgeSplit"/>). The exemption means "do not yield at this edge's ToNode",
+    /// so it follows <paramref name="secondHalf"/> (Mid→ToNode) — the new approach to that node.
+    /// </summary>
+    public void OnEdgeSplit(int oldEdge, int firstHalf, int secondHalf)
+    {
+        if (oldEdge < 0 || oldEdge >= _edgeExempt.Length || !_edgeExempt[oldEdge]) return;
+        EnsureExemptCapacity(secondHalf);
+        _edgeExempt[secondHalf] = true;
+        _edgeExempt[oldEdge] = false; // old edge is now defunct
+        _dirty = true;
+    }
+
+    /// <summary>
     /// Checks whether an edge is exempt from its node's yield sign.
     /// </summary>
     public bool IsEdgeExempt(int edgeIndex)

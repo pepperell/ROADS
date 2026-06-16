@@ -124,6 +124,8 @@ public class UIRenderer
         "+  -    Lane Count",
         "[  ]    Speed Limit",
         "R       Cycle Road Type",
+        "O       One-Way (cycle)",
+        "J       Single-Lane 2-Way",
         "Del     Delete Node",
         "L       Lane-Restrict Mode",
         "C       Default Restrictions",

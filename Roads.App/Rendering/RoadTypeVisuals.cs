@@ -60,6 +60,20 @@ public static class RoadTypeVisuals
     /// </summary>
     public static bool HasPaintedLines(RoadType type) => type != RoadType.Dirt;
 
+    /// <summary>
+    /// Visual importance rank — Highway &gt; Arterial &gt; Residential &gt; Dirt. Note this is NOT
+    /// the <see cref="RoadType"/> enum order (Dirt has the highest enum value but the lowest rank).
+    /// An intersection takes on the appearance of its highest-ranked incident road.
+    /// </summary>
+    public static int GetRank(RoadType type) => type switch
+    {
+        RoadType.Highway     => 3,
+        RoadType.Arterial    => 2,
+        RoadType.Residential => 1,
+        RoadType.Dirt        => 0,
+        _                    => 1,
+    };
+
     private static byte Dim(int baseValue, float ambient) =>
         (byte)Math.Clamp((int)(baseValue * ambient), 0, 255);
 }

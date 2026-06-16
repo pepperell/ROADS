@@ -68,6 +68,11 @@ public class MainForm : Form
     private bool _dragActive;
     private const int DragDeadZone = 5;
 
+    /// <summary>World-space radius within which the Destination placement tool will attach a
+    /// connector to the nearest road. Larger than SnapDistance so a destination can be dropped
+    /// in open space and still reach a road.</summary>
+    private const float DestPlacementSearchRadius = 200f;
+
     /// <summary>Autobench (see Program <c>--autobench</c>): target frame count (0 = disabled).</summary>
     private readonly int _autoBenchFrames;
     /// <summary>Frames elapsed since the autobench run started.</summary>
@@ -102,6 +107,11 @@ public class MainForm : Form
         _vehicles.VehiclesCleared += OnVehiclesCleared;
         _vehicles.VehicleRemoving += _vehicleGrid.OnEntityRemoving;
         _vehicles.VehiclesCleared += _vehicleGrid.Clear;
+
+        // Migrate stop/yield exemptions across edge splits (they are keyed by edge index, which
+        // SplitEdge changes) so splitting an exempt approach doesn't silently re-stop the road.
+        _roadGraph.EdgeSplit += _stopSigns.OnEdgeSplit;
+        _roadGraph.EdgeSplit += _yieldSigns.OnEdgeSplit;
 
         _sliderPanel.AddSlider("Kp", 0.5f, 10f, () => SteeringController.Kp, v => SteeringController.Kp = v);
         _sliderPanel.AddSlider("Kd", 0f, 5f, () => SteeringController.Kd, v => SteeringController.Kd = v);
@@ -348,7 +358,15 @@ public class MainForm : Form
             {
                 case 0: _roadGraph.MakeOneWay(sel); _editorState.OneWayCycleStep = 1; break;
                 case 1: _roadGraph.ReverseOneWay(sel); _editorState.OneWayCycleStep = 2; break;
-                default: _roadGraph.MakeTwoWay(sel); _editorState.OneWayCycleStep = 0; break;
+                default:
+                    // Flip the edge back to its original orientation before re-adding the reverse,
+                    // so a full cycle returns to the EXACT starting two-way road. Without this,
+                    // ReverseOneWay's in-place flip persists and the next lap's one-way (and its
+                    // arrows) points the opposite direction.
+                    _roadGraph.ReverseOneWay(sel);
+                    _roadGraph.MakeTwoWay(sel);
+                    _editorState.OneWayCycleStep = 0;
+                    break;
             }
             e.Handled = true;
         }
@@ -936,7 +954,20 @@ public class MainForm : Form
                     _spawnPointTool.OnClick(worldVec, _roadGraph);
                     break;
                 case EditorTool.Destination:
-                    _destinationTool.OnClick(worldVec, _roadGraph, _editorState.SelectedPOIType);
+                    // Legacy fallback: if over an existing eligible node, flag/toggle it.
+                    if (!_destinationTool.OnClick(worldVec, _roadGraph, _editorState.SelectedPOIType))
+                    {
+                        // Placement: use the ghost computed on the last mouse-move (recompute foot at click
+                        // for safety, since the graph may have changed). Requires a nearby road.
+                        _edgeSpatialGrid.RebuildIfNeeded(_roadGraph);
+                        var (nearEdge, nearT) = _edgeSpatialGrid.FindNearestEdgeWithT(
+                            _roadGraph, worldVec, DestPlacementSearchRadius);
+                        if (nearEdge >= 0)
+                        {
+                            _destinationTool.PlaceAndConnect(worldVec, nearEdge, nearT,
+                                _roadGraph, _editorState.SelectedPOIType, _stopSigns);
+                        }
+                    }
                     break;
                 case EditorTool.Signal:
                     _signalTool.OnClick(worldVec, _roadGraph);
@@ -1019,6 +1050,14 @@ public class MainForm : Form
     private void OnCanvasMouseMove(object? sender, MouseEventArgs e)
     {
         _currentMousePos = e.Location;
+
+        // Clear the destination-placement ghost up front; the Destination hover case below
+        // recomputes it when applicable. This guarantees no stale ghost renders down any
+        // early-return path (UI, pan, slider, node/control-point drag) — e.g. during a
+        // middle-button pan while the Destination tool is active.
+        _editorState.GhostDestPos = null;
+        _editorState.GhostFootPos = null;
+        _editorState.GhostEdge = -1;
 
         // Update button hover state; suppress map hovers when over UI
         if (_uiRenderer.UpdateHover(e.X, e.Y))
@@ -1141,11 +1180,45 @@ public class MainForm : Form
                     break;
                 }
                 case EditorTool.SpawnPoint:
-                case EditorTool.Destination:
                 case EditorTool.Signal:
                 {
                     _editorState.HoveredEdge = -1;
                     _editorState.HoveredNode = _roadGraph.FindNearestNode(worldVec, EditorState.SnapDistance);
+                    break;
+                }
+                case EditorTool.Destination:
+                {
+                    _editorState.HoveredEdge = -1;
+                    int nearNode = _roadGraph.FindNearestNode(worldVec, EditorState.SnapDistance);
+
+                    // Snap to (and later flag) an existing node only when it is eligible AND not
+                    // already carrying a marker — never grab a spawn/destination node. Otherwise
+                    // fall through to placement (the ghost), which drops a NEW destination.
+                    // (Ghost fields were cleared at the top of this handler, so the snap and
+                    // no-nearby-road cases simply leave them null.)
+                    bool snapToNode = nearNode >= 0 && _roadGraph.CanPlaceMarker(nearNode)
+                        && (_roadGraph.Nodes[nearNode].Flags & (NodeFlags.Spawn | NodeFlags.Destination)) == 0;
+
+                    if (snapToNode)
+                    {
+                        _editorState.HoveredNode = nearNode; // legacy flag-existing path; no ghost
+                    }
+                    else
+                    {
+                        _editorState.HoveredNode = -1;
+                        _edgeSpatialGrid.RebuildIfNeeded(_roadGraph);
+                        var (nearEdge, nearT) = _edgeSpatialGrid.FindNearestEdgeWithT(
+                            _roadGraph, worldVec, DestPlacementSearchRadius);
+                        if (nearEdge >= 0)
+                        {
+                            // ComputeFootPoint treats a flagged endpoint as non-existent — the foot
+                            // lands on the road just shy of it (a split), never on the marked node.
+                            _editorState.GhostDestPos = worldVec;
+                            _editorState.GhostFootPos = DestinationTool.ComputeFootPoint(_roadGraph, nearEdge, nearT);
+                            _editorState.GhostEdge = nearEdge;
+                            _editorState.GhostT = nearT;
+                        }
+                    }
                     break;
                 }
                 default:

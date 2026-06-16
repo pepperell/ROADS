@@ -81,6 +81,16 @@ public class RoadGraph
     public int Version { get; private set; }
 
     /// <summary>
+    /// Raised once per single-edge split (the primary edge and, if present, its reverse) with
+    /// (oldEdge, firstHalf, secondHalf). External per-edge state keyed by edge index — the stop-sign
+    /// and yield exemptions — subscribes to migrate onto the surviving half. An exemption is about
+    /// the edge's ToNode, which <c>secondHalf</c> (Mid→ToNode) inherits; <c>firstHalf</c>
+    /// (FromNode→Mid) approaches the new mid node. (Lane restrictions live in this class and are
+    /// migrated directly by <see cref="MigrateLaneRestrictionsForSplit"/>, not via this event.)
+    /// </summary>
+    public event Action<int, int, int>? EdgeSplit;
+
+    /// <summary>
     /// Sets the traffic control flags on a node and increments the graph version.
     /// </summary>
     /// <param name="index">Index of the node to modify.</param>
@@ -1304,12 +1314,15 @@ public class RoadGraph
         // Carry any lane restrictions from the old edge onto its two halves so a split
         // incident to a restricted node doesn't silently revert that approach to allow-all.
         MigrateLaneRestrictionsForSplit(edgeIndex, fwdFirst, fwdSecond);
+        // Migrate external per-edge state (stop/yield exemptions) onto the surviving half.
+        EdgeSplit?.Invoke(edgeIndex, fwdFirst, fwdSecond);
 
         // If reverse exists, split it at (1-t) using the same midNode
         if (reverseEdge >= 0 && _edges[reverseEdge].FromNode >= 0)
         {
             var (revFirst, revSecond) = SplitEdgeSingle(reverseEdge, 1f - t, midNode);
             MigrateLaneRestrictionsForSplit(reverseEdge, revFirst, revSecond);
+            EdgeSplit?.Invoke(reverseEdge, revFirst, revSecond);
             ActiveEdgeCount++; // net +1 for the reverse split too
         }
 

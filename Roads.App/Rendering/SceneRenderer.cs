@@ -130,6 +130,9 @@ public class SceneRenderer
         _spawnPointRenderer.DrawForFlag(canvas, graph, NodeFlags.Spawn, camera.Zoom);
         MarkerRenderer.DrawPOIMarkers(canvas, graph, camera.Zoom);
 
+        // Destination placement ghost (translucent preview of dest node + connector + foot node)
+        DrawDestinationPlacementGhost(canvas, editorState, camera);
+
         // Draw control point handles in Select mode
         DrawControlPointHandles(canvas, graph, editorState, camera);
 
@@ -377,6 +380,86 @@ public class SceneRenderer
             canvas.DrawCircle(pos.X, pos.Y, previewRadius, previewFill);
             canvas.DrawCircle(pos.X, pos.Y, previewRadius, previewStroke);
         }
+    }
+
+    /// <summary>
+    /// Draws the Destination placement ghost: a translucent preview of the new destination dot at
+    /// the cursor, a dashed connector to the perpendicular foot on the nearest road, and a small
+    /// foot dot on the road. Drawn in world coordinates (camera transform still applied), so all
+    /// radii/strokes are divided by zoom to match the real markers. The guard short-circuits when
+    /// the tool is not Destination or the ghost fields are null (cursor over an eligible node, over
+    /// UI, or no nearby road), giving automatic cleanup. Uses its own paints (does not touch shared).
+    /// </summary>
+    private static void DrawDestinationPlacementGhost(SKCanvas canvas, EditorState editorState, Camera camera)
+    {
+        if (editorState.ActiveTool != EditorTool.Destination) return;
+        if (editorState.GhostDestPos is not { } dest || editorState.GhostFootPos is not { } foot)
+            return;
+
+        // Ghost POI color: same indexing as MarkerRenderer / GetDestinationHoverColors, low alpha.
+        int colorIdx = (int)editorState.SelectedPOIType - 1;
+        var c = colorIdx >= 0 && colorIdx < UIRenderer.POIColors.Length
+            ? UIRenderer.POIColors[colorIdx]
+            : new SKColor(200, 60, 40, 200);
+        byte ghostAlpha = 110; // ~43%, within the 50-180 range used by existing previews
+
+        float zoom = camera.Zoom;
+        float radius = Math.Max(4f, 6f / zoom);          // match MarkerRenderer dot
+        float innerRadius = radius * 0.5f;
+        float footRadius = Math.Max(3f, 4f / zoom);      // smaller foot node
+
+        // --- Connector road (dashed translucent line cursor -> foot), mimic DrawRoadPreview ---
+        using var connectorPaint = new SKPaint
+        {
+            Color = new SKColor(c.Red, c.Green, c.Blue, ghostAlpha),
+            StrokeWidth = Math.Max(2f, 3.5f / zoom),
+            Style = SKPaintStyle.Stroke,
+            StrokeCap = SKStrokeCap.Round,
+            IsAntialias = true,
+            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0),
+        };
+        canvas.DrawLine(dest.X, dest.Y, foot.X, foot.Y, connectorPaint);
+
+        // --- Foot node (small translucent dot on the road) ---
+        using var footFill = new SKPaint
+        {
+            Color = new SKColor(c.Red, c.Green, c.Blue, ghostAlpha),
+            Style = SKPaintStyle.Fill,
+            IsAntialias = true,
+        };
+        using var footStroke = new SKPaint
+        {
+            Color = new SKColor(255, 255, 255, 120),
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = Math.Max(1f, 1.5f / zoom),
+            IsAntialias = true,
+        };
+        canvas.DrawCircle(foot.X, foot.Y, footRadius, footFill);
+        canvas.DrawCircle(foot.X, foot.Y, footRadius, footStroke);
+
+        // --- Destination dot (translucent, mimics MarkerRenderer composition) ---
+        using var destFill = new SKPaint
+        {
+            Color = new SKColor(c.Red, c.Green, c.Blue, ghostAlpha),
+            Style = SKPaintStyle.Fill,
+            IsAntialias = true,
+        };
+        using var destStroke = new SKPaint
+        {
+            Color = new SKColor(255, 255, 255, 120),
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = Math.Max(1f, 1.5f / zoom),
+            IsAntialias = true,
+        };
+        using var destInner = new SKPaint
+        {
+            Color = new SKColor(255, 255, 255, 110),
+            Style = SKPaintStyle.Fill,
+            IsAntialias = true,
+        };
+        canvas.DrawCircle(dest.X, dest.Y, radius, destFill);
+        canvas.DrawCircle(dest.X, dest.Y, radius, destStroke);
+        canvas.DrawCircle(dest.X, dest.Y, innerRadius, destInner);
     }
 
     private static void DrawControlPointHandles(SKCanvas canvas, RoadGraph graph,

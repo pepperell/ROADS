@@ -529,6 +529,8 @@ public class RoadRenderer
         {
             var edge = graph.Edges[i];
             if (edge.FromNode < 0) continue;
+            // Dirt roads carry no painted markings, so no stop line (the stop still applies).
+            if (edge.RoadType == RoadType.Dirt) continue;
 
             var toPos = graph.Nodes[edge.ToNode].Position;
             if (!InView(toPos.X, toPos.Y, cullRect, 40f)) continue;
@@ -814,6 +816,11 @@ public class RoadRenderer
 
             int count = approaches.Count;
 
+            // The intersection takes on the appearance of its highest-ranked incident road
+            // (e.g. a highway+arterial node looks like highway; an all-dirt node looks like dirt).
+            RoadType nodeType = HighestRoadTypeAtNode(graph, n);
+            _intersectionFillPaint.Color = RoadTypeVisuals.GetSurfaceColor(nodeType, _ambient);
+
             // Build intersection fill polygon: for each road, a straight segment along the
             // stop line (left→right boundary), then a curve to the next road's left boundary.
             using var fillPath = new SKPath();
@@ -832,7 +839,10 @@ public class RoadRenderer
             fillPath.Close();
             canvas.DrawPath(fillPath, _intersectionFillPaint);
 
-            // Draw corner curves as white boundary lines
+            // White corner boundary lines — unpaved (dirt) intersections carry no paint, matching
+            // the per-edge rule, so skip them when the intersection's appearance is dirt.
+            if (!RoadTypeVisuals.HasPaintedLines(nodeType)) continue;
+
             using var curvePaint = new SKPaint
             {
                 Color = _edgeLinePaint.Color,
@@ -854,6 +864,32 @@ public class RoadRenderer
                 canvas.DrawPath(curvePath, curvePaint);
             }
         }
+    }
+
+    /// <summary>
+    /// The highest-ranked road type among all edges incident to a node (see
+    /// <see cref="RoadTypeVisuals.GetRank"/>). Determines the intersection's fill appearance.
+    /// </summary>
+    private static RoadType HighestRoadTypeAtNode(RoadGraph graph, int nodeIndex)
+    {
+        RoadType best = RoadType.Dirt;
+        int bestRank = -1;
+
+        foreach (int e in graph.GetIncomingEdges(nodeIndex))
+        {
+            var edge = graph.Edges[e];
+            if (edge.FromNode < 0) continue;
+            int r = RoadTypeVisuals.GetRank(edge.RoadType);
+            if (r > bestRank) { bestRank = r; best = edge.RoadType; }
+        }
+        foreach (int e in graph.GetOutgoingEdges(nodeIndex))
+        {
+            var edge = graph.Edges[e];
+            if (edge.FromNode < 0) continue;
+            int r = RoadTypeVisuals.GetRank(edge.RoadType);
+            if (r > bestRank) { bestRank = r; best = edge.RoadType; }
+        }
+        return best;
     }
 
     /// <summary>
