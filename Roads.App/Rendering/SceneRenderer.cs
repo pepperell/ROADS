@@ -99,7 +99,7 @@ public class SceneRenderer
         simLoop.EdgeGrid.QueryVisible(graph.Edges.Count, viewRect.Left, viewRect.Top, viewRect.Right, viewRect.Bottom, _visibleEdges);
 
         // Draw roads (heat-map forwarded so the renderer can tint surfaces)
-        _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness, _heatMap, viewRect, _visibleEdges);
+        _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness, _heatMap, viewRect, _visibleEdges, stopSigns);
         _roadRenderer.DrawSignals(canvas, graph, trafficSignals, stopLineCache, camera.Zoom, viewRect);
         _roadRenderer.DrawStopSigns(canvas, graph, stopSigns, stopLineCache, camera.Zoom, viewRect);
         _roadRenderer.DrawYieldSigns(canvas, graph, yieldSigns, stopLineCache, camera.Zoom, viewRect);

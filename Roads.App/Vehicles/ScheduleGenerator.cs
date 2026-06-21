@@ -24,10 +24,10 @@ public static class ScheduleGenerator
                 if (hasWork)
                 {
                     entries.Add(new ScheduleEntry { DepartureTime = Jitter(8.0f, 0.5f), Destination = POIType.Work });
-                    // 20% chance of midday shop errand
+                    // 20% chance of midday shop errand — a quick local run, so NEAREST shop.
                     if (Random.Shared.NextDouble() < 0.20)
                     {
-                        entries.Add(new ScheduleEntry { DepartureTime = Jitter(12.0f, 0.3f), Destination = POIType.Shop });
+                        entries.Add(new ScheduleEntry { DepartureTime = Jitter(12.0f, 0.3f), Destination = POIType.Shop, NearestPOI = true });
                         entries.Add(new ScheduleEntry { DepartureTime = Jitter(12.5f, 0.2f), Destination = POIType.Work });
                     }
                     entries.Add(new ScheduleEntry { DepartureTime = Jitter(18.0f, 0.5f), Destination = POIType.Home });

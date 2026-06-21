@@ -113,7 +113,8 @@ public class RoadRenderer
     /// <param name="viewRect">Visible world-space rectangle for frustum culling.</param>
     public void Draw(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom,
         float darkness = 0f, CongestionHeatMap? heatMap = null,
-        SKRect viewRect = default, IReadOnlyList<int>? visibleEdges = null)
+        SKRect viewRect = default, IReadOnlyList<int>? visibleEdges = null,
+        StopSignSystem? stopSigns = null)
     {
         if (graph.Edges.Count == 0) return;
 
@@ -226,7 +227,7 @@ public class RoadRenderer
                 DrawOneWayArrows(canvas, graph, i, zoom);
         }
 
-        DrawStopLines(canvas, graph, stopLines, zoom, viewRect);
+        DrawStopLines(canvas, graph, stopLines, zoom, viewRect, stopSigns);
         DrawNodes(canvas, graph, zoom, viewRect);
     }
 
@@ -504,9 +505,6 @@ public class RoadRenderer
     /// Draws white stop lines at both ends of each edge where StopLineCache indicates a line
     /// is needed (i.e., where the stop-T is inset from the edge endpoint).
     /// </summary>
-    /// <summary>Mask of node flags that indicate a controlled intersection where stop lines should be drawn.</summary>
-    private const NodeFlags ControlledMask = NodeFlags.TrafficLight | NodeFlags.StopSign | NodeFlags.Yield;
-
     /// <summary>True if (x,y) is within the cull rect (expanded by <paramref name="margin"/>), or
     /// culling is off (an empty rect means "draw everything"). Used to skip off-screen node/edge work.</summary>
     private static bool InView(float x, float y, SKRect cull, float margin)
@@ -514,7 +512,8 @@ public class RoadRenderer
            || (x >= cull.Left - margin && x <= cull.Right + margin
                && y >= cull.Top - margin && y <= cull.Bottom + margin);
 
-    private void DrawStopLines(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom, SKRect cullRect = default)
+    private void DrawStopLines(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom,
+        SKRect cullRect = default, StopSignSystem? stopSigns = null)
     {
         using var stopLinePaint = new SKPaint
         {
@@ -535,9 +534,14 @@ public class RoadRenderer
             var toPos = graph.Nodes[edge.ToNode].Position;
             if (!InView(toPos.X, toPos.Y, cullRect, 40f)) continue;
 
-            // Draw stop line at ToNode end only (the approach side of the intersection).
-            // Outgoing edges (FromNode end) don't need stop lines.
-            if ((graph.Nodes[edge.ToNode].Flags & ControlledMask) != 0)
+            // A stop line is painted only where a vehicle actually stops: a traffic-light approach
+            // (stops at red), or a stop-sign approach that is NOT exempt. Yield and uncontrolled
+            // nodes get none — as does the exempt main-road approach at a minor-road stop (e.g. a
+            // home driveway), which has neither a stop sign nor a light of its own.
+            var toFlags = graph.Nodes[edge.ToNode].Flags;
+            bool stops = (toFlags & NodeFlags.TrafficLight) != 0
+                      || ((toFlags & NodeFlags.StopSign) != 0 && (stopSigns == null || !stopSigns.IsEdgeExempt(i)));
+            if (stops)
             {
                 float stopT = stopLines.GetStopTAtToNode(i);
                 if (stopT < 0.999f)

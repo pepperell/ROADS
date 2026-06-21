@@ -271,8 +271,140 @@ public class MainForm : Form
             }
         }
 
+        // Intent / off-road context.
+        sb.AppendLine($"  ResidentId: {_vehicles.ResidentId[i]}  DistToRoadSq: {_vehicles.DistToRoadSq[i]:F2}");
+        int destNode = _vehicles.DestinationNode[i];
+        if (destNode >= 0 && destNode < _roadGraph.Nodes.Count)
+            sb.AppendLine($"  Destination: node {destNode} (POI {_roadGraph.Nodes[destNode].PointOfInterest}, flags {_roadGraph.Nodes[destNode].Flags})");
+
+        // --- BLOCKER ANALYSIS: why is this car not moving? ---
+        sb.AppendLine("  --- BLOCKER ANALYSIS ---");
+
+        int leader = NearestVehicleAhead(i, out float gap, out float lat);
+        if (leader >= 0)
+            sb.AppendLine($"  Nearest ahead: vehicle {leader} gap={gap:F2}m lateral={lat:F2}m " +
+                $"speed={_vehicles.Speed[leader]:F2} edge={_vehicles.CurrentEdge[leader]} arc={_vehicles.CurrentArc[leader]} prog={_vehicles.EdgeProgress[leader]:F3}");
+        else
+            sb.AppendLine("  Nearest ahead: none within 30m (so it is held by a signal/stop, not a car)");
+
+        // Stop-sign first-come-first-served detail (explains a never-granted green).
+        if (edgeIdx >= 0 && edgeIdx < _roadGraph.Edges.Count && _roadGraph.Edges[edgeIdx].FromNode >= 0
+            && _stopSigns.CanQuery(_roadGraph))
+            sb.AppendLine($"  StopSign FCFS: {_stopSigns.DescribeStopState(_roadGraph, edgeIdx)}");
+
+        // Intended turn arc + conflicting arcs and who occupies them (the intersection-deadlock view).
+        if (_vehicles.CurrentArc[i] < 0 && edgeIdx >= 0 && path != null && pathIdx + 1 < path.Count)
+        {
+            int nextEdge = path[pathIdx + 1];
+            if (nextEdge >= 0 && nextEdge < _roadGraph.Edges.Count && _roadGraph.Edges[nextEdge].FromNode >= 0)
+            {
+                byte inLane = _vehicles.CurrentLane[i];
+                byte outLane = (byte)Math.Min(inLane, _roadGraph.Edges[nextEdge].LaneCount - 1);
+                int arcIdx = _intersectionArcs.GetArcIndex(edgeIdx, nextEdge, inLane, outLane);
+                sb.AppendLine($"  Intended turn: edge {edgeIdx} -> {nextEdge}, arc={arcIdx}");
+                if (arcIdx >= 0)
+                {
+                    foreach (int c in _intersectionArcs.GetConflictingArcs(arcIdx))
+                    {
+                        var ca = _intersectionArcs.GetArc(c);
+                        sb.AppendLine($"    conflictArc {c} ({ca.IncomingEdge}->{ca.OutgoingEdge}) occupants: {VehiclesOnArc(c)}");
+                    }
+                }
+            }
+        }
+
+        // All arcs at the node being entered, with occupants (arc state is NOT saved, so this live
+        // snapshot is the only way to see who is wedged mid-intersection).
+        int approachNode = _vehicles.CurrentArc[i] >= 0
+            ? _intersectionArcs.GetArc(_vehicles.CurrentArc[i]).NodeIndex
+            : (edgeIdx >= 0 && edgeIdx < _roadGraph.Edges.Count ? _roadGraph.Edges[edgeIdx].ToNode : -1);
+        if (approachNode >= 0)
+        {
+            sb.AppendLine($"  Arcs at node {approachNode}:");
+            foreach (int a in _intersectionArcs.GetArcsAtNode(approachNode))
+            {
+                var ad = _intersectionArcs.GetArc(a);
+                string occ = VehiclesOnArc(a);
+                if (occ != "(empty)")
+                    sb.AppendLine($"    arc {a} ({ad.IncomingEdge}->{ad.OutgoingEdge}) occupants: {occ}");
+            }
+        }
+
+        // Follow the queue/conflict ahead to expose a deadlock cycle (A->B->...->A).
+        sb.AppendLine($"  Blocking chain: {BuildBlockingChain(i)}");
+
         sb.AppendLine();
         File.AppendAllText("diag_vehicle.log", sb.ToString());
+    }
+
+    /// <summary>
+    /// Nearest other driving vehicle ahead of <paramref name="v"/> within a 30 m forward cone
+    /// (generous ±5 m lateral so cross-traffic at an intersection is caught). Returns its index and
+    /// the bumper gap, or -1 if nothing is ahead (then the vehicle is held by a signal/stop, not a car).
+    /// </summary>
+    private int NearestVehicleAhead(int v, out float gap, out float lateral)
+    {
+        gap = float.MaxValue; lateral = 0f;
+        float vx = _vehicles.PosX[v], vy = _vehicles.PosY[v];
+        float fx, fy;
+        int e = _vehicles.CurrentEdge[v];
+        if (_vehicles.CurrentArc[v] < 0 && e >= 0 && e < _roadGraph.Edges.Count && _roadGraph.Edges[e].FromNode >= 0)
+        {
+            var t = _roadGraph.EvaluateBezierTangent(e, _vehicles.EdgeProgress[v]);
+            float tl = t.Length();
+            if (tl > 0.001f) { fx = t.X / tl; fy = t.Y / tl; }
+            else { fx = MathF.Cos(_vehicles.Heading[v]); fy = MathF.Sin(_vehicles.Heading[v]); }
+        }
+        else { fx = MathF.Cos(_vehicles.Heading[v]); fy = MathF.Sin(_vehicles.Heading[v]); }
+
+        var buf = new List<int>();
+        _vehicleGrid.QueryFiltered(vx, vy, 30f, _vehicles.PosX, _vehicles.PosY, buf);
+        int best = -1; float bestFwd = float.MaxValue;
+        foreach (int o in buf)
+        {
+            if (o == v || _vehicles.State[o] != VehicleState.Driving) continue;
+            float dx = _vehicles.PosX[o] - vx, dy = _vehicles.PosY[o] - vy;
+            float fwd = dx * fx + dy * fy;
+            if (fwd <= 0f) continue;
+            float la = -dx * fy + dy * fx;
+            if (MathF.Abs(la) > 5f) continue;
+            if (fwd < bestFwd) { bestFwd = fwd; best = o; lateral = la; }
+        }
+        if (best >= 0) gap = bestFwd - SimConstants.VehicleLength;
+        return best;
+    }
+
+    /// <summary>Comma-separated indices of driving vehicles currently on the given arc, or "(empty)".</summary>
+    private string VehiclesOnArc(int arcIdx)
+    {
+        var list = new List<int>();
+        for (int o = 0; o < _vehicles.Count; o++)
+            if (_vehicles.State[o] == VehicleState.Driving && _vehicles.CurrentArc[o] == arcIdx)
+                list.Add(o);
+        return list.Count == 0 ? "(empty)" : string.Join(",", list);
+    }
+
+    /// <summary>
+    /// Walks "nearest vehicle ahead" from <paramref name="v"/> to expose the head of the queue or a
+    /// deadlock cycle. Stops at a vehicle with no car ahead (signal/stop-held), a moving non-blocker,
+    /// or a revisited vehicle (a true deadlock loop, flagged explicitly).
+    /// </summary>
+    private string BuildBlockingChain(int v)
+    {
+        var sb = new System.Text.StringBuilder();
+        var seen = new HashSet<int>();
+        int cur = v;
+        for (int hop = 0; hop < 16; hop++)
+        {
+            if (!seen.Add(cur)) { sb.Append($"{cur} <== DEADLOCK CYCLE"); break; }
+            sb.Append(cur);
+            int next = NearestVehicleAhead(cur, out float g, out _);
+            if (next < 0) { sb.Append(" -> [held by signal/stop or clear]"); break; }
+            if (_vehicles.Speed[next] > 1.0f && g > 8f) { sb.Append($" -> {next} (moving, not blocking)"); break; }
+            sb.Append($" -[{g:F1}m]-> ");
+            cur = next;
+        }
+        return sb.ToString();
     }
 
     /// <summary>

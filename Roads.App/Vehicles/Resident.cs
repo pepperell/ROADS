@@ -22,6 +22,12 @@ public struct ScheduleEntry
     public float DepartureTime;
     /// <summary>Type of destination for this trip.</summary>
     public POIType Destination;
+    /// <summary>
+    /// When true, this trip targets the NEAREST available POI of its type (a quick local errand,
+    /// e.g. a midday shop run from work); when false the destination is picked at random each time.
+    /// In-memory only — not serialized (schedules regenerate daily), so it defaults to random on load.
+    /// </summary>
+    public bool NearestPOI;
 }
 
 /// <summary>

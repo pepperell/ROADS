@@ -509,14 +509,19 @@ public class PopulationManager
             case POIType.Work:
                 return resident.WorkNode;
             default:
-                // Find nearest available POI of the requested type
+                // Shop/Leisure/etc. A NearestPOI trip (the midday errand) goes to the closest
+                // available POI; every other trip picks a random available POI, so destinations
+                // vary each time a resident goes out. Fallback to Leisure (same mode), then home.
                 var fromPos = resident.CurrentPOINode >= 0 && resident.CurrentPOINode < _graph.Nodes.Count
                     ? _graph.Nodes[resident.CurrentPOINode].Position
                     : Vector2.Zero;
-                int found = _poiRegistry.FindNearestAvailable(_graph, entry.Destination, fromPos);
+                int found = entry.NearestPOI
+                    ? _poiRegistry.FindNearestAvailable(_graph, entry.Destination, fromPos)
+                    : _poiRegistry.FindRandomAvailable(entry.Destination);
                 if (found >= 0) return found;
-                // Fallback: try Leisure, then any destination
-                found = _poiRegistry.FindNearestAvailable(_graph, POIType.Leisure, fromPos);
+                found = entry.NearestPOI
+                    ? _poiRegistry.FindNearestAvailable(_graph, POIType.Leisure, fromPos)
+                    : _poiRegistry.FindRandomAvailable(POIType.Leisure);
                 if (found >= 0) return found;
                 // Last resort: go home
                 return resident.HomeNode;

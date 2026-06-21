@@ -135,6 +135,26 @@ public class POIRegistry
         return best;
     }
 
+    /// <summary>
+    /// Picks a uniformly-random available (under-capacity) node of the given type, or -1 if none
+    /// are available. Reservoir-samples in a single pass (each available node has equal probability)
+    /// so callers get a fresh random destination every trip without allocating.
+    /// </summary>
+    public int FindRandomAvailable(POIType type)
+    {
+        var nodes = GetNodesOfType(type);
+        int chosen = -1;
+        int seen = 0;
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            int nodeIdx = nodes[i];
+            if (GetOccupancy(nodeIdx) >= GetCapacity(nodeIdx, type)) continue;
+            seen++;
+            if (Random.Shared.Next(seen) == 0) chosen = nodeIdx; // 1/seen chance to replace
+        }
+        return chosen;
+    }
+
     /// <summary>Resets all occupancy counts to zero.</summary>
     public void ClearOccupancy()
     {

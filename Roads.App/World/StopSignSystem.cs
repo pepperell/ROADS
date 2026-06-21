@@ -478,6 +478,30 @@ public class StopSignSystem
 
     // ── Serialization helpers ──────────────────────────────────────────
 
+    /// <summary>
+    /// Human-readable first-come-first-served state for an approach edge, for the vehicle
+    /// diagnostics dump: whether this edge stops here, who currently holds right-of-way, whether
+    /// THIS edge is recognised as stopped at the line, how long it has waited, and the post-departure
+    /// clearance remaining. Explains a "green never comes" stall that the signal colour alone hides.
+    /// </summary>
+    public string DescribeStopState(RoadGraph graph, int edgeIndex)
+    {
+        if (edgeIndex < 0 || edgeIndex >= graph.Edges.Count) return "n/a";
+        int node = graph.Edges[edgeIndex].ToNode;
+        if (node < 0 || node >= _isStopSign.Length || !_isStopSign[node]) return "ToNode is not a stop-sign node";
+        bool exempt = IsEdgeExempt(edgeIndex);
+        if (exempt) return $"node {node}: this approach is EXEMPT (does not stop)";
+
+        int served = node < _currentlyServingEdge.Length ? _currentlyServingEdge[node] : -1;
+        int servedVeh = node < _servedVehicle.Length ? _servedVehicle[node] : -1;
+        bool stoppedHere = edgeIndex < _edgeHasStoppedVeh.Length && _edgeHasStoppedVeh[edgeIndex];
+        float arrival = edgeIndex < _edgeArrivalTime.Length ? _edgeArrivalTime[edgeIndex] : float.NaN;
+        float waited = float.IsNaN(arrival) ? 0f : _simTime - arrival;
+        float clearIn = node < _clearanceEndTime.Length ? MathF.Max(0f, _clearanceEndTime[node] - _simTime) : 0f;
+        return $"node {node}: servedEdge={served} servedVeh={servedVeh} thisEdgeAtLine={stoppedHere} " +
+               $"waited={waited:F2}s (min {MinWaitTime:F1}s) clearanceIn={clearIn:F2}s";
+    }
+
     /// <summary>Returns indices of all edges marked exempt from stop sign enforcement.</summary>
     public List<int> GetExemptEdges()
     {
