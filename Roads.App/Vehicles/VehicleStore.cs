@@ -364,6 +364,21 @@ public class VehicleStore
     }
 
     /// <summary>
+    /// True if any active vehicle is currently on the given edge. A vehicle counts as "on" the
+    /// edge while <see cref="CurrentEdge"/> equals <paramref name="edgeIndex"/>, including while it
+    /// is on an intersection arc leaving that edge (CurrentEdge updates only after the arc exits).
+    /// O(n) scan — intended for rare callers (e.g. checking whether a draining edge has emptied).
+    /// </summary>
+    /// <param name="edgeIndex">Edge index to test for occupancy.</param>
+    /// <returns>True if at least one vehicle has <see cref="CurrentEdge"/> == <paramref name="edgeIndex"/>.</returns>
+    public bool AnyVehicleOnEdge(int edgeIndex)
+    {
+        for (int i = 0; i < Count; i++)
+            if (CurrentEdge[i] == edgeIndex) return true;
+        return false;
+    }
+
+    /// <summary>
     /// Ensures backing arrays have at least the given capacity and sets Count directly.
     /// Used during deserialization to pre-allocate before writing SoA data.
     /// </summary>

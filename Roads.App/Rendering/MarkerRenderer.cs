@@ -19,16 +19,24 @@ public class MarkerRenderer
     }
 
     /// <summary>
-    /// Draws markers at all non-defunct nodes that have the specified flag set.
+    /// Draws markers at all non-defunct nodes that have the specified flag set, using this
+    /// renderer's configured fill color.
     /// </summary>
     public void DrawForFlag(SKCanvas canvas, RoadGraph graph, NodeFlags flag, float zoom)
+        => DrawForFlag(canvas, graph, flag, zoom, _fillColor);
+
+    /// <summary>
+    /// Draws markers at all non-defunct nodes that have the specified flag set, with an explicit
+    /// fill color (lets one renderer instance serve multiple flag kinds, e.g. spawn vs region spawn).
+    /// </summary>
+    public void DrawForFlag(SKCanvas canvas, RoadGraph graph, NodeFlags flag, float zoom, SKColor fillColor)
     {
         float radius = Math.Max(4f, 6f / zoom);
         float innerRadius = radius * 0.5f;
 
         using var fillPaint = new SKPaint
         {
-            Color = _fillColor,
+            Color = fillColor,
             Style = SKPaintStyle.Fill,
             IsAntialias = true,
         };

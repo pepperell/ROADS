@@ -126,8 +126,9 @@ public class SceneRenderer
         if (editorState.SelectedVehicle >= 0)
             _vehicleRenderer.DrawSelectionOverlay(canvas, vehicles, editorState.SelectedVehicle, graph, stopLineCache, intersectionArcs);
 
-        // Draw spawn and destination node markers
+        // Draw spawn, region-spawn, and destination node markers
         _spawnPointRenderer.DrawForFlag(canvas, graph, NodeFlags.Spawn, camera.Zoom);
+        _spawnPointRenderer.DrawForFlag(canvas, graph, NodeFlags.RegionSpawn, camera.Zoom, UIRenderer.SpawnColors[1]);
         MarkerRenderer.DrawPOIMarkers(canvas, graph, camera.Zoom);
 
         // Destination placement ghost (translucent preview of dest node + connector + foot node)

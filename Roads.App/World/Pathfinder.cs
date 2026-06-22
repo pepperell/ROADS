@@ -106,6 +106,9 @@ public static class Pathfinder
         {
             var edge = graph.Edges[edgeIdx];
             if (edge.FromNode < 0) continue;
+            // Skip edges closed by an in-progress drain so new routes avoid a closing edge
+            // while cars already on it finish crossing (the edge is still traversable).
+            if (graph.IsEdgeClosed(edgeIdx)) continue;
             int toNode = edge.ToNode;
             if (float.IsNaN(graph.Nodes[toNode].Position.X)) continue;
 
@@ -143,6 +146,9 @@ public static class Pathfinder
             {
                 var neighborData = graph.Edges[neighborEdge];
                 if (neighborData.FromNode < 0) continue;
+                // Skip edges closed by an in-progress drain (same rationale as the seed loop):
+                // exclude a closing edge from new routes while its current traffic clears.
+                if (graph.IsEdgeClosed(neighborEdge)) continue;
 
                 int neighborToNode = neighborData.ToNode;
                 if (float.IsNaN(graph.Nodes[neighborToNode].Position.X)) continue;

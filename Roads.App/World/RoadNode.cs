@@ -22,6 +22,9 @@ public enum NodeFlags : byte
     ManualSignal = 16,
     /// <summary>Node is a vehicle destination (only valid on nodes with ≤ 2 outgoing edges).</summary>
     Destination = 32,
+    /// <summary>Node is a region spawn point: the off-map origin residents drive in from the
+    /// first time they appear (only valid on nodes with ≤ 2 outgoing edges).</summary>
+    RegionSpawn = 64,
 }
 
 /// <summary>
@@ -36,6 +39,9 @@ public enum POIType : byte
     Leisure,
     School,
     Parking,
+    /// <summary>Region exit: an off-map boundary destination. Its existence gates region
+    /// spawns (residents only drive in when at least one region exit exists).</summary>
+    RegionExit,
 }
 
 /// <summary>

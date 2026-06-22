@@ -23,8 +23,9 @@ public class SignalTool
         int node = graph.FindNearestNode(worldPos, EditorState.SnapDistance);
         if (node < 0) return false;
 
-        // Only allow signals at real intersections (3+ incoming edges)
-        if (graph.GetIncomingEdges(node).Count < 3) return false;
+        // Only allow signals at real intersections (incl. one-way merges, which have only
+        // 2 incoming edges but 3 distinct neighbors — see RoadGraph.IsTrafficControlJunction).
+        if (!graph.IsTrafficControlJunction(node)) return false;
 
         var flags = graph.Nodes[node].Flags;
 

@@ -432,6 +432,19 @@ public static class SteeringController
                         }
                     }
 
+                    // Closed-edge gate: a closed edge is draining (will be removed once empty), so
+                    // refuse NEW entrants arriving via this intersection arc. Cars already on / spawned
+                    // onto the closed edge are unaffected — they don't re-enter through this arc gate,
+                    // so they finish crossing and let the edge empty out.
+                    if (graph.IsEdgeClosed(arc.OutgoingEdge))
+                    {
+                        store.EdgeProgress[index] = stopAtT;
+                        store.Throttle[index] = 0f;
+                        store.Brake[index] = 1.0f;
+                        store.Speed[index] = 0f;
+                        return TransitionResult.Returned;
+                    }
+
                     // Single-lane two-way (shared-lane) gate: don't enter a one-lane shared segment
                     // while a vehicle is travelling the OPPOSITE direction on it (already on the edge,
                     // or committed to entering it from the far end). Same-direction following is fine —

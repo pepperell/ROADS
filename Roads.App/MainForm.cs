@@ -518,11 +518,12 @@ public class MainForm : Form
             e.Handled = true;
         }
 
-        // Delete key to delete selected node
+        // Delete key to delete selected node. Routed through the population coordinator so a
+        // populated node drains its people out before disappearing instead of vanishing instantly.
         if (e.KeyCode == Keys.Delete && _editorState.ActiveTool == EditorTool.Select
             && _editorState.SelectedNode >= 0)
         {
-            _roadGraph.RemoveNode(_editorState.SelectedNode);
+            _populationManager.RequestDeleteNode(_editorState.SelectedNode);
             _editorState.SelectedNode = -1;
             e.Handled = true;
         }
@@ -893,6 +894,17 @@ public class MainForm : Form
                 }
             }
 
+            // Check spawn-kind submenu (only visible when Spawn tool active)
+            if (_editorState.ActiveTool == EditorTool.SpawnPoint)
+            {
+                var hitSpawn = _uiRenderer.HitTestSpawn(e.X, e.Y);
+                if (hitSpawn.HasValue)
+                {
+                    _editorState.SelectedSpawnKind = hitSpawn.Value;
+                    return;
+                }
+            }
+
             // Check toolbar
             var hitTool = _uiRenderer.HitTest(e.X, e.Y);
             if (hitTool.HasValue)
@@ -1080,10 +1092,10 @@ public class MainForm : Form
                     _roadTool.OnClick(worldVec, _roadGraph, _editorState, _edgeSpatialGrid);
                     break;
                 case EditorTool.Delete:
-                    _deleteTool.OnClick(worldVec, _roadGraph, _edgeSpatialGrid);
+                    _deleteTool.OnClick(worldVec, _roadGraph, _edgeSpatialGrid, _populationManager);
                     break;
                 case EditorTool.SpawnPoint:
-                    _spawnPointTool.OnClick(worldVec, _roadGraph);
+                    _spawnPointTool.OnClick(worldVec, _roadGraph, _editorState.SelectedSpawnKind);
                     break;
                 case EditorTool.Destination:
                     // Legacy fallback: if over an existing eligible node, flag/toggle it.
@@ -1117,7 +1129,8 @@ public class MainForm : Form
                     _roadTool.OnCancel(_editorState);
                     break;
                 case EditorTool.SpawnPoint:
-                    RemoveNearestFlag(rWorldVec, NodeFlags.Spawn);
+                    RemoveNearestFlag(rWorldVec, _editorState.SelectedSpawnKind == SpawnKind.RegionSpawn
+                        ? NodeFlags.RegionSpawn : NodeFlags.Spawn);
                     break;
                 case EditorTool.Destination:
                     RemoveNearestDestination(rWorldVec);
@@ -1329,7 +1342,7 @@ public class MainForm : Form
                     // (Ghost fields were cleared at the top of this handler, so the snap and
                     // no-nearby-road cases simply leave them null.)
                     bool snapToNode = nearNode >= 0 && _roadGraph.CanPlaceMarker(nearNode)
-                        && (_roadGraph.Nodes[nearNode].Flags & (NodeFlags.Spawn | NodeFlags.Destination)) == 0;
+                        && (_roadGraph.Nodes[nearNode].Flags & (NodeFlags.Spawn | NodeFlags.RegionSpawn | NodeFlags.Destination)) == 0;
 
                     if (snapToNode)
                     {

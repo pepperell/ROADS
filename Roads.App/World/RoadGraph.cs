@@ -50,6 +50,18 @@ public class RoadGraph
     /// </summary>
     private readonly HashSet<int> _userLaneRestrictionNodes = new();
 
+    /// <summary>
+    /// Transient set of "closed" edge indices used by the graceful-deletion drain. A closed
+    /// edge stays fully present and traversable (NOT defunct) — vehicles already on it finish
+    /// crossing — but it is excluded from new route planning (<see cref="Pathfinder"/> skips it)
+    /// and blocks new entry at intersection arcs. This is a side-set rather than an
+    /// <see cref="EdgeFlags"/> bit so the closed state is never persisted: a mid-drain save must
+    /// not write a "closed" road. The set is purely runtime and is cleared on every full graph
+    /// reset (<see cref="LoadFromData"/>). Toggle via <see cref="SetEdgeClosed"/>; query via
+    /// <see cref="IsEdgeClosed"/>.
+    /// </summary>
+    private readonly HashSet<int> _closedEdges = new();
+
     /// <summary>Read-only view of all nodes in the graph.</summary>
     public IReadOnlyList<RoadNode> Nodes => _nodes;
     /// <summary>Read-only view of all edges in the graph (includes defunct entries).</summary>
@@ -254,6 +266,30 @@ public class RoadGraph
     }
 
     /// <summary>
+    /// Marks an edge as closed (or reopens it) for the graceful-deletion drain. A closed edge
+    /// remains fully present and traversable — it is NOT marked defunct, so vehicles already on
+    /// it (or spawned onto it during the drain) keep moving and finish crossing — but new routes
+    /// avoid it (<see cref="Pathfinder"/> skips closed edges) and new entry at intersection arcs
+    /// is blocked. The closed state is transient and never serialized (see
+    /// <see cref="_closedEdges"/>). Increments <see cref="Version"/> only when the set actually
+    /// changes, so route-dependent caches refresh exactly once per real transition (and a no-op
+    /// toggle does not churn caches).
+    /// </summary>
+    /// <param name="edgeIndex">Index of the edge to close or reopen.</param>
+    /// <param name="closed">True to close (exclude from routing / block entry); false to reopen.</param>
+    public void SetEdgeClosed(int edgeIndex, bool closed)
+    {
+        bool changed = closed ? _closedEdges.Add(edgeIndex) : _closedEdges.Remove(edgeIndex);
+        if (changed) Version++;
+    }
+
+    /// <summary>
+    /// Returns true if the edge is currently closed for the drain (route-excluded and
+    /// entry-blocked, but still traversable). See <see cref="SetEdgeClosed"/>.
+    /// </summary>
+    public bool IsEdgeClosed(int edgeIndex) => _closedEdges.Contains(edgeIndex);
+
+    /// <summary>
     /// Rebuild compact flat adjacency arrays from the current edge list.
     /// Updates EdgeStartIdx/EdgeCount on each RoadNode for outgoing edges,
     /// and parallel arrays for incoming edges.
@@ -421,6 +457,50 @@ public class RoadGraph
         if (nodeIndex >= _incomingCount.Length || _incomingCount[nodeIndex] == 0 || _flatIncoming.Length == 0)
             return ArraySegment<int>.Empty;
         return new ArraySegment<int>(_flatIncoming, _incomingStartIdx[nodeIndex], _incomingCount[nodeIndex]);
+    }
+
+    /// <summary>
+    /// True when a node is a junction where traffic control (stop/yield/light) is meaningful:
+    /// at least two streams enter AND at least three distinct roads meet. Distinct *neighbor
+    /// nodes* are counted, not directed edges, so a one-way merge (two incoming one-way edges
+    /// from distinct sources plus one outgoing — 2 incoming, 3 neighbors) qualifies while a
+    /// straight pass-through (2 neighbors) does not. For two-way graphs each road contributes
+    /// exactly one incoming edge and one neighbor, so this returns the identical result to
+    /// <c>GetIncomingEdges(node).Count &gt;= 3</c> — only one-way junctions change.
+    /// This is the single source of truth for "is this an intersection" across the signal
+    /// editor (<see cref="Editor.SignalTool"/>), the auto-assign policies
+    /// (<see cref="StopSignSystem"/>), and <see cref="StripMarkerFlagsFromIntersections"/>.
+    /// </summary>
+    /// <param name="nodeIndex">Index of the node to test.</param>
+    public bool IsTrafficControlJunction(int nodeIndex)
+    {
+        var incoming = GetIncomingEdges(nodeIndex);
+        if (incoming.Count < 2) return false; // a single entering stream cannot conflict
+
+        // Distinct neighbor nodes across incoming sources and outgoing destinations.
+        // Degree is tiny (clamped well under 8), so a small stack buffer + linear scan
+        // is cheaper than a HashSet and allocation-free. Early-out once 3 are seen.
+        Span<int> neighbors = stackalloc int[16];
+        int count = 0;
+
+        foreach (int e in incoming)
+        {
+            int from = _edges[e].FromNode;
+            if (from < 0) continue;
+            bool seen = false;
+            for (int k = 0; k < count; k++) if (neighbors[k] == from) { seen = true; break; }
+            if (!seen && count < neighbors.Length) neighbors[count++] = from;
+        }
+        foreach (int e in GetOutgoingEdges(nodeIndex))
+        {
+            int to = _edges[e].ToNode;
+            if (to < 0) continue;
+            bool seen = false;
+            for (int k = 0; k < count; k++) if (neighbors[k] == to) { seen = true; break; }
+            if (!seen && count < neighbors.Length) neighbors[count++] = to;
+        }
+
+        return count >= 3;
     }
 
     /// <summary>
@@ -1200,8 +1280,9 @@ public class RoadGraph
 
     /// <summary>
     /// Strips Spawn/Destination flags from any node that now has more than 2 outgoing edges,
-    /// and strips signal flags (TrafficLight/StopSign/Yield/ManualSignal) from nodes with fewer
-    /// than 3 incoming edges (bends/dead-ends that aren't real intersections).
+    /// and strips signal flags (TrafficLight/StopSign/Yield/ManualSignal) from any node that is
+    /// not a <see cref="IsTrafficControlJunction"/> (bends/dead-ends/pass-throughs that aren't real
+    /// intersections — including one-way pass-throughs, while one-way merges are kept).
     /// Runs once per tick via GraphChangeHandler whenever the graph version changed.
     /// Increments the graph version only if any flags were actually stripped (same
     /// conditional pattern as ClearLaneRestrictions). Because GraphChangeHandler caches
@@ -1219,16 +1300,16 @@ public class RoadGraph
             var node = _nodes[i];
             if (float.IsNaN(node.Position.X)) continue;
 
-            if (node.EdgeCount > 2 && (node.Flags & (NodeFlags.Spawn | NodeFlags.Destination)) != 0)
+            if (node.EdgeCount > 2 && (node.Flags & (NodeFlags.Spawn | NodeFlags.RegionSpawn | NodeFlags.Destination)) != 0)
             {
-                node.Flags &= ~(NodeFlags.Spawn | NodeFlags.Destination);
+                node.Flags &= ~(NodeFlags.Spawn | NodeFlags.RegionSpawn | NodeFlags.Destination);
                 node.PointOfInterest = POIType.None;
                 _nodes[i] = node;
                 stripped = true;
             }
 
-            // Strip signal flags from non-intersections (< 3 incoming edges)
-            if (GetIncomingEdges(i).Count < 3 && (node.Flags & signalMask) != 0)
+            // Strip signal flags from non-intersections (not a traffic-control junction)
+            if (!IsTrafficControlJunction(i) && (node.Flags & signalMask) != 0)
             {
                 node.Flags &= ~signalMask;
                 _nodes[i] = node;
@@ -1725,6 +1806,7 @@ public class RoadGraph
         _laneRestrictions.Clear();
         _userLaneRestrictionNodes.Clear();
         _turnMatrix.Clear();
+        _closedEdges.Clear(); // closed state is transient and never persisted
 
         _nodes.AddRange(nodes);
         _edges.AddRange(edges);

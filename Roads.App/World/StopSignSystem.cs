@@ -132,9 +132,10 @@ public class StopSignSystem
 
     /// <summary>
     /// Normalizes auto-assigned stop-sign flags to the current graph topology:
-    /// non-manual nodes get NodeFlags.StopSign iff they have 3+ incoming edges, are not
-    /// a traffic light or yield node, and their approaches have angular spread (a real
-    /// intersection, not a bend). Manual nodes (NodeFlags.ManualSignal) are never
+    /// non-manual nodes get NodeFlags.StopSign iff they are a traffic-control junction
+    /// (<see cref="RoadGraph.IsTrafficControlJunction"/> — a real intersection incl. one-way
+    /// merges, not a bend/pass-through), are not a traffic light or yield node, and their
+    /// approaches have angular spread. Manual nodes (NodeFlags.ManualSignal) are never
     /// touched — their flags are the truth. Reads and writes only graph node flags
     /// (bumping Version on change), touches no system state, and is idempotent. Runs
     /// in the normalize phase of SimulationLoop.RebuildWorldCaches, AFTER
@@ -152,7 +153,7 @@ public class StopSignSystem
             if (node.Flags.HasFlag(NodeFlags.ManualSignal)) continue; // manual = truth
 
             var incoming = graph.GetIncomingEdges(n);
-            bool shouldBeStop = incoming.Count >= 3
+            bool shouldBeStop = graph.IsTrafficControlJunction(n)
                 && !node.Flags.HasFlag(NodeFlags.TrafficLight)
                 && !node.Flags.HasFlag(NodeFlags.Yield)
                 && HasAngularSpread(graph, incoming);
