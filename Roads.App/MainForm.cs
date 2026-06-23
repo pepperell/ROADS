@@ -894,17 +894,6 @@ public class MainForm : Form
                 }
             }
 
-            // Check spawn-kind submenu (only visible when Spawn tool active)
-            if (_editorState.ActiveTool == EditorTool.SpawnPoint)
-            {
-                var hitSpawn = _uiRenderer.HitTestSpawn(e.X, e.Y);
-                if (hitSpawn.HasValue)
-                {
-                    _editorState.SelectedSpawnKind = hitSpawn.Value;
-                    return;
-                }
-            }
-
             // Check toolbar
             var hitTool = _uiRenderer.HitTest(e.X, e.Y);
             if (hitTool.HasValue)
@@ -1095,7 +1084,7 @@ public class MainForm : Form
                     _deleteTool.OnClick(worldVec, _roadGraph, _edgeSpatialGrid, _populationManager);
                     break;
                 case EditorTool.SpawnPoint:
-                    _spawnPointTool.OnClick(worldVec, _roadGraph, _editorState.SelectedSpawnKind);
+                    _spawnPointTool.OnClick(worldVec, _roadGraph);
                     break;
                 case EditorTool.Destination:
                     // Legacy fallback: if over an existing eligible node, flag/toggle it.
@@ -1129,8 +1118,7 @@ public class MainForm : Form
                     _roadTool.OnCancel(_editorState);
                     break;
                 case EditorTool.SpawnPoint:
-                    RemoveNearestFlag(rWorldVec, _editorState.SelectedSpawnKind == SpawnKind.RegionSpawn
-                        ? NodeFlags.RegionSpawn : NodeFlags.Spawn);
+                    RemoveNearestFlag(rWorldVec, NodeFlags.Spawn);
                     break;
                 case EditorTool.Destination:
                     RemoveNearestDestination(rWorldVec);
@@ -1342,7 +1330,7 @@ public class MainForm : Form
                     // (Ghost fields were cleared at the top of this handler, so the snap and
                     // no-nearby-road cases simply leave them null.)
                     bool snapToNode = nearNode >= 0 && _roadGraph.CanPlaceMarker(nearNode)
-                        && (_roadGraph.Nodes[nearNode].Flags & (NodeFlags.Spawn | NodeFlags.RegionSpawn | NodeFlags.Destination)) == 0;
+                        && (_roadGraph.Nodes[nearNode].Flags & (NodeFlags.Spawn | NodeFlags.Destination)) == 0;
 
                     if (snapToNode)
                     {

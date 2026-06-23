@@ -22,9 +22,7 @@ public enum NodeFlags : byte
     ManualSignal = 16,
     /// <summary>Node is a vehicle destination (only valid on nodes with ≤ 2 outgoing edges).</summary>
     Destination = 32,
-    /// <summary>Node is a region spawn point: the off-map origin residents drive in from the
-    /// first time they appear (only valid on nodes with ≤ 2 outgoing edges).</summary>
-    RegionSpawn = 64,
+    // 64 reserved (was RegionSpawn, removed in entry/exit merge)
 }
 
 /// <summary>
@@ -39,9 +37,15 @@ public enum POIType : byte
     Leisure,
     School,
     Parking,
-    /// <summary>Region exit: an off-map boundary destination. Its existence gates region
-    /// spawns (residents only drive in when at least one region exit exists).</summary>
-    RegionExit,
+    /// <summary>Map entry/exit boundary where vehicles spawn into town and despawn leaving it
+    /// (resident move-in, through-traffic, emigrants, undestined cars). Works on one-way OR two-way
+    /// roads: a node with an OUTGOING edge is an ENTRY (a lane into town — vehicles spawn there at max
+    /// speed and drive in) and a node with an INCOMING edge is an EXIT (a lane out of town — vehicles
+    /// drive there and despawn); a two-way node is both. The map needs at least one entry-capable and
+    /// one exit-capable entry/exit node to fully function — they can be the same two-way node, or the
+    /// two ends of a long one-way road (spawn at the upstream end, despawn at the downstream end).
+    /// Through-traffic additionally needs its spawn and despawn nodes to be different.</summary>
+    EntryExit,
 }
 
 /// <summary>

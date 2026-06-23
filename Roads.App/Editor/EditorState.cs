@@ -16,17 +16,6 @@ public enum EditorTool
 }
 
 /// <summary>
-/// Which kind of spawn marker the Spawn tool places (selectable via its sub-menu).
-/// </summary>
-public enum SpawnKind
-{
-    /// <summary>Ordinary spawn point — origin for legacy/ambient random traffic.</summary>
-    SpawnPoint,
-    /// <summary>Region spawn — off-map origin residents drive in from on first appearance.</summary>
-    RegionSpawn,
-}
-
-/// <summary>
 /// Shared mutable state for the editor: which tool is active, road-drawing progress,
 /// selected edge, and control-point drag state.
 /// </summary>
@@ -40,9 +29,6 @@ public class EditorState
 
     /// <summary>POI type to assign when placing destination nodes (sticky across tool switches).</summary>
     public POIType SelectedPOIType { get; set; } = POIType.Home;
-
-    /// <summary>Spawn marker kind to place with the Spawn tool (sticky across tool switches).</summary>
-    public SpawnKind SelectedSpawnKind { get; set; } = SpawnKind.SpawnPoint;
 
     /// <summary>Index of the node where the current road segment starts, or <c>null</c> if not drawing.</summary>
     public int? RoadStartNode { get; set; }

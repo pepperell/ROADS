@@ -11,11 +11,11 @@ public enum ResidentActivity : byte
     Dormant,
     /// <summary>Actively driving a scheduled trip — occupies a slot in VehicleStore.</summary>
     Driving,
-    /// <summary>Created but not yet on the map: waiting to drive in from a region spawn the
+    /// <summary>Created but not yet on the map: waiting to drive in from an entry/exit node the
     /// first time. Not in VehicleStore, occupies no POI. Skipped by departures; picked up by
-    /// the move-in pass once a region spawn + region exit pair exists.</summary>
+    /// the move-in pass once at least one active entry/exit node exists.</summary>
     OffMap,
-    /// <summary>Driving the one-time region-spawn → home move-in trip — occupies a VehicleStore
+    /// <summary>Driving the one-time entry/exit → home move-in trip — occupies a VehicleStore
     /// slot like <see cref="Driving"/>, but on arrival becomes dormant at home and resumes
     /// (rather than consuming) its schedule.</summary>
     MovingIn,
@@ -71,7 +71,7 @@ public class Resident
     public int CurrentPOINode;
 
     /// <summary>
-    /// A resident whose home was deleted: it always heads to a region exit and is removed from
+    /// A resident whose home was deleted: it always heads to an entry/exit node and is removed from
     /// the population on arrival there (it never goes dormant). Set by the graceful-deletion drain
     /// (<see cref="PopulationManager"/>) when a home node is being removed. Owns the resident's
     /// lifecycle for the rest of its trip — driving emigrants are retargeted to an exit, dormant

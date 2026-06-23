@@ -47,7 +47,7 @@ public class PopulationManager
     {
         /// <summary>The node being drained and ultimately removed.</summary>
         public int Node;
-        /// <summary>True if <see cref="Node"/> is a Home POI: its whole household emigrates to a region exit.</summary>
+        /// <summary>True if <see cref="Node"/> is a Home POI: its whole household emigrates to an entry/exit node.</summary>
         public bool IsHome;
         /// <summary>All edges with <c>FromNode==Node</c> or <c>ToNode==Node</c> at drain start — held
         /// open during the drain, then closed and removed when empty.</summary>
@@ -71,7 +71,7 @@ public class PopulationManager
     /// <summary>Minimum clearance in meters around a spawn point.</summary>
     private const float SpawnClearance = 8f;
 
-    /// <summary>Time headway (seconds) used to size the spawn gap for at-speed region move-ins,
+    /// <summary>Time headway (seconds) used to size the spawn gap for at-speed entry/exit move-ins,
     /// so cars entering mid-flow keep a safe following distance instead of bunching at the edge.</summary>
     private const float MoveInHeadwaySeconds = 2.5f;
 
@@ -80,18 +80,26 @@ public class PopulationManager
     /// <see cref="TimeOfDayTrafficFactor"/>. Tunable; the spawn-clearance gate caps real bursts.</summary>
     private const float ThroughTrafficBaseRate = 0.001f;
 
-    /// <summary>Upper bound on the fractional-car spawn credit, so a blocked region entry can't
+    /// <summary>Upper bound on the fractional-car spawn credit, so a blocked entry/exit node can't
     /// build a backlog that floods once it clears.</summary>
     private const float ThroughAccumulatorCap = 2f;
 
     /// <summary>Max through-traffic spawns attempted per tick (the accumulator normally yields ≪1).</summary>
     private const int ThroughMaxPerTick = 2;
 
-    /// <summary>Fractional-car spawn credit accumulated for region through-traffic.</summary>
+    /// <summary>Fractional-car spawn credit accumulated for entry/exit through-traffic.</summary>
     private float _throughSpawnAccumulator;
 
     private readonly List<int> _spawnBlockedBuffer = new();
-    private readonly List<int> _regionSpawnBuffer = new();
+
+    /// <summary>Reused buffer of ENTRY-capable entry/exit nodes (an OUTGOING edge — a lane into
+    /// town — so a vehicle can spawn there and drive in), from the most recent
+    /// <see cref="GatherEntryNodes"/> call.</summary>
+    private readonly List<int> _entryNodesBuffer = new();
+    /// <summary>Reused buffer of EXIT-capable entry/exit nodes (an INCOMING edge — a lane out of
+    /// town — so a vehicle can drive there and despawn), from the most recent
+    /// <see cref="GatherExitNodes"/> call.</summary>
+    private readonly List<int> _exitNodesBuffer = new();
     private readonly List<(int node, float distSq)> _moveInCandidates = new();
     private int _lastDayNumber = -1;
     private int _poiGraphVersion = -1;
@@ -164,13 +172,13 @@ public class PopulationManager
         // Process arrivals (vehicles that reached their destination)
         ProcessArrivals(timeOfDay);
 
-        // First appearance: drive OffMap residents in from a region spawn, then process scheduled
+        // First appearance: drive OffMap residents in from an entry/exit node, then process scheduled
         // departures. Both draw from one per-tick spawn budget to bound pop-in.
         int movedIn = ProcessMoveIns(timeOfDay, MaxSpawnsPerTick);
         int departed = ProcessDepartures(timeOfDay, MaxSpawnsPerTick - movedIn);
 
-        // Ambient through-traffic: non-resident cars entering at region spawns and leaving via
-        // region exits, at a population- and time-of-day-scaled rate.
+        // Ambient through-traffic: non-resident cars entering at one active entry/exit node and
+        // leaving via a different one, at a population- and time-of-day-scaled rate.
         ProcessThroughTraffic(simDt, timeOfDay);
 
         // Graceful deletion: spawn people out of draining nodes and out of their homes (emigrants),
@@ -214,7 +222,7 @@ public class PopulationManager
                     WorkNode = workNode,
                     Traits = traits,
                     ColorR = cr, ColorG = cg, ColorB = cb,
-                    // Created off-map: residents must drive in from a region spawn before they
+                    // Created off-map: residents must drive in from an entry/exit node before they
                     // are at home. They occupy no POI until they arrive (see ProcessMoveIns).
                     Activity = ResidentActivity.OffMap,
                     VehicleIndex = -1,
@@ -320,7 +328,7 @@ public class PopulationManager
         {
             var r = _residents[i];
             // Emigrating residents own their own lifecycle: the drain marked them when their home
-            // began being removed, and they are removed only on arrival at a region exit (see
+            // began being removed, and they are removed only on arrival at an entry/exit node (see
             // HandleArrival). Skip them here so a finalized home-drain doesn't instant-erase the
             // very household it is gracefully driving off the map.
             if (r.Emigrating) continue;
@@ -381,7 +389,7 @@ public class PopulationManager
                     WorkNode = workNode,
                     Traits = traits,
                     ColorR = cr, ColorG = cg, ColorB = cb,
-                    // Created off-map; drives in from a region spawn before being at home.
+                    // Created off-map; drives in from an entry/exit node before being at home.
                     Activity = ResidentActivity.OffMap,
                     VehicleIndex = -1,
                     CurrentPOINode = -1,
@@ -519,8 +527,8 @@ public class PopulationManager
     /// <summary>
     /// Begins a graceful drain on a node. Captures every edge incident to the node (so they stay
     /// open and routable while people drive out), then de-registers the node as a POI target so no
-    /// new arrivals are routed to it. For a Home node, the whole household emigrates: EVERY resident
-    /// with <c>HomeNode==node</c> is flagged <see cref="Resident.Emigrating"/> BEFORE the POI flags
+    /// new arrivals are routed to it. For a Home node, the whole household emigrates via an entry/exit
+    /// node: EVERY resident with <c>HomeNode==node</c> is flagged <see cref="Resident.Emigrating"/> BEFORE the POI flags
     /// are cleared (so the flag change can't race a resident off this node first). A no-op if a
     /// drain for the node already exists.
     /// </summary>
@@ -543,8 +551,8 @@ public class PopulationManager
 
         if (isHome)
         {
-            // Flag the whole household BEFORE clearing flags: every resident living here leaves for
-            // a region exit, whether they're at home, out at another POI, or already driving.
+            // Flag the whole household BEFORE clearing flags: every resident living here leaves via
+            // an entry/exit node, whether they're at home, out at another POI, or already driving.
             foreach (var r in _residents)
                 if (r.HomeNode == node)
                     r.Emigrating = true;
@@ -572,8 +580,8 @@ public class PopulationManager
 
     /// <summary>
     /// Per-tick drain processing, run after departures/through-traffic and sharing their spawn
-    /// budget. Each drain advances through two phases: spawn its dormant residents out (toward a
-    /// region exit for a home, toward their next itinerary stop otherwise), then close its incident
+    /// budget. Each drain advances through two phases: spawn its dormant residents out (toward an
+    /// entry/exit node for a home, toward their next itinerary stop otherwise), then close its incident
     /// edges and remove them and the node once every incident edge has emptied. Also drives the
     /// emigration of out-of-house residents whose home is being drained. Index-safe and idempotent:
     /// a drain whose node/edges have vanished underneath it self-cancels.
@@ -585,7 +593,7 @@ public class PopulationManager
         if (_drains.Count == 0) return;
 
         // Out-of-house emigrants (driving, or dormant somewhere other than a draining node) are
-        // retargeted/spawned toward a region exit regardless of which drain owns them. This shares
+        // retargeted/spawned toward an entry/exit node regardless of which drain owns them. This shares
         // the same spawn budget as the drains below.
         budget = ProcessEmigration(budget);
 
@@ -610,20 +618,20 @@ public class PopulationManager
 
     /// <summary>
     /// Drain phase 1 — spawn out the residents dormant at the draining node. A home drives its
-    /// people toward the nearest reachable region exit (they are already flagged Emigrating); any
+    /// people toward the nearest reachable entry/exit node (they are already flagged Emigrating); any
     /// other node sends them to their next itinerary stop (or home if their schedule is exhausted).
     /// Throttled by the shared spawn budget; spawn clearance spaces successive cars. A resident that
     /// repeatedly fails to spawn is removed after <see cref="DrainSpawnFailLimit"/> ticks so a
     /// blocked departure can't wedge the drain. When no dormant residents remain at the node, the
-    /// drain advances to the closing phase. If a home has no reachable region exit at all, its
+    /// drain advances to the closing phase. If a home has no exit-capable entry/exit node at all, its
     /// resident-at-node are removed immediately (graceful exit is impossible) and the drain closes.
     /// </summary>
     private void ProcessDrainSpawnOut(NodeDrain drain, double timeOfDay, ref int budget)
     {
-        // No-exit fallback for a home: without a region exit, the household cannot leave gracefully.
-        // Remove every dormant resident at the node (and clear their emigrating intent so the
-        // population loop doesn't keep them) and proceed straight to closing.
-        if (drain.IsHome && _poiRegistry.GetNodesOfType(POIType.RegionExit).Count == 0)
+        // No-exit fallback for a home: without an exit-capable entry/exit node, the household cannot
+        // leave gracefully. Remove every dormant resident at the node (and clear their emigrating
+        // intent so the population loop doesn't keep them) and proceed straight to closing.
+        if (drain.IsHome && GatherExitNodes().Count == 0)
         {
             for (int i = _residents.Count - 1; i >= 0; i--)
             {
@@ -657,7 +665,7 @@ public class PopulationManager
         bool spawned;
         if (drain.IsHome)
         {
-            // Emigrant: drive to the nearest reachable region exit and leave.
+            // Emigrant: drive to the nearest reachable entry/exit node and leave.
             spawned = TrySpawnEmigrantFromNode(resident, drain.Node);
         }
         else
@@ -739,16 +747,16 @@ public class PopulationManager
     }
 
     /// <summary>
-    /// Drives emigrating residents toward a region exit: dormant emigrants NOT sitting at a draining
-    /// node are spawned toward the nearest exit (drawing from the shared spawn budget), and driving
-    /// emigrants are retargeted so their current trip ends at the nearest exit instead. Emigrants
-    /// dormant AT a draining node are handled by that drain's spawn-out phase. With no region exit on
-    /// the map, emigration is impossible — the residents are removed (the no-exit fallback). Returns
-    /// the remaining spawn budget.
+    /// Drives emigrating residents toward an entry/exit node: dormant emigrants NOT sitting at a
+    /// draining node are spawned toward the nearest exit-capable entry/exit node (drawing from the
+    /// shared spawn budget), and driving emigrants are retargeted so their current trip ends at the
+    /// nearest one instead. Emigrants dormant AT a draining node are handled by that drain's spawn-out
+    /// phase. With no exit-capable entry/exit node on the map, emigration is impossible — the residents
+    /// are removed (the no-exit fallback). Returns the remaining spawn budget.
     /// </summary>
     private int ProcessEmigration(int budget)
     {
-        bool hasExit = _poiRegistry.GetNodesOfType(POIType.RegionExit).Count > 0;
+        bool hasExit = GatherExitNodes().Count > 0;
 
         for (int i = _residents.Count - 1; i >= 0; i--)
         {
@@ -757,8 +765,9 @@ public class PopulationManager
 
             if (!hasExit)
             {
-                // No region exit exists: graceful emigration is impossible. Driving emigrants finish
-                // their current trip (HandleArrival removes them); dormant ones are removed now.
+                // No active entry/exit node exists: graceful emigration is impossible. Driving
+                // emigrants finish their current trip (HandleArrival removes them); dormant ones are
+                // removed now.
                 if (r.Activity == ResidentActivity.Dormant)
                     RemoveResidentAt(i);
                 continue;
@@ -786,9 +795,9 @@ public class PopulationManager
 
     /// <summary>
     /// Spawns a (presumed dormant) resident from <paramref name="fromNode"/> toward the nearest
-    /// reachable region exit, as a normal driving trip that will be removed on arrival (the resident
-    /// is already flagged <see cref="Resident.Emigrating"/>). Returns true on a successful spawn.
-    /// Tries exits nearest-first and falls through on any unreachable/blocked exit.
+    /// reachable exit-capable entry/exit node, as a normal driving trip that will be removed on arrival
+    /// (the resident is already flagged <see cref="Resident.Emigrating"/>). Returns true on a
+    /// successful spawn. Tries nodes nearest-first and falls through on any unreachable/blocked one.
     /// </summary>
     private bool TrySpawnEmigrantFromNode(Resident resident, int fromNode)
     {
@@ -796,7 +805,7 @@ public class PopulationManager
             || float.IsNaN(_graph.Nodes[fromNode].Position.X))
             return false;
 
-        var exits = _poiRegistry.GetNodesOfType(POIType.RegionExit);
+        var exits = GatherExitNodes();
         if (exits.Count == 0) return false;
 
         var fromPos = _graph.Nodes[fromNode].Position;
@@ -820,11 +829,11 @@ public class PopulationManager
 
     /// <summary>
     /// Retargets an already-driving emigrant so its current trip ends at the nearest reachable
-    /// region exit. Rebuilds its path from the edge it is on (pathfind from that edge's ToNode to
-    /// the exit, then prepend the current edge) the way VehicleSpawner.RerouteFinished does. If the
-    /// vehicle is already heading to / sitting at an exit (or no reroute is found), it is left as-is
-    /// and arrival handling removes it. Idempotent: re-running while already routed to the nearest
-    /// exit changes nothing meaningful.
+    /// exit-capable entry/exit node. Rebuilds its path from the edge it is on (pathfind from that edge's
+    /// ToNode to the node, then prepend the current edge) the way VehicleSpawner.RerouteFinished
+    /// does. If the vehicle is already heading to / sitting at an entry/exit node (or no reroute is
+    /// found), it is left as-is and arrival handling removes it. Idempotent: re-running while already
+    /// routed to the nearest entry/exit node changes nothing meaningful.
     /// </summary>
     private void RetargetDrivingEmigrantToExit(Resident resident)
     {
@@ -837,15 +846,17 @@ public class PopulationManager
         if (ce.FromNode < 0) return; // on a defunct edge; GraphChangeHandler will deal with it
         int startNode = ce.ToNode;
 
-        // Already at an exit at the end of the current edge: let arrival remove it.
-        if (IsRegionExitNode(startNode)) return;
+        // Already at an entry/exit node at the end of the current edge: let arrival remove it.
+        if (IsEntryExitNode(startNode)) return;
 
-        var exits = _poiRegistry.GetNodesOfType(POIType.RegionExit);
+        // Gather the exit-capable entry/exit nodes (returns the shared _exitNodesBuffer); we only read
+        // it within this method, before any call that could re-gather and clobber it.
+        var exits = GatherExitNodes();
         if (exits.Count == 0) return;
 
-        // If the vehicle is already routed to a region exit, leave its path alone.
+        // If the vehicle is already routed to an entry/exit node, leave its path alone.
         int curDest = _vehicles.DestinationNode[vi];
-        if (IsRegionExitNode(curDest)) return;
+        if (IsEntryExitNode(curDest)) return;
 
         var startPos = _graph.Nodes[startNode].Position;
         List<int>? best = null;
@@ -860,7 +871,7 @@ public class PopulationManager
             if (best == null || d < bestDistSq) { best = p; bestDistSq = d; bestExit = exit; }
         }
 
-        if (best == null) return; // no reachable exit from here; arrival/next pass handles it
+        if (best == null) return; // no reachable entry/exit node from here; arrival/next pass handles it
 
         best.Insert(0, currentEdge);
         _vehicles.Path[vi] = best;
@@ -868,11 +879,60 @@ public class PopulationManager
         _vehicles.DestinationNode[vi] = bestExit;
     }
 
-    /// <summary>True if the node is a region-exit destination marker.</summary>
-    private bool IsRegionExitNode(int node)
+    /// <summary>
+    /// True if the node is an entry/exit destination marker (Destination flag and
+    /// <see cref="POIType.EntryExit"/>). Does not check entry/exit capability — callers that need
+    /// spawn origins or despawn targets gather them via <see cref="GatherEntryNodes"/> /
+    /// <see cref="GatherExitNodes"/>.
+    /// </summary>
+    private bool IsEntryExitNode(int node)
         => node >= 0 && node < _graph.Nodes.Count
            && _graph.Nodes[node].Flags.HasFlag(NodeFlags.Destination)
-           && _graph.Nodes[node].PointOfInterest == POIType.RegionExit;
+           && _graph.Nodes[node].PointOfInterest == POIType.EntryExit;
+
+    /// <summary>
+    /// Fills and returns <see cref="_entryNodesBuffer"/> with the ENTRY-capable entry/exit nodes —
+    /// those with at least one OUTGOING edge (a lane into town), so a vehicle can spawn there and
+    /// drive in. One-way roads qualify: the upstream end of a one-way road is entry-capable. Source
+    /// nodes come from <c>_poiRegistry.GetNodesOfType(POIType.EntryExit)</c>. Overwritten by the next
+    /// call, so consume it before re-invoking.
+    /// </summary>
+    private List<int> GatherEntryNodes()
+    {
+        _entryNodesBuffer.Clear();
+        foreach (int n in _poiRegistry.GetNodesOfType(POIType.EntryExit))
+            if (_graph.GetOutgoingEdges(n).Count > 0)
+                _entryNodesBuffer.Add(n);
+        return _entryNodesBuffer;
+    }
+
+    /// <summary>
+    /// Fills and returns <see cref="_exitNodesBuffer"/> with the EXIT-capable entry/exit nodes —
+    /// those with at least one INCOMING edge (a lane out of town), so a vehicle can drive there and
+    /// despawn. One-way roads qualify: the downstream end of a one-way road is exit-capable.
+    /// Overwritten by the next call, so consume it before re-invoking.
+    /// </summary>
+    private List<int> GatherExitNodes()
+    {
+        _exitNodesBuffer.Clear();
+        foreach (int n in _poiRegistry.GetNodesOfType(POIType.EntryExit))
+            if (_graph.GetIncomingEdges(n).Count > 0)
+                _exitNodesBuffer.Add(n);
+        return _exitNodesBuffer;
+    }
+
+    /// <summary>
+    /// True when a pass-through trip is possible — at least one entry-capable node and one
+    /// exit-capable node exist that are not the single same node. Assumes <see cref="GatherEntryNodes"/>
+    /// and <see cref="GatherExitNodes"/> have just populated their buffers.
+    /// </summary>
+    private bool CanPassThrough()
+    {
+        int e = _entryNodesBuffer.Count, x = _exitNodesBuffer.Count;
+        if (e == 0 || x == 0) return false;
+        // The only no-pass case is exactly one entry and one exit that are the same node.
+        return !(e == 1 && x == 1 && _entryNodesBuffer[0] == _exitNodesBuffer[0]);
+    }
 
     /// <summary>
     /// Removes the resident at <paramref name="index"/> from the population entirely: drops its
@@ -957,8 +1017,8 @@ public class PopulationManager
         if (residentId < 0 || residentId >= _residents.Count) return;
         var resident = _residents[residentId];
 
-        // Emigrants leave the simulation when they arrive (at a region exit, or any node when no exit
-        // is reachable): remove the vehicle AND the resident from the population — never re-park them
+        // Emigrants leave the simulation when they arrive (at an entry/exit node, or any node when no
+        // entry/exit node is reachable): remove the vehicle AND the resident from the population — never re-park them
         // dormant. RemoveResidentAt drops the vehicle, vacates any POI, and re-indexes everything.
         if (resident.Emigrating)
         {
@@ -987,7 +1047,7 @@ public class PopulationManager
         resident.Activity = ResidentActivity.Dormant;
         resident.CurrentPOINode = destNode;
 
-        // A completed move-in (region spawn → home) consumed no schedule entry. Skip past any
+        // A completed move-in (entry/exit node → home) consumed no schedule entry. Skip past any
         // departures whose time already passed during the drive in, so the resident resumes its
         // normal schedule if a trip is still ahead today, or stays home until the next-day rollover.
         if (wasMovingIn)
@@ -1061,18 +1121,18 @@ public class PopulationManager
     }
 
     /// <summary>
-    /// Drives every off-map resident into the region from a region spawn (their one-time first
-    /// appearance), up to <paramref name="budget"/> spawns. Strict gate: does nothing unless at
-    /// least one region spawn node AND one region exit node exist. Returns the number spawned.
+    /// Drives every off-map resident into the region from an entry-capable entry/exit node (their
+    /// one-time first appearance), up to <paramref name="budget"/> spawns. Strict gate: does nothing
+    /// unless at least one ENTRY-capable entry/exit node exists (one with an outgoing lane into town).
+    /// Returns the number spawned.
     /// </summary>
     private int ProcessMoveIns(double timeOfDay, int budget)
     {
         if (budget <= 0) return 0;
 
-        // Gate: region spawns are inert without a region exit to pair them.
-        _graph.GetNodesWithFlag(NodeFlags.RegionSpawn, _regionSpawnBuffer);
-        if (_regionSpawnBuffer.Count == 0) return 0;
-        if (_poiRegistry.GetNodesOfType(POIType.RegionExit).Count == 0) return 0;
+        // Gate: move-ins need at least one entry-capable entry/exit node to enter from.
+        GatherEntryNodes(); // fills _entryNodesBuffer, consumed by TryMoveIn below
+        if (_entryNodesBuffer.Count == 0) return 0;
 
         // Bound ATTEMPTS (not just successes): when the entry is blocked (clearance), every
         // TryMoveIn does a pathfind and fails, so capping attempts keeps a congested entry from
@@ -1091,9 +1151,9 @@ public class PopulationManager
     }
 
     /// <summary>
-    /// Spawns a resident's move-in trip from the region spawn nearest their home that yields a
-    /// valid path, driving them to their home node. Uses <see cref="_regionSpawnBuffer"/> (already
-    /// populated by <see cref="ProcessMoveIns"/>).
+    /// Spawns a resident's move-in trip from the entry-capable entry/exit node nearest their home that
+    /// yields a valid path, driving them to their home node. Uses <see cref="_entryNodesBuffer"/>
+    /// (already populated by <see cref="ProcessMoveIns"/>).
     /// </summary>
     private bool TryMoveIn(Resident resident)
     {
@@ -1102,10 +1162,10 @@ public class PopulationManager
             return false;
         var homePos = _graph.Nodes[home].Position;
 
-        // Try region spawns nearest-home first; fall through to the next on any failure
-        // (no path / blocked / etc.).
+        // Try entry-capable entry/exit nodes nearest-home first; fall through to the next on any
+        // failure (no path / blocked / etc.).
         _moveInCandidates.Clear();
-        foreach (int n in _regionSpawnBuffer)
+        foreach (int n in _entryNodesBuffer)
         {
             if (n < 0 || n >= _graph.Nodes.Count || float.IsNaN(_graph.Nodes[n].Position.X)) continue;
             _moveInCandidates.Add((n, Vector2.DistanceSquared(_graph.Nodes[n].Position, homePos)));
@@ -1152,16 +1212,18 @@ public class PopulationManager
     }
 
     /// <summary>
-    /// Spawns non-resident through-traffic at region spawns bound for a region exit, at a rate of
-    /// <see cref="ThroughTrafficBaseRate"/> × housed population × <see cref="TimeOfDayTrafficFactor"/>.
-    /// Strict gate: requires a housed population, at least one region exit, and one region spawn.
+    /// Spawns non-resident through-traffic entering at an entry-capable entry/exit node and bound for
+    /// a distinct exit-capable one, at a rate of <see cref="ThroughTrafficBaseRate"/> × housed
+    /// population × <see cref="TimeOfDayTrafficFactor"/>. Strict gate: requires a housed population and
+    /// a valid pass-through pair (an entry-capable node and a different exit-capable node — e.g. the
+    /// two ends of a one-way road).
     /// </summary>
     private void ProcessThroughTraffic(float simDt, double timeOfDay)
     {
         int housed = HousedPopulation;
-        bool hasExit = _poiRegistry.GetNodesOfType(POIType.RegionExit).Count > 0;
-        _graph.GetNodesWithFlag(NodeFlags.RegionSpawn, _regionSpawnBuffer);
-        if (housed <= 0 || !hasExit || _regionSpawnBuffer.Count == 0)
+        GatherEntryNodes(); // _entryNodesBuffer (spawn origins)
+        GatherExitNodes();  // _exitNodesBuffer (despawn targets) — both consumed by TrySpawnThroughCar
+        if (housed <= 0 || !CanPassThrough())
         {
             _throughSpawnAccumulator = 0f; // no backlog builds while inactive
             return;
@@ -1181,30 +1243,40 @@ public class PopulationManager
     }
 
     /// <summary>
-    /// Spawns one non-resident through-car from a random region spawn to a random region exit,
-    /// entering at speed in a random lane. The car carries no destination of its own — it targets
-    /// the region exit and despawns there (see VehicleSpawner.RerouteFinished). Returns true on success.
+    /// Spawns one non-resident through-car entering at a random entry-capable entry/exit node and
+    /// bound for a DIFFERENT random exit-capable entry/exit node, entering at speed in a random lane.
+    /// The car carries no destination of its own — it targets the chosen exit node and despawns there
+    /// (see VehicleSpawner.RerouteFinished). Returns true on success.
     /// </summary>
     private bool TrySpawnThroughCar()
     {
-        // _regionSpawnBuffer was freshly populated by ProcessThroughTraffic.
-        if (_regionSpawnBuffer.Count == 0) return false;
-        var exits = _poiRegistry.GetNodesOfType(POIType.RegionExit);
-        if (exits.Count == 0) return false;
+        // Buffers were freshly populated by ProcessThroughTraffic: spawn at an entry-capable node,
+        // despawn at a distinct exit-capable node (the CanPassThrough gate guaranteed a valid pair).
+        if (_entryNodesBuffer.Count == 0 || _exitNodesBuffer.Count == 0) return false;
 
-        int spawn = _regionSpawnBuffer[Random.Shared.Next(_regionSpawnBuffer.Count)];
-        int exit = exits[Random.Shared.Next(exits.Count)];
-        if (spawn == exit) return false;
+        int spawn = _entryNodesBuffer[Random.Shared.Next(_entryNodesBuffer.Count)];
+
+        // Pick an exit target distinct from the spawn node, scanning from a random offset. The only
+        // way to find none is an exit set of exactly {spawn}, which the gate already excluded.
+        int n = _exitNodesBuffer.Count;
+        int start = Random.Shared.Next(n);
+        int target = -1;
+        for (int k = 0; k < n; k++)
+        {
+            int t = _exitNodesBuffer[(start + k) % n];
+            if (t != spawn) { target = t; break; }
+        }
+        if (target < 0) return false;
 
         var traits = DriverPersonalityGenerator.GenerateRandom();
         var (cr, cg, cb) = VehicleStore.RandomCarColor();
-        return CreateVehicle(spawn, exit, traits, cr, cg, cb, residentId: -1, enterAtSpeed: true) >= 0;
+        return CreateVehicle(spawn, target, traits, cr, cg, cb, residentId: -1, enterAtSpeed: true) >= 0;
     }
 
     /// <summary>
     /// Creates a vehicle for a resident travelling <paramref name="fromNode"/> → <paramref name="toNode"/>,
     /// copies traits/color, links the resident, and transitions it to <paramref name="newActivity"/>.
-    /// Shared by scheduled departures (advanceSchedule: true, Driving) and region move-ins
+    /// Shared by scheduled departures (advanceSchedule: true, Driving) and entry/exit move-ins
     /// (advanceSchedule: false, MovingIn). Returns false (changing nothing) if the node is invalid,
     /// the destination is unreachable/identical, or the spawn point is blocked.
     /// </summary>

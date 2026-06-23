@@ -48,7 +48,7 @@ public class UIRenderer
     private const float POIButtonHeight = 24f;
     private const float POIButtonSpacing = 3f;
     private readonly SKRect[] _poiButtons;
-    private static readonly string[] POILabels = { "Home", "Work", "Shop", "Leisure", "School", "Parking", "RegExit" };
+    private static readonly string[] POILabels = { "Home", "Work", "Shop", "Leisure", "School", "Parking", "Ent/Exit" };
 
     /// <summary>POI type colors, indexed by (POIType - 1). Used for both submenu buttons and map markers.</summary>
     public static readonly SKColor[] POIColors =
@@ -59,17 +59,7 @@ public class UIRenderer
         new SKColor(60, 180, 80, 200),    // Leisure — green
         new SKColor(200, 190, 50, 200),   // School — yellow
         new SKColor(60, 180, 200, 200),   // Parking — cyan
-        new SKColor(190, 80, 200, 200),   // RegionExit — magenta
-    };
-
-    // Spawn submenu (two kinds: ordinary spawn point, region spawn)
-    private readonly SKRect[] _spawnButtons;
-    private static readonly string[] SpawnLabels = { "Spawn Pt", "Region" };
-    /// <summary>Spawn-kind marker colors, indexed by (int)SpawnKind. Shared with map markers.</summary>
-    public static readonly SKColor[] SpawnColors =
-    {
-        new SKColor(40, 200, 80, 200),    // SpawnPoint — green
-        new SKColor(230, 110, 40, 200),   // RegionSpawn — orange-red
+        new SKColor(190, 80, 200, 200),   // EntryExit — magenta
     };
 
     // Reusable paints for button rendering (Color updated per button per frame)
@@ -125,15 +115,6 @@ public class UIRenderer
         {
             float px = poiStartX + i * (POIButtonWidth + POIButtonSpacing);
             _poiButtons[i] = new SKRect(px, poiY, px + POIButtonWidth, poiY + POIButtonHeight);
-        }
-
-        // Spawn submenu positioned below the "Spawn Pt" button (index 3)
-        float spawnStartX = _buttons[3].Bounds.Left;
-        _spawnButtons = new SKRect[SpawnLabels.Length];
-        for (int i = 0; i < SpawnLabels.Length; i++)
-        {
-            float sx = spawnStartX + i * (POIButtonWidth + POIButtonSpacing);
-            _spawnButtons[i] = new SKRect(sx, poiY, sx + POIButtonWidth, poiY + POIButtonHeight);
         }
     }
 
@@ -269,10 +250,6 @@ public class UIRenderer
         if (editorState.ActiveTool == EditorTool.Destination)
             DrawPOISubmenu(canvas, editorState);
 
-        // Spawn kind submenu (only when Spawn tool active)
-        if (editorState.ActiveTool == EditorTool.SpawnPoint)
-            DrawSpawnSubmenu(canvas, editorState);
-
         // Keyboard shortcut legend (bottom-left)
         if (canvasWidth > 0 && canvasHeight > 0)
         {
@@ -374,20 +351,6 @@ public class UIRenderer
         return null;
     }
 
-    /// <summary>
-    /// Tests if a screen position hits a spawn-kind submenu button.
-    /// </summary>
-    /// <returns>The spawn kind if a button was clicked; otherwise <c>null</c>.</returns>
-    public SpawnKind? HitTestSpawn(float screenX, float screenY)
-    {
-        for (int i = 0; i < _spawnButtons.Length; i++)
-        {
-            if (_spawnButtons[i].Contains(screenX, screenY))
-                return (SpawnKind)i; // SpawnPoint = 0, RegionSpawn = 1
-        }
-        return null;
-    }
-
     private void DrawPOISubmenu(SKCanvas canvas, EditorState editorState)
     {
         // Background panel
@@ -421,40 +384,6 @@ public class UIRenderer
             float textX = _poiButtons[i].MidX;
             float textY = _poiButtons[i].MidY + 4f;
             canvas.DrawText(POILabels[i], textX, textY, SKTextAlign.Center, font, _btnTextPaint);
-        }
-    }
-
-    private void DrawSpawnSubmenu(SKCanvas canvas, EditorState editorState)
-    {
-        // Background panel
-        float bgLeft = _spawnButtons[0].Left - 4f;
-        float bgTop = _spawnButtons[0].Top - 4f;
-        float bgRight = _spawnButtons[^1].Right + 4f;
-        float bgBottom = _spawnButtons[0].Bottom + 4f;
-
-        using var bgPaint = new SKPaint
-        {
-            Color = new SKColor(30, 32, 38, 220),
-            Style = SKPaintStyle.Fill,
-        };
-        canvas.DrawRoundRect(bgLeft, bgTop, bgRight - bgLeft, bgBottom - bgTop, 4f, 4f, bgPaint);
-
-        using var font = new SKFont { Size = 11 };
-
-        for (int i = 0; i < _spawnButtons.Length; i++)
-        {
-            bool active = (int)editorState.SelectedSpawnKind == i;
-
-            var color = SpawnColors[i];
-            _btnPaint.Color = active
-                ? new SKColor(color.Red, color.Green, color.Blue, 255)
-                : new SKColor((byte)(color.Red / 2), (byte)(color.Green / 2), (byte)(color.Blue / 2), 200);
-
-            canvas.DrawRoundRect(_spawnButtons[i], 3f, 3f, _btnPaint);
-
-            _btnTextPaint.Color = active ? SKColors.White : new SKColor(160, 160, 160);
-            canvas.DrawText(SpawnLabels[i], _spawnButtons[i].MidX, _spawnButtons[i].MidY + 4f,
-                SKTextAlign.Center, font, _btnTextPaint);
         }
     }
 }

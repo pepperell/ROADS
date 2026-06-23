@@ -21,13 +21,13 @@ NODE_FLAGS = {
     32: "Destination",
 }
 
-POI_TYPES = ["None", "Home", "Work", "Shop", "Leisure", "School", "Parking"]
+POI_TYPES = ["None", "Home", "Work", "Shop", "Leisure", "School", "Parking", "EntryExit"]
 
 ROAD_TYPES = ["Residential", "Arterial", "Highway", "Dirt"]
 
 DRIVER_ARCHETYPES = ["Commuter", "SundayDriver", "LeadFoot", "NervousNellie", "Trucker"]
 
-RESIDENT_ACTIVITY = ["Dormant", "Driving"]
+RESIDENT_ACTIVITY = ["Dormant", "Driving", "OffMap", "MovingIn"]
 
 EDGE_FLAGS = {0: "None"}
 

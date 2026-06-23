@@ -32,8 +32,8 @@ public class DestinationTool
         if (node < 0 || !graph.CanPlaceMarker(node)) return false;
 
         var flags = graph.Nodes[node].Flags;
-        // Never snap to a node that already carries a marker (spawn/region-spawn/destination).
-        if ((flags & (NodeFlags.Spawn | NodeFlags.RegionSpawn | NodeFlags.Destination)) != 0) return false;
+        // Never snap to a node that already carries a marker (spawn/destination).
+        if ((flags & (NodeFlags.Spawn | NodeFlags.Destination)) != 0) return false;
 
         graph.SetNodeFlags(node, flags | NodeFlags.Destination);
         graph.SetNodePOIType(node, poiType);

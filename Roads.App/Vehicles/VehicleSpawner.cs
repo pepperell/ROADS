@@ -8,6 +8,9 @@ namespace Roads.App.Vehicles;
 /// (V key) and automatic spawning from spawn-flagged nodes on a timed interval.
 /// Spawn and destination locations are determined by NodeFlags.Spawn and NodeFlags.Destination
 /// on road graph nodes.
+/// When one or more ACTIVE (two-way) EntryExit destination nodes exist, finished non-resident
+/// cars enter "regionMode": instead of picking a new random destination they route to and despawn
+/// at the nearest reachable entry/exit node (see <see cref="RerouteFinished"/>).
 /// </summary>
 public class VehicleSpawner
 {
@@ -17,7 +20,7 @@ public class VehicleSpawner
     private readonly List<int> _spawnBlockedBuffer = new();
     private readonly List<int> _spawnNodeCache = new();
     private readonly List<int> _destNodeCache = new();
-    private readonly List<int> _regionExitCache = new();
+    private readonly List<int> _entryExitCache = new();
     private int _cacheGraphVersion = -1;
     private float _spawnTimer;
 
@@ -43,10 +46,17 @@ public class VehicleSpawner
         {
             _graph.GetNodesWithFlag(NodeFlags.Spawn, _spawnNodeCache);
             _graph.GetNodesWithFlag(NodeFlags.Destination, _destNodeCache);
-            _regionExitCache.Clear();
+            // Despawn targets are EXIT-capable entry/exit nodes: a node a finished car can drive TO
+            // and despawn at needs at least one INCOMING edge (a lane out of town). Outgoing is NOT
+            // required — the downstream end of a one-way road is a valid exit. An outgoing-only node
+            // (no incoming) is unreachable as a target and is correctly excluded, so a lone one-way
+            // entry node can't flip regionMode on and make RerouteFinished delete free-roam cars
+            // (FindPathToNearestEntryExit would return null); it falls back to FindRandomReroute.
+            _entryExitCache.Clear();
             foreach (int n in _destNodeCache)
-                if (_graph.Nodes[n].PointOfInterest == POIType.RegionExit)
-                    _regionExitCache.Add(n);
+                if (_graph.Nodes[n].PointOfInterest == POIType.EntryExit
+                    && _graph.GetIncomingEdges(n).Count > 0)
+                    _entryExitCache.Add(n);
             _cacheGraphVersion = _graph.Version;
         }
         return this;
@@ -153,11 +163,12 @@ public class VehicleSpawner
             var curEdge = _graph.Edges[currentEdge];
             int startNode = curEdge.ToNode;
 
-            // Region model: when region exits exist, a finished non-resident car has no destination
-            // of its own — it heads for a region exit and leaves. Despawn once it has arrived at one
-            // (checked before the per-edge dedup so a queue of arrivals all clear in one pass).
-            bool regionMode = _regionExitCache.Count > 0;
-            if (regionMode && IsRegionExitNode(startNode))
+            // Entry/exit model: when entry/exit nodes exist, a finished non-resident car has no
+            // destination of its own — it heads for an entry/exit node and leaves. Despawn once it
+            // has arrived at one (checked before the per-edge dedup so a queue of arrivals all clear
+            // in one pass).
+            bool regionMode = _entryExitCache.Count > 0;
+            if (regionMode && IsEntryExitNode(startNode))
             {
                 _vehicles.Remove(i);
                 continue;
@@ -168,7 +179,7 @@ public class VehicleSpawner
 
             int destNode;
             List<int>? newPath = regionMode
-                ? FindPathToNearestRegionExit(startNode, currentEdge, out destNode)
+                ? FindPathToNearestEntryExit(startNode, currentEdge, out destNode)
                 : FindRandomReroute(startNode, currentEdge, out destNode);
 
             if (newPath == null)
@@ -184,24 +195,24 @@ public class VehicleSpawner
         }
     }
 
-    /// <summary>True if the node is a region-exit destination marker.</summary>
-    private bool IsRegionExitNode(int node)
+    /// <summary>True if the node is an entry/exit destination marker.</summary>
+    private bool IsEntryExitNode(int node)
         => node >= 0 && node < _graph.Nodes.Count
            && _graph.Nodes[node].Flags.HasFlag(NodeFlags.Destination)
-           && _graph.Nodes[node].PointOfInterest == POIType.RegionExit;
+           && _graph.Nodes[node].PointOfInterest == POIType.EntryExit;
 
     /// <summary>
     /// Finds a path from <paramref name="startNode"/> (via <paramref name="currentEdge"/>) to the
-    /// nearest reachable region exit. Returns the path (excluding the current edge) and the chosen
-    /// exit node, or null if none is reachable.
+    /// nearest reachable entry/exit node. Returns the path (excluding the current edge) and the
+    /// chosen entry/exit node, or null if none is reachable.
     /// </summary>
-    private List<int>? FindPathToNearestRegionExit(int startNode, int currentEdge, out int destNode)
+    private List<int>? FindPathToNearestEntryExit(int startNode, int currentEdge, out int destNode)
     {
         destNode = -1;
         List<int>? best = null;
         float bestDistSq = float.MaxValue;
         var startPos = _graph.Nodes[startNode].Position;
-        foreach (int exit in _regionExitCache)
+        foreach (int exit in _entryExitCache)
         {
             if (exit == startNode) continue;
             var p = Pathfinder.FindPath(_graph, startNode, exit, currentEdge);

@@ -22,7 +22,7 @@ public class POIRegistry
         POIType.Leisure => 15,
         POIType.School => 30,
         POIType.Parking => 30,
-        POIType.RegionExit => int.MaxValue, // a map boundary is never "full"
+        POIType.EntryExit => int.MaxValue, // entry/exit boundary is never full
         _ => 1,
     };
 

@@ -1300,9 +1300,9 @@ public class RoadGraph
             var node = _nodes[i];
             if (float.IsNaN(node.Position.X)) continue;
 
-            if (node.EdgeCount > 2 && (node.Flags & (NodeFlags.Spawn | NodeFlags.RegionSpawn | NodeFlags.Destination)) != 0)
+            if (node.EdgeCount > 2 && (node.Flags & (NodeFlags.Spawn | NodeFlags.Destination)) != 0)
             {
-                node.Flags &= ~(NodeFlags.Spawn | NodeFlags.RegionSpawn | NodeFlags.Destination);
+                node.Flags &= ~(NodeFlags.Spawn | NodeFlags.Destination);
                 node.PointOfInterest = POIType.None;
                 _nodes[i] = node;
                 stripped = true;
