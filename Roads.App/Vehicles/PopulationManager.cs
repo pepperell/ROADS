@@ -101,8 +101,26 @@ public class PopulationManager
     /// <see cref="GatherExitNodes"/> call.</summary>
     private readonly List<int> _exitNodesBuffer = new();
     private readonly List<(int node, float distSq)> _moveInCandidates = new();
+
+    /// <summary>Reusable per-pass map of Work node → number of residents currently employed there
+    /// (the employment headcount, distinct from <see cref="POIRegistry"/>'s physical-presence count).
+    /// Rebuilt at the start of each job-assignment pass; see the "Employment / job assignment" region.</summary>
+    private readonly Dictionary<int, int> _employmentCount = new();
+    /// <summary>Reusable per-pass list of resident indices seeking a job, shuffled before assignment.</summary>
+    private readonly List<int> _jobSeekers = new();
+    /// <summary>Resident indices whose <see cref="Resident.WorkNode"/> changed during the current
+    /// incremental job pass — their schedules are regenerated so work trips appear/disappear.</summary>
+    private readonly HashSet<int> _jobChanged = new();
+
     private int _lastDayNumber = -1;
     private int _poiGraphVersion = -1;
+
+    /// <summary>Home/Work POI counts at the last incremental job pass. The graph version bumps on ANY
+    /// edit (speed limit, lane count, …), but a job reassignment is only warranted when the population
+    /// or workplace count actually changed (requirement: "any change in population or workplace count").
+    /// Initialized to -1 so the first pass always runs. See <see cref="UpdateForGraphChange"/>.</summary>
+    private int _lastHomeCount = -1;
+    private int _lastWorkCount = -1;
 
     /// <summary>Whether schedule mode is active (Home POIs exist).</summary>
     public bool ScheduleModeEnabled { get; private set; }
@@ -112,6 +130,43 @@ public class PopulationManager
 
     /// <summary>Number of residents currently driving.</summary>
     public int ActiveDrivers => _vehicleToResident.Count;
+
+    /// <summary>Number of residents currently holding a job (<c>WorkNode &gt;= 0</c>). Read-only,
+    /// computed per call (instantaneous, no averaging).</summary>
+    public int EmployedWorkers
+    {
+        get
+        {
+            int n = 0;
+            foreach (var r in _residents)
+                if (r.WorkNode >= 0) n++;
+            return n;
+        }
+    }
+
+    /// <summary>Number of workers (archetype wants work, not emigrating) without a job. Read-only,
+    /// computed per call.</summary>
+    public int UnemployedWorkers
+    {
+        get
+        {
+            int n = 0;
+            foreach (var r in _residents)
+                if (r.WorkNode < 0 && IsEmployable(r)) n++;
+            return n;
+        }
+    }
+
+    /// <summary>Total unfilled job slots across all live workplaces (Σ capacity − employed). Read-only,
+    /// computed per call.</summary>
+    public int JobOpenings
+    {
+        get
+        {
+            int openings = _poiRegistry.GetTotalCapacity(POIType.Work) - EmployedWorkers;
+            return openings > 0 ? openings : 0;
+        }
+    }
 
     /// <summary>Read-only access to the resident list.</summary>
     public IReadOnlyList<Resident> Residents => _residents;
@@ -198,8 +253,9 @@ public class PopulationManager
         var homeNodes = _poiRegistry.GetNodesOfType(POIType.Home);
         if (homeNodes.Count == 0) return;
 
-        var workNodes = _poiRegistry.GetNodesOfType(POIType.Work);
-
+        // Create everyone unemployed (WorkNode = -1); the job-assignment pass below is the only place
+        // that hands out jobs, honoring workplace capacity. Schedules are generated afterward so they
+        // reflect the assigned WorkNode (work trips only for those who actually got a job).
         int id = 0;
         for (int h = 0; h < homeNodes.Count; h++)
         {
@@ -208,18 +264,14 @@ public class PopulationManager
 
             for (int slot = 0; slot < capacity; slot++)
             {
-                int workNode = workNodes.Count > 0
-                    ? workNodes[Random.Shared.Next(workNodes.Count)]
-                    : -1;
-
                 var traits = DriverPersonalityGenerator.GenerateRandom();
                 var (cr, cg, cb) = VehicleStore.RandomCarColor();
 
-                var resident = new Resident
+                _residents.Add(new Resident
                 {
                     Id = id++,
                     HomeNode = homeNode,
-                    WorkNode = workNode,
+                    WorkNode = -1,
                     Traits = traits,
                     ColorR = cr, ColorG = cg, ColorB = cb,
                     // Created off-map: residents must drive in from an entry/exit node before they
@@ -228,14 +280,16 @@ public class PopulationManager
                     VehicleIndex = -1,
                     CurrentPOINode = -1,
                     ScheduleIndex = 0,
-                };
-
-                resident.Schedule = ScheduleGenerator.GenerateWeekday(traits.Archetype, workNode);
-                // Advance ScheduleIndex past any entries whose departure time has already passed
-                AdvanceSchedulePastTime(resident, timeOfDay);
-
-                _residents.Add(resident);
+                });
             }
+        }
+
+        // Assign jobs capacity-limited (nearest-home-first, random order), then build schedules.
+        RunTotalJobAssignment();
+        foreach (var resident in _residents)
+        {
+            resident.Schedule = ScheduleGenerator.GenerateWeekday(resident.Traits.Archetype, resident.WorkNode);
+            AdvanceSchedulePastTime(resident, timeOfDay);
         }
 
         _poiGraphVersion = _graph.Version;
@@ -313,7 +367,15 @@ public class PopulationManager
         // loaded (non-resident) vehicles, which the next Update would otherwise wipe via
         // ClearPopulation the moment it sees no homes while schedule mode is on.
         ScheduleModeEnabled = _poiRegistry.GetNodesOfType(POIType.Home).Count > 0;
-        _poiGraphVersion = _graph.Version;
+
+        // Force a graph-change pass on the FIRST Update after load by NOT pinning _poiGraphVersion to
+        // the current version. That first pass (UpdateForGraphChange → RunIncrementalJobAssignment)
+        // reconciles any dangling employment from the loaded save (a WorkNode whose workplace no
+        // longer exists, possible in an old/edited map) AND regenerates the affected residents'
+        // schedules with a real time-of-day — all through the one incremental code path, instead of
+        // duplicating reconcile+regen here without a clock. For a normally-saved map (employment
+        // already valid) this pass changes nothing.
+        _poiGraphVersion = -1;
         _lastDayNumber = -1; // first Update sets the day baseline without a spurious rollover
     }
 
@@ -366,8 +428,6 @@ public class PopulationManager
         foreach (var r in _residents)
             existingHomes.Add(r.HomeNode);
 
-        var workNodes = _poiRegistry.GetNodesOfType(POIType.Work);
-
         foreach (int homeNode in homeNodes)
         {
             if (existingHomes.Contains(homeNode)) continue;
@@ -376,9 +436,6 @@ public class PopulationManager
             for (int slot = 0; slot < capacity; slot++)
             {
                 int id = _residents.Count;
-                int workNode = workNodes.Count > 0
-                    ? workNodes[Random.Shared.Next(workNodes.Count)]
-                    : -1;
                 var traits = DriverPersonalityGenerator.GenerateRandom();
                 var (cr, cg, cb) = VehicleStore.RandomCarColor();
 
@@ -386,7 +443,9 @@ public class PopulationManager
                 {
                     Id = id,
                     HomeNode = homeNode,
-                    WorkNode = workNode,
+                    // Created unemployed; the incremental job pass below finds them a nearby job if a
+                    // slot is open. Schedule starts in the no-work form and is regenerated if hired.
+                    WorkNode = -1,
                     Traits = traits,
                     ColorR = cr, ColorG = cg, ColorB = cb,
                     // Created off-map; drives in from an entry/exit node before being at home.
@@ -395,10 +454,193 @@ public class PopulationManager
                     CurrentPOINode = -1,
                     ScheduleIndex = 0,
                 };
-                resident.Schedule = ScheduleGenerator.GenerateWeekday(traits.Archetype, workNode);
+                resident.Schedule = ScheduleGenerator.GenerateWeekday(traits.Archetype, -1);
                 AdvanceSchedulePastTime(resident, timeOfDay);
                 _residents.Add(resident);
             }
+        }
+
+        // Reconcile employment and fill open slots — but only when the home or workplace COUNT
+        // actually changed. The graph version also bumps on pure road edits (speed limit, lane count,
+        // restrictions) that leave POIs untouched; those need no reassignment, so skip the pass.
+        int homeCount = homeNodes.Count;
+        int workCount = _poiRegistry.GetNodesOfType(POIType.Work).Count;
+        if (homeCount != _lastHomeCount || workCount != _lastWorkCount)
+        {
+            _lastHomeCount = homeCount;
+            _lastWorkCount = workCount;
+            RunIncrementalJobAssignment(timeOfDay);
+        }
+    }
+
+    // ── Employment / job assignment ─────────────────────────────────────
+    //
+    // Jobs are a capacity-limited resource. A resident's WorkNode is the single source of truth for
+    // employment (>=0 employed at that Work node, -1 unemployed); a workplace's employment headcount
+    // is just the number of residents pointing at it, recomputed per pass (passes are event-driven and
+    // rare). Only "workers" (ScheduleGenerator.WantsWork) ever hold a job; emigrants never do. Two
+    // entry points drive it:
+    //   • RunTotalJobAssignment       — midnight: every worker drops their job and re-competes (random order).
+    //   • RunIncrementalJobAssignment — on any graph change: un-employ workers whose workplace vanished,
+    //     then fill open slots from the currently-unemployed pool (new workers, displaced staff, freed slots).
+    // Each seeker claims the OPEN slot nearest its home and that slot is counted immediately, so later
+    // seekers in the (shuffled) order see it taken. ResolveDestination reads WorkNode live, so changing
+    // WorkNode retargets future work trips automatically; only an employed↔unemployed flip needs a
+    // schedule regen (to add/remove the work trips themselves).
+
+    /// <summary>True if the resident is a worker (has work in their daily routine) and not leaving town.</summary>
+    private bool IsEmployable(Resident r) =>
+        !r.Emigrating && ScheduleGenerator.WantsWork(r.Traits.Archetype);
+
+    /// <summary>True if a node index is currently a live Work POI (exists, destination, type Work).</summary>
+    private bool IsLiveWorkNode(int node)
+    {
+        if (node < 0 || node >= _graph.Nodes.Count) return false;
+        var n = _graph.Nodes[node];
+        return !float.IsNaN(n.Position.X)
+            && n.Flags.HasFlag(NodeFlags.Destination)
+            && n.PointOfInterest == POIType.Work;
+    }
+
+    /// <summary>
+    /// Rebuilds <see cref="_employmentCount"/> from residents' current WorkNode values. Any WorkNode
+    /// that no longer references a live Work POI (its workplace was removed) is cleared to -1 — this
+    /// is the reconcile that un-employs a deleted workplace's staff — and that resident is recorded in
+    /// <see cref="_jobChanged"/> so its schedule regenerates. Emigrants are already at -1 and ignored.
+    /// </summary>
+    private void RebuildEmploymentCount()
+    {
+        _employmentCount.Clear();
+        for (int i = 0; i < _residents.Count; i++)
+        {
+            var r = _residents[i];
+            int w = r.WorkNode;
+            if (w < 0) continue;
+            if (!IsLiveWorkNode(w))
+            {
+                r.WorkNode = -1;       // workplace gone → unemployed
+                _jobChanged.Add(i);
+                continue;
+            }
+            _employmentCount.TryGetValue(w, out int c);
+            _employmentCount[w] = c + 1;
+        }
+    }
+
+    /// <summary>
+    /// Finds the Work node nearest <paramref name="fromPos"/> whose employment headcount
+    /// (<see cref="_employmentCount"/>) is below its capacity, or -1 if every workplace is full / none
+    /// exist. Keyed on the employment headcount, NOT POIRegistry physical occupancy.
+    /// </summary>
+    private int FindNearestWorkWithCapacity(Vector2 fromPos)
+    {
+        var workNodes = _poiRegistry.GetNodesOfType(POIType.Work);
+        int best = -1;
+        float bestDistSq = float.MaxValue;
+        for (int i = 0; i < workNodes.Count; i++)
+        {
+            int w = workNodes[i];
+            _employmentCount.TryGetValue(w, out int c);
+            if (c >= _poiRegistry.GetCapacity(w, POIType.Work)) continue;
+            float distSq = Vector2.DistanceSquared(_graph.Nodes[w].Position, fromPos);
+            if (distSq < bestDistSq) { bestDistSq = distSq; best = w; }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// Assigns each seeker in <see cref="_jobSeekers"/> to the open Work slot nearest its HOME, in a
+    /// randomized order (fairness), claiming each slot immediately so later seekers see reduced
+    /// capacity. Seekers who find no open slot stay unemployed. Every resident whose WorkNode value
+    /// changes is recorded in <see cref="_jobChanged"/>. Assumes <see cref="_employmentCount"/> already
+    /// reflects the workers keeping their jobs.
+    /// </summary>
+    private void AssignSeekers()
+    {
+        // Fisher–Yates shuffle — the "randomized reassignment order for fairness".
+        for (int i = _jobSeekers.Count - 1; i > 0; i--)
+        {
+            int j = Random.Shared.Next(i + 1);
+            (_jobSeekers[i], _jobSeekers[j]) = (_jobSeekers[j], _jobSeekers[i]);
+        }
+
+        foreach (int rid in _jobSeekers)
+        {
+            var r = _residents[rid];
+            int home = r.HomeNode;
+            if (home < 0 || home >= _graph.Nodes.Count || float.IsNaN(_graph.Nodes[home].Position.X))
+                continue;
+            int w = FindNearestWorkWithCapacity(_graph.Nodes[home].Position);
+            if (w < 0) continue; // no open slot anywhere — remains unemployed
+            if (r.WorkNode != w)
+            {
+                r.WorkNode = w;
+                _jobChanged.Add(rid);
+            }
+            _employmentCount.TryGetValue(w, out int c);
+            _employmentCount[w] = c + 1; // claim the slot
+        }
+    }
+
+    /// <summary>
+    /// Total (midnight) reassignment: every employable worker drops their job and re-competes in
+    /// random order. Does NOT regenerate schedules — the caller (<see cref="OnDayRollover"/>,
+    /// <see cref="RebuildPopulation"/>) does that from the freshly assigned WorkNode.
+    /// </summary>
+    private void RunTotalJobAssignment()
+    {
+        _jobChanged.Clear();
+
+        // Everyone drops their job (emigrants are already -1 and excluded by IsEmployable).
+        foreach (var r in _residents)
+            if (IsEmployable(r))
+                r.WorkNode = -1;
+
+        _employmentCount.Clear(); // all workplaces start empty for a fresh competition
+        _jobSeekers.Clear();
+        for (int i = 0; i < _residents.Count; i++)
+            if (IsEmployable(_residents[i]))
+                _jobSeekers.Add(i);
+
+        AssignSeekers();
+    }
+
+    /// <summary>
+    /// Incremental reassignment after a graph change: un-employ workers whose workplace vanished
+    /// (reconcile), then fill open slots from the currently-unemployed worker pool (random order,
+    /// nearest-first). Residents whose employment status flips get their schedule regenerated so work
+    /// trips appear/disappear. Employed workers whose workplace still exists keep their jobs until the
+    /// nightly total pass.
+    /// </summary>
+    /// <param name="timeOfDay">Current time of day in fractional hours (for schedule advancement).</param>
+    private void RunIncrementalJobAssignment(double timeOfDay)
+    {
+        _jobChanged.Clear();
+
+        // Reconcile dangling employment AND build the headcount of workers keeping their jobs.
+        RebuildEmploymentCount();
+
+        // Seekers = employable workers without a job (new arrivals, displaced staff, the chronically
+        // unemployed who might now fill a freed slot).
+        _jobSeekers.Clear();
+        for (int i = 0; i < _residents.Count; i++)
+        {
+            var r = _residents[i];
+            if (IsEmployable(r) && r.WorkNode < 0)
+                _jobSeekers.Add(i);
+        }
+
+        AssignSeekers();
+
+        // Regenerate schedules only for residents whose WorkNode changed (gained or lost work trips,
+        // or moved workplaces). A currently-driving resident finishes its in-flight trip and picks up
+        // the new schedule when it next goes dormant (same contract OnDayRollover relies on).
+        foreach (int rid in _jobChanged)
+        {
+            var r = _residents[rid];
+            r.Schedule = ScheduleGenerator.GenerateWeekday(r.Traits.Archetype, r.WorkNode);
+            r.ScheduleIndex = 0;
+            AdvanceSchedulePastTime(r, timeOfDay);
         }
     }
 
@@ -553,9 +795,15 @@ public class PopulationManager
         {
             // Flag the whole household BEFORE clearing flags: every resident living here leaves via
             // an entry/exit node, whether they're at home, out at another POI, or already driving.
+            // An emigrant no longer holds a job, so free its workplace slot now; the incremental job
+            // pass (triggered by the POI-flag clear below bumping the graph version) then fills the
+            // freed slots from the unemployed pool.
             foreach (var r in _residents)
                 if (r.HomeNode == node)
+                {
                     r.Emigrating = true;
+                    r.WorkNode = -1;
+                }
         }
 
         // De-register the node as a destination so no new residents/arrivals target it. Clearing
@@ -663,9 +911,13 @@ public class PopulationManager
 
         var resident = _residents[idx];
         bool spawned;
-        if (drain.IsHome)
+        if (drain.IsHome || resident.Emigrating)
         {
-            // Emigrant: drive to the nearest reachable entry/exit node and leave.
+            // Emigrant: drive to the nearest reachable entry/exit node and leave. This covers a
+            // resident whose HOME was deleted (so it is emigrating) while it sits dormant at some
+            // OTHER node that is now also being drained — it must still leave via an exit, not follow
+            // its old itinerary (whose next stop may be its own draining home or, with WorkNode now
+            // -1, an unresolvable work trip).
             spawned = TrySpawnEmigrantFromNode(resident, drain.Node);
         }
         else
@@ -977,11 +1229,19 @@ public class PopulationManager
 
     private void OnDayRollover(double timeOfDay)
     {
+        // Total job reassignment: every worker drops their job and re-competes for the nearest open
+        // slot in a fresh randomized order (fairness). Done before regenerating schedules so each
+        // schedule reflects the new WorkNode.
+        RunTotalJobAssignment();
+
         for (int i = 0; i < _residents.Count; i++)
         {
             var r = _residents[i];
             r.Schedule = ScheduleGenerator.GenerateWeekday(r.Traits.Archetype, r.WorkNode);
             r.ScheduleIndex = 0;
+            // Advance past any already-passed departures (a no-op at ~00:00, but keeps this consistent
+            // with every other schedule-(re)generation site and robust if rollover ever fires off-zero).
+            AdvanceSchedulePastTime(r, timeOfDay);
             // Driving residents keep going; their new schedule starts after they arrive
         }
     }

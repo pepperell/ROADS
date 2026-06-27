@@ -78,6 +78,19 @@ public class MainForm : Form
     /// <summary>Frames elapsed since the autobench run started.</summary>
     private int _autoBenchFrameCount;
 
+    /// <summary>Per-vehicle count of consecutive simulation ticks spent essentially stopped
+    /// (speed &lt; <see cref="StuckSpeedThreshold"/>), reset to 0 the moment it moves. Updated every
+    /// tick in <see cref="OnTick"/>; read by the deadlock-capture dump (press <c>D</c>) to report how
+    /// long each car has been wedged and to gather a whole stuck cluster. Index-aligned to the
+    /// VehicleStore; follows swap-and-pop removals via <see cref="OnVehicleRemoving"/>.</summary>
+    private int[] _stuckTicks = System.Array.Empty<int>();
+    /// <summary>Speed (m/s) below which a vehicle counts as "stopped" for stuck-time tracking.</summary>
+    private const float StuckSpeedThreshold = 0.1f;
+    /// <summary>Ticks stopped before a vehicle is treated as a deadlock candidate by the cluster dump
+    /// (press <c>D</c> with nothing selected). ~6 s at the sim tick rate — long past any stop-sign wait
+    /// or queue, so a normal red light never trips it.</summary>
+    private const int StuckTickThreshold = 360;
+
     public MainForm(int autoBenchFrames = 0)
     {
         _autoBenchFrames = autoBenchFrames;
@@ -157,6 +170,74 @@ public class MainForm : Form
 
         if (_autoBenchFrames > 0)
             AutoBenchStep();
+
+        UpdateStuckTracking();
+    }
+
+    /// <summary>
+    /// Per-tick maintenance of <see cref="_stuckTicks"/>: increments the counter for every vehicle
+    /// essentially stopped, and resets the moment it moves. Cheap O(n) pass that powers the
+    /// deadlock-capture dump (press <c>D</c>). Skipped while paused so a deliberately-paused sim
+    /// doesn't inflate the counters.
+    /// </summary>
+    private void UpdateStuckTracking()
+    {
+        if (_simLoop.Paused) return;
+        if (_stuckTicks.Length < _vehicles.Count)
+            System.Array.Resize(ref _stuckTicks, _vehicles.Count + 64);
+
+        for (int v = 0; v < _vehicles.Count; v++)
+        {
+            if (_vehicles.State[v] == VehicleState.Driving && _vehicles.Speed[v] < StuckSpeedThreshold)
+                _stuckTicks[v]++;
+            else
+                _stuckTicks[v] = 0;
+        }
+    }
+
+    /// <summary>
+    /// Captures a live deadlock to diag_vehicle.log. With a vehicle selected, dumps it and walks its
+    /// blocking chain, dumping every distinct car in the chain so the full cycle is recorded from one
+    /// keypress. With nothing selected, dumps every vehicle stopped past <see cref="StuckTickThreshold"/>
+    /// — the whole wedged cluster. The arc/intersection state that causes the wedge is NOT saved to the
+    /// map, so this text dump is the only durable record; use it the moment a deadlock is on screen.
+    /// </summary>
+    private void CaptureDeadlock()
+    {
+        var dumped = new HashSet<int>();
+
+        if (_editorState.SelectedVehicle >= 0 && _editorState.SelectedVehicle < _vehicles.Count)
+        {
+            // Selected car is the entry point: dump it, then follow "nearest ahead" through the chain
+            // (which terminates at a signal-held car, a moving car, or a revisited car = a true cycle).
+            int cur = _editorState.SelectedVehicle;
+            for (int hop = 0; hop < 16 && cur >= 0 && cur < _vehicles.Count; hop++)
+            {
+                if (!dumped.Add(cur)) break; // cycle closed
+                DumpVehicleDiag(cur);
+                int next = NearestVehicleAhead(cur, out _, out _);
+                if (next < 0 || _vehicles.Speed[next] > 1.0f) break;
+                cur = next;
+            }
+        }
+        else
+        {
+            // No selection: dump the whole cluster of long-stopped cars.
+            for (int v = 0; v < _vehicles.Count; v++)
+                if (v < _stuckTicks.Length && _stuckTicks[v] >= StuckTickThreshold)
+                {
+                    DumpVehicleDiag(v);
+                    dumped.Add(v);
+                }
+            if (dumped.Count == 0)
+            {
+                // Nothing met the threshold; still record the worst offender so a keypress is never a no-op.
+                int worst = -1, worstTicks = 0;
+                for (int v = 0; v < _vehicles.Count && v < _stuckTicks.Length; v++)
+                    if (_stuckTicks[v] > worstTicks) { worstTicks = _stuckTicks[v]; worst = v; }
+                if (worst >= 0) DumpVehicleDiag(worst);
+            }
+        }
     }
 
     /// <summary>
@@ -187,6 +268,11 @@ public class MainForm : Form
     {
         _editorState.SelectedVehicle = FixupVehicleIndex(_editorState.SelectedVehicle, removed, swappedFrom);
         _editorState.HoveredVehicle = FixupVehicleIndex(_editorState.HoveredVehicle, removed, swappedFrom);
+
+        // Keep the stuck-time tracker index-aligned across swap-and-pop: the vehicle at swappedFrom
+        // moved into the removed slot, so its counter follows it.
+        if (swappedFrom >= 0 && removed >= 0 && removed < _stuckTicks.Length && swappedFrom < _stuckTicks.Length)
+            _stuckTicks[removed] = _stuckTicks[swappedFrom];
     }
 
     /// <summary>Drops editor-held vehicle indices when the store is bulk-cleared.</summary>
@@ -279,6 +365,9 @@ public class MainForm : Form
 
         // --- BLOCKER ANALYSIS: why is this car not moving? ---
         sb.AppendLine("  --- BLOCKER ANALYSIS ---");
+
+        int stuckTicks = i < _stuckTicks.Length ? _stuckTicks[i] : 0;
+        sb.AppendLine($"  Stuck for: {stuckTicks} ticks (~{stuckTicks / 60f:F1}s continuously stopped at ~60Hz)");
 
         int leader = NearestVehicleAhead(i, out float gap, out float lat);
         if (leader >= 0)
@@ -629,11 +718,13 @@ public class MainForm : Form
             e.Handled = true;
         }
 
-        // D = dump selected vehicle debug info to file
-        if (e.KeyCode == Keys.D && _editorState.SelectedVehicle >= 0
-            && _editorState.SelectedVehicle < _vehicles.Count)
+        // D = capture a live deadlock to diag_vehicle.log. With a vehicle selected, dumps it and walks
+        // the blocking chain (the full cycle); with NOTHING selected, dumps every car stuck > ~6s (the
+        // whole wedged cluster). Press it the moment a deadlock is on screen — the arc/intersection
+        // wedge state is not saved, so this text dump is the only durable record.
+        if (e.KeyCode == Keys.D)
         {
-            DumpVehicleDiag(_editorState.SelectedVehicle);
+            CaptureDeadlock();
             e.Handled = true;
         }
 

@@ -10,6 +10,15 @@ namespace Roads.App.Vehicles;
 public static class ScheduleGenerator
 {
     /// <summary>
+    /// Whether an archetype "has work in their daily routine" — i.e. is a worker who should hold a
+    /// job. Every archetype commutes to work except <see cref="DriverArchetype.SundayDriver"/>, who
+    /// only ever runs leisure/errands. This is the single definition shared by the schedule generator
+    /// (which only produces work trips for workers) and the job-assignment system (which only ever
+    /// employs workers); keep the two in agreement by routing both through this predicate.
+    /// </summary>
+    public static bool WantsWork(DriverArchetype archetype) => archetype != DriverArchetype.SundayDriver;
+
+    /// <summary>
     /// Generates a weekday schedule for a resident based on their archetype.
     /// Schedules are sorted by departure time.
     /// </summary>

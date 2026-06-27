@@ -38,9 +38,10 @@ public class StatisticsPanel
     /// </summary>
     /// <param name="canvas">Skia canvas; must be in screen (identity) space.</param>
     /// <param name="vehicles">Vehicle store — read only.</param>
+    /// <param name="population">Population manager — read only, for the employment row.</param>
     /// <param name="canvasWidth">Canvas width in pixels.</param>
     /// <param name="canvasHeight">Canvas height in pixels.</param>
-    public void Draw(SKCanvas canvas, VehicleStore vehicles, float canvasWidth, float canvasHeight)
+    public void Draw(SKCanvas canvas, VehicleStore vehicles, PopulationManager population, float canvasWidth, float canvasHeight)
     {
         if (!Visible) return;
 
@@ -72,7 +73,7 @@ public class StatisticsPanel
         // PerformanceHud sits at canvasHeight - 68 - 10 (height=68, margin=10).
         // Place this panel directly above it with a 4px gap.
         const float panelWidth  = 256f;
-        const float panelHeight = 66f;
+        const float panelHeight = 82f;
         const float padding     = 8f;
         const float perfHudHeight = 68f;
         const float margin      = 10f;
@@ -108,5 +109,18 @@ public class StatisticsPanel
         canvas.DrawText($"{congestionPct:F1}%", px + padding + 72f, textY, SKTextAlign.Left, _font, congPaint);
 
         canvas.DrawText($"({congested} slow)", px + padding + 118f, textY, SKTextAlign.Left, _font, _headerPaint);
+
+        // ── Row 4: employment ─────────────────────────────────────────────────────
+        // Employed workers, jobless workers (want work but have none), and open job slots.
+        textY += 16f;
+        canvas.DrawText("Jobs: ", px + padding, textY, SKTextAlign.Left, _font, _headerPaint);
+        int employed = population.EmployedWorkers;
+        int jobless  = population.UnemployedWorkers;
+        int openings = population.JobOpenings;
+        canvas.DrawText($"{employed} emp", px + padding + 36f, textY, SKTextAlign.Left, _font, _valuePaint);
+        // Jobless count is amber when anyone is out of work, blue otherwise.
+        canvas.DrawText($"{jobless} jobless", px + padding + 92f, textY, SKTextAlign.Left, _font,
+            jobless > 0 ? _warnPaint : _valuePaint);
+        canvas.DrawText($"{openings} open", px + padding + 170f, textY, SKTextAlign.Left, _font, _headerPaint);
     }
 }

@@ -149,7 +149,7 @@ public class SceneRenderer
         _sliderPanel.Draw(canvas, info.Width);
         if (editorState.SelectedVehicle >= 0)
             _vehicleInfoPanel.Draw(canvas, vehicles, editorState.SelectedVehicle, graph, info.Height, intersectionArcs);
-        _statisticsPanel.Draw(canvas, vehicles, info.Width, info.Height);
+        _statisticsPanel.Draw(canvas, vehicles, simLoop.Population, info.Width, info.Height);
 
         // Minimap drawn last so it sits on top of the other overlays.
         _minimap.Draw(canvas, camera, graph, info.Width, info.Height);
