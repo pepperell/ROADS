@@ -6,9 +6,15 @@ using Roads.App.World;
 namespace Roads.App.Rendering;
 
 /// <summary>
-/// Renders the road network: asphalt surfaces, lane markings, edge boundaries, stop lines,
-/// intersection nodes, and traffic control indicators (signals, stop signs, yield signs).
-/// Caches per-edge Bezier offset paths and invalidates when the graph version changes.
+/// Renders the road network with a distinct visual identity per <see cref="RoadType"/>:
+/// shoulder/sidewalk/verge bands under the asphalt, per-type surface tones and edge
+/// treatment (dark curbs on residential/arterial, white edge lines on highway), per-type
+/// center-line policy (none on residential, double solid yellow on arterial, median band
+/// plus yellow lines on highway, worn tire tracks on dirt), lane markings, stop lines,
+/// zebra crosswalks at signalized approaches, intersection fills, and node dots.
+/// Traffic-control furniture (signal heads, stop/yield/speed signs) is drawn by
+/// <see cref="SignRenderer"/>. Caches per-edge Bezier offset paths and invalidates when
+/// the graph version changes.
 /// </summary>
 public class RoadRenderer
 {
@@ -16,6 +22,30 @@ public class RoadRenderer
     private const float LaneWidth = SimConstants.LaneWidth;
     /// <summary>Number of line segments per Bézier curve for rendering.</summary>
     private const int BezierSegments = 20;
+    /// <summary>Zoom below which shoulders/sidewalks are skipped (sub-pixel at that scale).</summary>
+    private const float ShoulderMinZoom = 0.3f;
+    /// <summary>Lateral offset (m) of each line of the arterial double-yellow from the center path.</summary>
+    private const float ArterialYellowOffset = 0.22f;
+    /// <summary>Lateral offset (m) of each highway yellow line from the median center.</summary>
+    private const float HighwayYellowOffset = 0.9f;
+    /// <summary>Stroke width (m) of the highway median band.</summary>
+    private const float HighwayMedianWidth = 1.6f;
+    /// <summary>Lateral offset (m) of each dirt tire track from its lane center.</summary>
+    private const float TireTrackSpread = 0.85f;
+    /// <summary>Stroke width (m) of a dirt tire track.</summary>
+    private const float TireTrackWidth = 0.45f;
+    /// <summary>Zoom at or above which crosswalks are drawn (needs TrafficSignalSystem supplied to Draw).</summary>
+    private const float CrosswalkMinZoom = 0.8f;
+    /// <summary>Width (m) of each zebra crosswalk bar.</summary>
+    private const float CrosswalkBarWidth = 0.6f;
+    /// <summary>Gap (m) between zebra crosswalk bars.</summary>
+    private const float CrosswalkBarGap = 0.6f;
+    /// <summary>Number of zebra bars per crosswalk.</summary>
+    private const int CrosswalkBarCount = 5;
+    /// <summary>Distance (m) from the stop line to the center of the first zebra bar.</summary>
+    private const float CrosswalkStartOffset = 1.3f;
+    /// <summary>Zoom below which editor node dots are hidden (they are an aid, not scenery).</summary>
+    private const float NodeDotMinZoom = 0.5f;
 
     /// <summary>Cached offset paths per edge, invalidated when graph version changes.</summary>
     private readonly List<CachedEdgePaths> _cache = new();
@@ -53,8 +83,9 @@ public class RoadRenderer
         IsAntialias = true
     };
 
-    // Center-line dash effect — immutable and shared across all edges/frames (created once
-    // to honor the per-frame no-allocation discipline of the paints above).
+    // Shared-lane dash effect (also used for dashed edge lines) — immutable and shared
+    // across all edges/frames (created once to honor the per-frame no-allocation
+    // discipline of the paints above).
     private readonly SKPathEffect _centerLineDash = SKPathEffect.CreateDash(new[] { 2f, 2f }, 0);
 
     // Reusable paints for DrawRoadLines (StrokeWidth updated per frame based on zoom)
@@ -64,12 +95,74 @@ public class RoadRenderer
         Style = SKPaintStyle.Stroke,
         IsAntialias = true
     };
+    // Solid yellow center paint: arterial double-yellow and highway median edge lines.
     private readonly SKPaint _centerLinePaint = new()
     {
-        Color = new SKColor(220, 180, 40),
+        Color = new SKColor(200, 166, 60),
         Style = SKPaintStyle.Stroke,
         IsAntialias = true
     };
+    // Dark curb line at the asphalt edge of residential/arterial roads.
+    private readonly SKPaint _curbPaint = new()
+    {
+        Color = new SKColor(45, 46, 50),
+        Style = SKPaintStyle.Stroke,
+        IsAntialias = true
+    };
+    // Highway median band stroked along the center path.
+    private readonly SKPaint _medianPaint = new()
+    {
+        Color = new SKColor(96, 100, 92),
+        Style = SKPaintStyle.Stroke,
+        IsAntialias = true
+    };
+    // Shoulder/sidewalk/verge band stroked under the asphalt (color set per edge type).
+    private readonly SKPaint _shoulderPaint = new()
+    {
+        Style = SKPaintStyle.Stroke,
+        StrokeCap = SKStrokeCap.Round,
+        StrokeJoin = SKStrokeJoin.Round,
+        IsAntialias = true
+    };
+    // Worn tire tracks on dirt roads (long ragged dashes).
+    private readonly SKPaint _tireTrackPaint = new()
+    {
+        Color = new SKColor(96, 76, 48),
+        Style = SKPaintStyle.Stroke,
+        StrokeCap = SKStrokeCap.Round,
+        PathEffect = SKPathEffect.CreateDash(new[] { 7f, 2f }, 0),
+        IsAntialias = true
+    };
+    // Zebra crosswalk bars at signalized approaches.
+    private readonly SKPaint _crosswalkPaint = new()
+    {
+        Color = new SKColor(255, 255, 255, 200),
+        Style = SKPaintStyle.Stroke,
+        StrokeCap = SKStrokeCap.Butt,
+        IsAntialias = true
+    };
+    // Stop bars at light/stop approaches (width set per frame from zoom).
+    private readonly SKPaint _stopLinePaint = new()
+    {
+        Color = new SKColor(255, 255, 255),
+        Style = SKPaintStyle.Stroke,
+        StrokeCap = SKStrokeCap.Butt,
+        IsAntialias = true
+    };
+    // Intersection corner boundary lines (color set per node type, width per frame).
+    private readonly SKPaint _cornerPaint = new()
+    {
+        Style = SKPaintStyle.Stroke,
+        StrokeCap = SKStrokeCap.Butt,
+        IsAntialias = true
+    };
+
+    // Per-node scratch state for DrawIntersectionFills — reused across nodes/frames so the
+    // per-visible-node fill pass never allocates.
+    private readonly List<ApproachInfo> _approaches = new();
+    private readonly HashSet<int> _seenPairs = new();
+    private readonly SKPath _fillPath = new();
+    private readonly SKPath _cornerPath = new();
     private readonly SKPaint _laneDividerPaint = new()
     {
         Color = new SKColor(180, 180, 180, 160),
@@ -88,21 +181,24 @@ public class RoadRenderer
     };
 
     /// <summary>
-    /// Draws all active road edges in two passes (surfaces first, then markings) so that
-    /// connecting roads don't overlap each other's lines. Also draws stop lines and nodes.
+    /// Draws all active road edges in three passes (shoulders/sidewalks first, then asphalt
+    /// surfaces, then markings) so that connecting roads don't overlap each other's lines
+    /// and junction interiors stay clean. Also draws stop lines, crosswalks, and nodes.
     /// For paired edges (forward/reverse), only the lower-index edge is drawn to avoid overdraw.
     /// When <paramref name="heatMap"/> is non-null and <see cref="CongestionHeatMap.Enabled"/>
     /// is true, a congestion tint is alpha-blended over each road surface after the base
     /// color is applied, without affecting lane markings or the road type styling.
+    /// When <paramref name="trafficSignals"/> is non-null and zoom is at least
+    /// <see cref="CrosswalkMinZoom"/>, zebra crosswalks are drawn at each signalized approach.
     ///
     /// Frustum culling: edges whose endpoint AABB does not intersect <paramref name="viewRect"/>
-    /// are skipped in both passes. A generous margin is added to the AABB so that Bézier
+    /// are skipped in all passes. A generous margin is added to the AABB so that Bézier
     /// curves bowing outside their endpoint bounding box are never incorrectly culled.
     ///
     /// Level-of-Detail: when <paramref name="zoom"/> is below
-    /// <see cref="RenderDetail.RoadSimpleThreshold"/>, Pass 1 draws plain center-line
-    /// strokes only (no surface fill or markings) and Pass 2 / intersections / stop lines
-    /// / nodes are all skipped. The simplified view is always legible at city-overview scale.
+    /// <see cref="RenderDetail.RoadSimpleThreshold"/>, roads are drawn as brightened
+    /// center-line strokes whose width grades by road type, and all other passes are
+    /// skipped. Shoulders are skipped below <see cref="ShoulderMinZoom"/>.
     /// </summary>
     /// <param name="canvas">SkiaSharp canvas in world-space coordinates.</param>
     /// <param name="graph">Road graph to render.</param>
@@ -111,10 +207,13 @@ public class RoadRenderer
     /// <param name="darkness">Ambient darkness factor (0 = full day, 1 = full night).</param>
     /// <param name="heatMap">Optional congestion heat-map overlay; null disables it.</param>
     /// <param name="viewRect">Visible world-space rectangle for frustum culling.</param>
+    /// <param name="visibleEdges">Optional pre-culled edge index list from the edge spatial grid.</param>
+    /// <param name="stopSigns">Optional stop-sign system for stop-line exemption checks.</param>
+    /// <param name="trafficSignals">Optional signal system; enables crosswalk rendering at lights.</param>
     public void Draw(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom,
         float darkness = 0f, CongestionHeatMap? heatMap = null,
         SKRect viewRect = default, IReadOnlyList<int>? visibleEdges = null,
-        StopSignSystem? stopSigns = null)
+        StopSignSystem? stopSigns = null, TrafficSignalSystem? trafficSignals = null)
     {
         if (graph.Edges.Count == 0) return;
 
@@ -131,12 +230,19 @@ public class RoadRenderer
         // Dim road colors at night
         _ambient = 1f - darkness * 0.45f;
         // Default surface paint color (intersection fills use this; per-edge surfaces override it)
-        _surfacePaint.Color = new SKColor(Dim(70, _ambient), Dim(72, _ambient), Dim(78, _ambient));
+        _surfacePaint.Color = RoadTypeVisuals.GetSurfaceColor(RoadType.Residential, _ambient);
         _intersectionFillPaint.Color = _surfacePaint.Color;
-        _nodePaint.Color = new SKColor(Dim(120, _ambient), Dim(130, _ambient), Dim(150, _ambient));
+        _nodePaint.Color = new SKColor(Dim(120, _ambient), Dim(130, _ambient), Dim(150, _ambient), 120);
         _edgeLinePaint.Color = new SKColor(Dim(200, _ambient), Dim(200, _ambient), Dim(200, _ambient));
-        _centerLinePaint.Color = new SKColor(Dim(220, _ambient), Dim(180, _ambient), Dim(40, _ambient));
-        _laneDividerPaint.Color = new SKColor(Dim(180, _ambient), Dim(180, _ambient), Dim(180, _ambient), (byte)(160 * _ambient));
+        _centerLinePaint.Color = new SKColor(Dim(200, _ambient), Dim(166, _ambient), Dim(60, _ambient));
+        // RGB dims; alpha stays constant (scaling both would double-dim the markings).
+        _laneDividerPaint.Color = new SKColor(Dim(180, _ambient), Dim(180, _ambient), Dim(180, _ambient), 160);
+        _arrowPaint.Color = new SKColor(Dim(210, _ambient), Dim(210, _ambient), Dim(210, _ambient), 220);
+        _curbPaint.Color = new SKColor(Dim(45, _ambient), Dim(46, _ambient), Dim(50, _ambient));
+        _medianPaint.Color = new SKColor(Dim(96, _ambient), Dim(100, _ambient), Dim(92, _ambient));
+        _tireTrackPaint.Color = new SKColor(Dim(96, _ambient), Dim(76, _ambient), Dim(48, _ambient));
+        _crosswalkPaint.Color = new SKColor(Dim(255, _ambient), Dim(255, _ambient), Dim(255, _ambient), 200);
+        _stopLinePaint.Color = new SKColor(Dim(255, _ambient), Dim(255, _ambient), Dim(255, _ambient));
 
         RebuildCacheIfNeeded(graph, stopLines);
 
@@ -145,10 +251,10 @@ public class RoadRenderer
         bool cull = viewRect.Width > 0f || viewRect.Height > 0f;
 
         // LOD simple: draw roads as plain center-line strokes at city-overview zoom.
-        // This replaces both surface pass and marking pass with a single cheap draw.
+        // Stroke width and (brightened) color grade by road type so the network hierarchy
+        // stays legible when roads collapse to lines.
         if (lodSimple)
         {
-            _surfacePaint.StrokeWidth = 1.5f / zoom; // thin but visible at all scales
             for (int i = 0; i < graph.Edges.Count; i++)
             {
                 if (i >= _cache.Count) break;
@@ -166,10 +272,42 @@ public class RoadRenderer
                         continue;
                 }
 
-                _surfacePaint.Color = RoadTypeVisuals.GetSurfaceColor(edge.RoadType, _ambient);
+                _surfacePaint.StrokeWidth = RoadTypeVisuals.GetSchematicStrokeWidth(edge.RoadType) / zoom;
+                _surfacePaint.Color = RoadTypeVisuals.GetSchematicColor(edge.RoadType, _ambient);
                 canvas.DrawPath(_cache[i].CenterPath, _surfacePaint);
             }
             return; // skip all detail passes
+        }
+
+        // Pass 0: shoulder/sidewalk/verge bands under everything — ALL visible edges'
+        // shoulders are drawn before any asphalt so junction interiors stay clean once
+        // the asphalt and intersection fills go on top. Sub-pixel at low zoom, so skipped.
+        if (zoom >= ShoulderMinZoom)
+        {
+            for (int k = 0; k < visCount; k++)
+            {
+                int i = visibleEdges != null ? visibleEdges[k] : k;
+                if (i >= _cache.Count) continue;
+                var edge = graph.Edges[i];
+                if (edge.FromNode < 0) continue;
+                int reverse = graph.FindReverseEdge(i);
+                if (reverse >= 0 && reverse < i) continue;
+
+                if (cull)
+                {
+                    var from = graph.Nodes[edge.FromNode].Position;
+                    var to   = graph.Nodes[edge.ToNode].Position;
+                    float halfW = GeometryUtil.RoadHalfWidth(graph, i);
+                    if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to, halfW), viewRect))
+                        continue;
+                }
+
+                var cached = _cache[i];
+                float asphaltWidth = cached.TotalWidth * RoadTypeVisuals.GetWidthMultiplier(edge.RoadType);
+                _shoulderPaint.Color = RoadTypeVisuals.GetShoulderColor(edge.RoadType, _ambient);
+                _shoulderPaint.StrokeWidth = asphaltWidth + 2f * RoadTypeVisuals.GetShoulderWidth(edge.RoadType);
+                canvas.DrawPath(cached.CenterPath, _shoulderPaint);
+            }
         }
 
         // Pass 1: draw all asphalt surfaces first so overlapping roads blend seamlessly
@@ -228,6 +366,8 @@ public class RoadRenderer
         }
 
         DrawStopLines(canvas, graph, stopLines, zoom, viewRect, stopSigns);
+        if (trafficSignals != null && zoom >= CrosswalkMinZoom)
+            DrawCrosswalks(canvas, graph, stopLines, trafficSignals, viewRect);
         DrawNodes(canvas, graph, zoom, viewRect);
     }
 
@@ -294,14 +434,18 @@ public class RoadRenderer
 
     /// <summary>
     /// Builds the cached Bezier paths for a single edge: center path (full length for surface),
-    /// left/right boundary paths and lane dividers trimmed to stop line t-values so markings
-    /// don't extend into intersections.
+    /// left/right boundary paths, lane dividers, and per-type marking paths (arterial
+    /// double-yellow, highway median yellows, dirt tire tracks) — all marking paths trimmed
+    /// to stop line t-values so they don't extend into intersections.
     /// </summary>
     private CachedEdgePaths BuildEdgePaths(RoadGraph graph, int edgeIndex, StopLineCache stopLines)
     {
         var edge = graph.Edges[edgeIndex];
         float totalWidth = GeometryUtil.RoadSurfaceWidth(graph, edgeIndex);
-        float halfWidth = totalWidth * 0.5f;
+        // Boundary lines (curbs / white edge lines) sit at the DRAWN asphalt edge, which is
+        // the geometric half-width scaled by the per-type visual multiplier — otherwise the
+        // curb floats inside the roadway on arterials/highways (drawn wider than geometric).
+        float halfWidth = totalWidth * 0.5f * RoadTypeVisuals.GetWidthMultiplier(edge.RoadType);
         bool hasCenterLine = GeometryUtil.HasCenterDivider(graph, edgeIndex);
         bool dashedEdges = (edge.Flags & EdgeFlags.SharedLane) != 0;
 
@@ -319,10 +463,11 @@ public class RoadRenderer
         float tMinRight = stopLines.GetRightTrimAtFromNode(edgeIndex);
         float tMaxRight = stopLines.GetRightTrimAtToNode(edgeIndex);
 
-        // Yellow center line exists only on a two-way road, where the edge path is the
-        // center divider. One-way and single-lane two-way roads have no divider — keep an
-        // empty path so the cache shape is uniform.
-        var centerLinePath = hasCenterLine
+        // The trimmed center path is only stroked for the highway median band. Two-way
+        // arterials mark the center with the double-yellow pair below; residential
+        // two-ways carry no center marking at all. Keep an empty path otherwise so the
+        // cache shape is uniform.
+        var centerLinePath = hasCenterLine && edge.RoadType == RoadType.Highway
             ? BuildOffsetPath(graph, edgeIndex, 0f, tMin, tMax)
             : new SKPath();
 
@@ -356,8 +501,41 @@ public class RoadRenderer
             }
         }
 
+        // Per-type marking paths. Contents depend on the road type:
+        //   Dirt      — a tire-track pair (±TireTrackSpread) around each lane center; on a
+        //               two-way road the opposing direction's lanes are mirrored across the
+        //               center path (only the lower-index edge of a pair is drawn).
+        //   Arterial  — double solid yellow at ±ArterialYellowOffset (two-way only).
+        //   Highway   — solid yellow at ±HighwayYellowOffset flanking the median (two-way only).
+        var typeMarkingPaths = new List<SKPath>();
+        if (edge.RoadType == RoadType.Dirt)
+        {
+            for (int lane = 0; lane < edge.LaneCount; lane++)
+            {
+                float laneOff = GeometryUtil.LaneLateralOffset(graph, edgeIndex, lane);
+                typeMarkingPaths.Add(BuildOffsetPath(graph, edgeIndex, laneOff - TireTrackSpread, tMin, tMax));
+                typeMarkingPaths.Add(BuildOffsetPath(graph, edgeIndex, laneOff + TireTrackSpread, tMin, tMax));
+                if (hasCenterLine)
+                {
+                    // Opposing-direction lanes mirrored across the center divider.
+                    typeMarkingPaths.Add(BuildOffsetPath(graph, edgeIndex, -laneOff - TireTrackSpread, tMin, tMax));
+                    typeMarkingPaths.Add(BuildOffsetPath(graph, edgeIndex, -laneOff + TireTrackSpread, tMin, tMax));
+                }
+            }
+        }
+        else if (hasCenterLine && edge.RoadType == RoadType.Arterial)
+        {
+            typeMarkingPaths.Add(BuildOffsetPath(graph, edgeIndex, -ArterialYellowOffset, tMin, tMax));
+            typeMarkingPaths.Add(BuildOffsetPath(graph, edgeIndex, ArterialYellowOffset, tMin, tMax));
+        }
+        else if (hasCenterLine && edge.RoadType == RoadType.Highway)
+        {
+            typeMarkingPaths.Add(BuildOffsetPath(graph, edgeIndex, -HighwayYellowOffset, tMin, tMax));
+            typeMarkingPaths.Add(BuildOffsetPath(graph, edgeIndex, HighwayYellowOffset, tMin, tMax));
+        }
+
         return new CachedEdgePaths(centerPath, centerLinePath, leftPath, rightPath, lanePaths,
-            totalWidth, hasCenterLine, dashedEdges);
+            typeMarkingPaths, totalWidth, hasCenterLine, dashedEdges);
     }
 
     /// <summary>
@@ -461,33 +639,71 @@ public class RoadRenderer
     }
 
     /// <summary>
-    /// Draws boundary lines, center line, and lane dividers for a single road edge.
-    /// All marking paths are trimmed at intersection boundaries. Unpaved road types
-    /// (those where <see cref="RoadTypeVisuals.HasPaintedLines"/> is false, i.e. dirt)
-    /// carry no paint and are skipped entirely.
+    /// Draws boundary treatment, center marking, and lane dividers for a single road edge,
+    /// following the per-type policy: dirt shows only worn tire tracks (no paint);
+    /// residential/arterial get a thin dark curb line at the asphalt edge (white solid edge
+    /// lines remain highway-only); the center of a two-way road is unmarked on residential,
+    /// double solid yellow on arterial, and a median band flanked by yellow lines on highway.
+    /// White dashed lane dividers apply to all multi-lane paved types.
+    /// All marking paths are trimmed at intersection boundaries.
     /// </summary>
     private void DrawRoadLines(SKCanvas canvas, RoadEdge edge, int edgeIndex, float zoom)
     {
         var cached = _cache[edgeIndex];
 
-        // Unpaved roads (dirt) have no painted edge lines, center line, or lane dividers.
-        if (!RoadTypeVisuals.HasPaintedLines(edge.RoadType)) return;
+        // Unpaved roads (dirt) have no painted markings — worn tire tracks instead.
+        // Tracks are sub-pixel below mid zoom, so skip them there.
+        if (!RoadTypeVisuals.HasPaintedLines(edge.RoadType))
+        {
+            if (zoom >= ShoulderMinZoom)
+            {
+                _tireTrackPaint.StrokeWidth = TireTrackWidth;
+                foreach (var trackPath in cached.TypeMarkingPaths)
+                    canvas.DrawPath(trackPath, _tireTrackPaint);
+            }
+            return;
+        }
 
-        // Edge boundary lines (white) — update zoom-dependent stroke width. Single-lane
-        // two-way roads dash both edges to signal a shared single track.
-        _edgeLinePaint.StrokeWidth = Math.Max(0.3f, 0.5f / zoom);
-        _edgeLinePaint.PathEffect = cached.DashedEdges ? _centerLineDash : null;
-        canvas.DrawPath(cached.LeftEdgePath, _edgeLinePaint);
-        canvas.DrawPath(cached.RightEdgePath, _edgeLinePaint);
-        _edgeLinePaint.PathEffect = null;
+        // Edge boundary treatment: bright white solid lines are a highway signature;
+        // residential/arterial get a thin dark curb line at the asphalt edge instead.
+        // Single-lane two-way roads dash both edges to signal a shared single track.
+        SKPaint boundaryPaint;
+        if (edge.RoadType == RoadType.Highway)
+        {
+            boundaryPaint = _edgeLinePaint;
+            boundaryPaint.StrokeWidth = Math.Max(0.3f, 0.5f / zoom);
+        }
+        else
+        {
+            boundaryPaint = _curbPaint;
+            boundaryPaint.StrokeWidth = Math.Max(0.25f, 0.4f / zoom);
+        }
+        boundaryPaint.PathEffect = cached.DashedEdges ? _centerLineDash : null;
+        canvas.DrawPath(cached.LeftEdgePath, boundaryPaint);
+        canvas.DrawPath(cached.RightEdgePath, boundaryPaint);
+        boundaryPaint.PathEffect = null;
 
-        // Center line (yellow dashed) — only on two-way roads, where the edge path is the
-        // center divider. Shared effect, no per-frame allocation.
+        // Center marking policy — only two-way roads have a center divider to mark.
         if (cached.HasCenterLine)
         {
-            _centerLinePaint.StrokeWidth = Math.Max(0.3f, 0.4f / zoom);
-            _centerLinePaint.PathEffect = _centerLineDash;
-            canvas.DrawPath(cached.CenterLinePath, _centerLinePaint);
+            switch (edge.RoadType)
+            {
+                case RoadType.Arterial:
+                    // Double solid yellow.
+                    _centerLinePaint.StrokeWidth = MathF.Max(0.15f, 0.2f / zoom);
+                    foreach (var yellowPath in cached.TypeMarkingPaths)
+                        canvas.DrawPath(yellowPath, _centerLinePaint);
+                    break;
+                case RoadType.Highway:
+                    // Median band with a solid yellow line along each side.
+                    _medianPaint.StrokeWidth = HighwayMedianWidth;
+                    canvas.DrawPath(cached.CenterLinePath, _medianPaint);
+                    _centerLinePaint.StrokeWidth = MathF.Max(0.15f, 0.2f / zoom);
+                    foreach (var yellowPath in cached.TypeMarkingPaths)
+                        canvas.DrawPath(yellowPath, _centerLinePaint);
+                    break;
+                // Residential: real residential streets carry no center line.
+            }
         }
 
         // Lane dividers (white dashed, multi-lane only)
@@ -501,10 +717,6 @@ public class RoadRenderer
         }
     }
 
-    /// <summary>
-    /// Draws white stop lines at both ends of each edge where StopLineCache indicates a line
-    /// is needed (i.e., where the stop-T is inset from the edge endpoint).
-    /// </summary>
     /// <summary>True if (x,y) is within the cull rect (expanded by <paramref name="margin"/>), or
     /// culling is off (an empty rect means "draw everything"). Used to skip off-screen node/edge work.</summary>
     private static bool InView(float x, float y, SKRect cull, float margin)
@@ -512,17 +724,14 @@ public class RoadRenderer
            || (x >= cull.Left - margin && x <= cull.Right + margin
                && y >= cull.Top - margin && y <= cull.Bottom + margin);
 
+    /// <summary>
+    /// Draws white stop lines wherever a vehicle actually stops (traffic-light approaches
+    /// and non-exempt stop-sign approaches; never on dirt).
+    /// </summary>
     private void DrawStopLines(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom,
         SKRect cullRect = default, StopSignSystem? stopSigns = null)
     {
-        using var stopLinePaint = new SKPaint
-        {
-            Color = new SKColor(255, 255, 255),
-            StrokeWidth = Math.Max(0.4f, 0.6f / zoom),
-            Style = SKPaintStyle.Stroke,
-            StrokeCap = SKStrokeCap.Butt,
-            IsAntialias = true
-        };
+        _stopLinePaint.StrokeWidth = Math.Max(0.4f, 0.6f / zoom);
 
         for (int i = 0; i < graph.Edges.Count; i++)
         {
@@ -545,7 +754,7 @@ public class RoadRenderer
             {
                 float stopT = stopLines.GetStopTAtToNode(i);
                 if (stopT < 0.999f)
-                    DrawStopLine(canvas, graph, i, edge, stopT, stopLinePaint);
+                    DrawStopLine(canvas, graph, i, edge, stopT, _stopLinePaint);
             }
         }
     }
@@ -572,10 +781,68 @@ public class RoadRenderer
             center.X + nx * spanMax, center.Y + ny * spanMax, paint);
     }
 
-    /// <summary>Draws small circles at each active intersection/endpoint node.</summary>
+    /// <summary>
+    /// Draws zebra crosswalk bars just downstream of the stop line at every paved approach
+    /// whose destination node has a traffic light. Each crosswalk is
+    /// <see cref="CrosswalkBarCount"/> white bars oriented along the stop-line direction,
+    /// spanning the approach's <see cref="GeometryUtil.LaneSpan"/>. Dirt approaches are
+    /// skipped. Caller gates on zoom (drawn at <see cref="CrosswalkMinZoom"/> and above)
+    /// and only calls this when a <see cref="TrafficSignalSystem"/> was supplied to Draw.
+    /// </summary>
+    private void DrawCrosswalks(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines,
+        TrafficSignalSystem trafficSignals, SKRect cullRect = default)
+    {
+        _crosswalkPaint.StrokeWidth = CrosswalkBarWidth;
+
+        for (int i = 0; i < graph.Edges.Count; i++)
+        {
+            var edge = graph.Edges[i];
+            if (edge.FromNode < 0) continue;
+            if (edge.RoadType == RoadType.Dirt) continue; // no paint on dirt
+            if (!trafficSignals.IsTrafficLight(edge.ToNode)) continue;
+
+            var toPos = graph.Nodes[edge.ToNode].Position;
+            if (!InView(toPos.X, toPos.Y, cullRect, 40f)) continue;
+
+            float stopT = stopLines.GetStopTAtToNode(i);
+            if (stopT >= 0.999f) continue; // no stop line inset — no room for a crosswalk
+
+            var center = graph.EvaluateBezier(i, stopT);
+            var tangent = graph.EvaluateBezierTangent(i, stopT);
+            float len = tangent.Length();
+            if (len < 0.001f) continue;
+
+            // Travel direction points toward the node, so "downstream of the stop line"
+            // (between the stop line and the intersection) is +tangent.
+            float dx = tangent.X / len, dy = tangent.Y / len;
+            float nx = -dy, ny = dx; // right normal (Y-down) = stop-line direction
+
+            // A crosswalk crosses the FULL roadway (unlike stop lines, which span only the
+            // approaching lanes): on two-way roads the path is the center divider and
+            // LaneSpan covers just the right half, so mirror it across the center.
+            var (spanMin, spanMax) = GeometryUtil.LaneSpan(graph, i);
+            if (GeometryUtil.HasCenterDivider(graph, i))
+                spanMin = -spanMax;
+
+            for (int bar = 0; bar < CrosswalkBarCount; bar++)
+            {
+                float d = CrosswalkStartOffset + bar * (CrosswalkBarWidth + CrosswalkBarGap);
+                float cx = center.X + dx * d, cy = center.Y + dy * d;
+                canvas.DrawLine(cx + nx * spanMin, cy + ny * spanMin,
+                    cx + nx * spanMax, cy + ny * spanMax, _crosswalkPaint);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Draws small translucent circles at each active intersection/endpoint node. Node dots
+    /// are an editor aid rather than scenery, so they are hidden below
+    /// <see cref="NodeDotMinZoom"/> and kept small and faint at all zooms.
+    /// </summary>
     private void DrawNodes(SKCanvas canvas, RoadGraph graph, float zoom, SKRect cullRect = default)
     {
-        float nodeRadius = Math.Max(2f, 3f / zoom);
+        if (zoom < NodeDotMinZoom) return;
+        float nodeRadius = Math.Max(1.2f, 1.8f / zoom);
 
         for (int i = 0; i < graph.Nodes.Count; i++)
         {
@@ -583,201 +850,6 @@ public class RoadRenderer
             if (float.IsNaN(node.Position.X)) continue; // skip defunct nodes
             if (!InView(node.Position.X, node.Position.Y, cullRect, nodeRadius + 10f)) continue;
             canvas.DrawCircle(node.Position.X, node.Position.Y, nodeRadius, _nodePaint);
-        }
-    }
-
-    /// <summary>
-    /// Iterates incoming edges at nodes matching a predicate and computes the sign position
-    /// (stop line offset to the right). Calls the draw action for each valid position.
-    /// Shared by DrawSignals, DrawStopSigns, and DrawYieldSigns.
-    /// </summary>
-    private static void ForEachSignPosition(
-        RoadGraph graph, StopLineCache stopLines,
-        Func<int, bool> isNodeActive,
-        Func<int, bool>? isEdgeIncluded,
-        Action<SKCanvas, int, float, float> drawSign,
-        SKCanvas canvas, SKRect cullRect = default)
-    {
-        for (int n = 0; n < graph.Nodes.Count; n++)
-        {
-            if (!isNodeActive(n)) continue;
-            var node = graph.Nodes[n];
-            if (float.IsNaN(node.Position.X)) continue;
-            // Skip the per-edge Bezier evaluations below for off-screen intersections.
-            if (!InView(node.Position.X, node.Position.Y, cullRect, 40f)) continue;
-
-            var incoming = graph.GetIncomingEdges(n);
-            foreach (int edgeIdx in incoming)
-            {
-                var edge = graph.Edges[edgeIdx];
-                if (edge.FromNode < 0) continue;
-                if (isEdgeIncluded != null && !isEdgeIncluded(edgeIdx)) continue;
-
-                float stopT = stopLines.GetStopTAtToNode(edgeIdx);
-                var pos = graph.EvaluateBezier(edgeIdx, stopT);
-                var tangent = graph.EvaluateBezierTangent(edgeIdx, stopT);
-                float len = tangent.Length();
-                if (len < 0.001f) continue;
-
-                float rx = -tangent.Y / len;
-                float ry = tangent.X / len;
-                float offset = GeometryUtil.RoadHalfWidth(graph, edgeIdx) + 2f;
-                float sx = pos.X + rx * offset;
-                float sy = pos.Y + ry * offset;
-
-                drawSign(canvas, edgeIdx, sx, sy);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Draws colored circles (green/yellow/red) for traffic light signals at each incoming
-    /// edge's stop line, offset to the right of the travel direction.
-    /// </summary>
-    public void DrawSignals(SKCanvas canvas, RoadGraph graph, TrafficSignalSystem signals, StopLineCache stopLines, float zoom, SKRect cullRect = default)
-    {
-        if (zoom < 0.3f) return; // too far out to read — skip (declutter + draw cost at scale); matches speed-limit signs
-        float radius = Math.Max(1.5f, 2.5f / zoom);
-
-        using var greenPaint = new SKPaint { Color = new SKColor(0, 200, 0), Style = SKPaintStyle.Fill, IsAntialias = true };
-        using var yellowPaint = new SKPaint { Color = new SKColor(255, 200, 0), Style = SKPaintStyle.Fill, IsAntialias = true };
-        using var redPaint = new SKPaint { Color = new SKColor(220, 40, 40), Style = SKPaintStyle.Fill, IsAntialias = true };
-
-        ForEachSignPosition(graph, stopLines,
-            n => signals.IsTrafficLight(n),
-            null,
-            (c, edgeIdx, sx, sy) =>
-            {
-                var state = signals.GetSignal(edgeIdx);
-                var paint = state switch
-                {
-                    SignalState.Green => greenPaint,
-                    SignalState.Yellow => yellowPaint,
-                    _ => redPaint,
-                };
-                c.DrawCircle(sx, sy, radius, paint);
-            },
-            canvas, cullRect);
-    }
-
-    /// <summary>
-    /// Draws red squares for stop signs at each incoming edge's stop line, offset to the
-    /// right of the travel direction.
-    /// </summary>
-    public void DrawStopSigns(SKCanvas canvas, RoadGraph graph, StopSignSystem stopSigns, StopLineCache stopLines, float zoom, SKRect cullRect = default)
-    {
-        if (zoom < 0.3f) return; // too far out to read — skip (declutter + draw cost at scale); matches speed-limit signs
-        float size = Math.Max(1.5f, 2.5f / zoom);
-
-        using var stopPaint = new SKPaint { Color = new SKColor(200, 30, 30), Style = SKPaintStyle.Fill, IsAntialias = true };
-
-        ForEachSignPosition(graph, stopLines,
-            n => stopSigns.IsStopSign(n),
-            edgeIdx => !stopSigns.IsEdgeExempt(edgeIdx),
-            (c, _, sx, sy) => c.DrawRect(sx - size, sy - size, size * 2, size * 2, stopPaint),
-            canvas, cullRect);
-    }
-
-    /// <summary>
-    /// Draws orange inverted triangles for yield signs at each incoming edge's stop line,
-    /// offset to the right of the travel direction.
-    /// </summary>
-    public void DrawYieldSigns(SKCanvas canvas, RoadGraph graph, YieldSignSystem yieldSigns, StopLineCache stopLines, float zoom, SKRect cullRect = default)
-    {
-        if (zoom < 0.3f) return; // too far out to read — skip (declutter + draw cost at scale); matches speed-limit signs
-        float size = Math.Max(1.5f, 2.5f / zoom);
-
-        using var yieldPaint = new SKPaint { Color = new SKColor(230, 160, 0), Style = SKPaintStyle.Fill, IsAntialias = true };
-
-        ForEachSignPosition(graph, stopLines,
-            n => yieldSigns.IsYield(n),
-            edgeIdx => !yieldSigns.IsEdgeExempt(edgeIdx),
-            (c, _, sx, sy) =>
-            {
-                using var path = new SKPath();
-                path.MoveTo(sx - size, sy - size);
-                path.LineTo(sx + size, sy - size);
-                path.LineTo(sx, sy + size);
-                path.Close();
-                c.DrawPath(path, yieldPaint);
-            },
-            canvas, cullRect);
-    }
-
-    /// <summary>
-    /// Draws speed limit signs near the start of each road edge, offset to the right of
-    /// the travel direction. Shows a white circle with red border and speed in mph.
-    /// Only drawn at medium/close zoom to avoid visual clutter.
-    /// </summary>
-    public void DrawSpeedLimitSigns(SKCanvas canvas, RoadGraph graph, float zoom, SKRect cullRect = default)
-    {
-        if (zoom < 0.3f) return; // too far out — skip to avoid clutter
-
-        float radius = Math.Max(2.5f, 4f / zoom);
-        float fontSize = Math.Max(2f, 3f / zoom);
-
-        using var bgPaint = new SKPaint
-        {
-            Color = SKColors.White,
-            Style = SKPaintStyle.Fill,
-            IsAntialias = true
-        };
-        using var borderPaint = new SKPaint
-        {
-            Color = new SKColor(200, 30, 30),
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = Math.Max(0.3f, 0.5f / zoom),
-            IsAntialias = true
-        };
-        using var textPaint = new SKPaint
-        {
-            Color = SKColors.Black,
-            IsAntialias = true
-        };
-        using var font = new SKFont
-        {
-            Size = fontSize
-        };
-
-        for (int i = 0; i < graph.Edges.Count; i++)
-        {
-            var edge = graph.Edges[i];
-            if (edge.FromNode < 0) continue;
-            // For paired edges, only draw on the lower-index edge
-            int reverse = graph.FindReverseEdge(i);
-            if (reverse >= 0 && reverse < i) continue;
-
-            var fromPos = graph.Nodes[edge.FromNode].Position;
-            if (!InView(fromPos.X, fromPos.Y, cullRect, 60f)) continue;
-
-            // Position at 20% of the edge length (past intersection, near start)
-            float signT = 0.2f;
-            var pos = graph.EvaluateBezier(i, signT);
-            var tangent = graph.EvaluateBezierTangent(i, signT);
-            float len = tangent.Length();
-            if (len < 0.001f) continue;
-
-            float rx = -tangent.Y / len;
-            float ry = tangent.X / len;
-            float offset = GeometryUtil.RoadHalfWidth(graph, i) + 3f;
-            float sx = pos.X + rx * offset;
-            float sy = pos.Y + ry * offset;
-
-            // Draw white circle with red border
-            canvas.DrawCircle(sx, sy, radius, bgPaint);
-            canvas.DrawCircle(sx, sy, radius, borderPaint);
-
-            // Draw speed text (mph, rounded to nearest 5)
-            float mph = edge.SpeedLimit * 2.23694f;
-            int roundedMph = ((int)MathF.Round(mph / 5f)) * 5;
-            string text = roundedMph.ToString();
-
-            using var textBlob = SKTextBlob.Create(text, font);
-            if (textBlob != null)
-            {
-                float tw = font.MeasureText(text);
-                canvas.DrawText(text, sx - tw * 0.5f, sy + fontSize * 0.35f, font, textPaint);
-            }
         }
     }
 
@@ -800,23 +872,26 @@ public class RoadRenderer
 
     /// <summary>
     /// Fills intersection interiors with asphalt and draws curved boundary lines connecting
-    /// adjacent roads at each intersection node.
+    /// adjacent roads at each intersection node. All per-node scratch state (approach list,
+    /// pair set, fill/corner paths, corner paint) lives in reusable fields — this runs for
+    /// every visible node every frame, so it must not allocate.
     /// </summary>
     private void DrawIntersectionFills(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom, SKRect cullRect = default)
     {
-        float curveLineWidth = Math.Max(0.3f, 0.5f / zoom);
+        _cornerPaint.StrokeWidth = Math.Max(0.3f, 0.5f / zoom);
 
         for (int n = 0; n < graph.Nodes.Count; n++)
         {
             var node = graph.Nodes[n];
             if (float.IsNaN(node.Position.X)) continue;
-            // Cull before the expensive CollectApproaches (allocates + sorts) for off-screen nodes.
+            // Cull before the expensive CollectApproaches (Bezier evals + sort) for off-screen nodes.
             if (!InView(node.Position.X, node.Position.Y, cullRect, 60f)) continue;
 
-            var approaches = CollectApproaches(graph, stopLines, n);
+            CollectApproaches(graph, stopLines, n);
+            var approaches = _approaches;
             if (approaches.Count < 2) continue;
 
-            approaches.Sort((a, b) => a.Angle.CompareTo(b.Angle));
+            approaches.Sort(static (a, b) => a.Angle.CompareTo(b.Angle));
 
             int count = approaches.Count;
 
@@ -827,45 +902,40 @@ public class RoadRenderer
 
             // Build intersection fill polygon: for each road, a straight segment along the
             // stop line (left→right boundary), then a curve to the next road's left boundary.
-            using var fillPath = new SKPath();
-            fillPath.MoveTo(approaches[0].LeftBound.X, approaches[0].LeftBound.Y);
+            _fillPath.Reset();
+            _fillPath.MoveTo(approaches[0].LeftBound.X, approaches[0].LeftBound.Y);
 
             for (int i = 0; i < count; i++)
             {
                 var curr = approaches[i];
                 var next = approaches[(i + 1) % count];
 
-                fillPath.LineTo(curr.RightBound.X, curr.RightBound.Y);
-                AddCornerCurve(fillPath, curr.RightBound, curr.RightAwayDir,
+                _fillPath.LineTo(curr.RightBound.X, curr.RightBound.Y);
+                AddCornerCurve(_fillPath, curr.RightBound, curr.RightAwayDir,
                     next.LeftBound, next.LeftAwayDir);
             }
 
-            fillPath.Close();
-            canvas.DrawPath(fillPath, _intersectionFillPaint);
+            _fillPath.Close();
+            canvas.DrawPath(_fillPath, _intersectionFillPaint);
 
-            // White corner boundary lines — unpaved (dirt) intersections carry no paint, matching
+            // Corner boundary lines — unpaved (dirt) intersections carry no paint, matching
             // the per-edge rule, so skip them when the intersection's appearance is dirt.
+            // The color matches the per-type edge treatment: white lines at highway
+            // intersections, dark curbs at residential/arterial ones.
             if (!RoadTypeVisuals.HasPaintedLines(nodeType)) continue;
 
-            using var curvePaint = new SKPaint
-            {
-                Color = _edgeLinePaint.Color,
-                StrokeWidth = curveLineWidth,
-                Style = SKPaintStyle.Stroke,
-                StrokeCap = SKStrokeCap.Butt,
-                IsAntialias = true
-            };
+            _cornerPaint.Color = nodeType == RoadType.Highway ? _edgeLinePaint.Color : _curbPaint.Color;
 
             for (int i = 0; i < count; i++)
             {
                 var curr = approaches[i];
                 var next = approaches[(i + 1) % count];
 
-                using var curvePath = new SKPath();
-                curvePath.MoveTo(curr.RightBound.X, curr.RightBound.Y);
-                AddCornerCurve(curvePath, curr.RightBound, curr.RightAwayDir,
+                _cornerPath.Reset();
+                _cornerPath.MoveTo(curr.RightBound.X, curr.RightBound.Y);
+                AddCornerCurve(_cornerPath, curr.RightBound, curr.RightAwayDir,
                     next.LeftBound, next.LeftAwayDir);
-                canvas.DrawPath(curvePath, curvePaint);
+                canvas.DrawPath(_cornerPath, _cornerPaint);
             }
         }
     }
@@ -897,13 +967,16 @@ public class RoadRenderer
     }
 
     /// <summary>
-    /// Collects boundary endpoint info for each unique road meeting at a node.
-    /// Deduplicates forward/reverse pairs so each physical road appears once.
+    /// Collects boundary endpoint info for each unique road meeting at a node into the
+    /// reusable <see cref="_approaches"/> list (cleared first; result valid until the next
+    /// call). Deduplicates forward/reverse pairs so each physical road appears once.
     /// </summary>
-    private static List<ApproachInfo> CollectApproaches(RoadGraph graph, StopLineCache stopLines, int nodeIndex)
+    private void CollectApproaches(RoadGraph graph, StopLineCache stopLines, int nodeIndex)
     {
-        var approaches = new List<ApproachInfo>();
-        var seen = new HashSet<int>(); // track processed road pairs by min edge index
+        var approaches = _approaches;
+        approaches.Clear();
+        var seen = _seenPairs; // track processed road pairs by min edge index
+        seen.Clear();
 
         // Incoming edges: ToNode == nodeIndex
         foreach (int edgeIdx in graph.GetIncomingEdges(nodeIndex))
@@ -938,8 +1011,6 @@ public class RoadRenderer
             if (ComputeApproach(graph, edgeIdx, leftT, rightT, stopT, atToNode: false) is { } info)
                 approaches.Add(info);
         }
-
-        return approaches;
     }
 
     /// <summary>
@@ -956,7 +1027,10 @@ public class RoadRenderer
         float len = tangent.Length();
         if (len < 0.001f) return null;
 
-        float halfWidth = GeometryUtil.RoadHalfWidth(graph, edgeIdx);
+        // Boundary endpoints sit at the DRAWN asphalt edge (geometric half-width × visual
+        // multiplier) so fills and corner curves meet the surface strokes and curb lines.
+        float halfWidth = GeometryUtil.RoadHalfWidth(graph, edgeIdx)
+            * RoadTypeVisuals.GetWidthMultiplier(graph.Edges[edgeIdx].RoadType);
 
         // Compute left boundary point at its own trim-t (negative offset in tangent frame)
         var posL = graph.EvaluateBezier(edgeIdx, leftTrimT);
@@ -1065,14 +1139,15 @@ public class RoadRenderer
         (byte)Math.Clamp((int)(baseValue * ambient), 0, 255);
 
     /// <summary>
-    /// Pre-computed SkiaSharp paths for rendering a single road edge: center line, left/right
-    /// boundaries, lane dividers, and total road width.
+    /// Pre-computed SkiaSharp paths for rendering a single road edge: center path, trimmed
+    /// center line (highway median), left/right boundaries, lane dividers, per-road-type
+    /// marking paths, and total road width.
     /// </summary>
     private sealed class CachedEdgePaths : IDisposable
     {
-        /// <summary>Path along the center of the road, full length (used for surface rendering).</summary>
+        /// <summary>Path along the center of the road, full length (used for surface + shoulder rendering).</summary>
         public readonly SKPath CenterPath;
-        /// <summary>Center line path trimmed at intersection boundaries (used for yellow dashed marking).</summary>
+        /// <summary>Trimmed center path — non-empty only for two-way highways, stroked as the median band.</summary>
         public readonly SKPath CenterLinePath;
         /// <summary>Path along the left boundary of the road, trimmed at intersections.</summary>
         public readonly SKPath LeftEdgePath;
@@ -1080,21 +1155,28 @@ public class RoadRenderer
         public readonly SKPath RightEdgePath;
         /// <summary>Paths for lane divider markings, trimmed at intersections (empty for single-lane roads).</summary>
         public readonly List<SKPath> LanePaths;
+        /// <summary>
+        /// Per-road-type marking paths, trimmed at intersections. Dirt: tire-track pairs per
+        /// lane (both directions on two-way roads); arterial: double-yellow pair; highway:
+        /// yellow lines flanking the median. Empty for other type/topology combinations.
+        /// </summary>
+        public readonly List<SKPath> TypeMarkingPaths;
         /// <summary>Total road width in meters (2 × <see cref="GeometryUtil.RoadHalfWidth"/>).</summary>
         public readonly float TotalWidth;
-        /// <summary>True if a yellow center line should be drawn (two-way roads only).</summary>
+        /// <summary>True if the road has a center divider to mark (two-way roads only).</summary>
         public readonly bool HasCenterLine;
         /// <summary>True if the outer edge lines should be dashed (single-lane two-way roads).</summary>
         public readonly bool DashedEdges;
 
         public CachedEdgePaths(SKPath center, SKPath centerLine, SKPath left, SKPath right, List<SKPath> lanes,
-            float totalWidth, bool hasCenterLine, bool dashedEdges)
+            List<SKPath> typeMarkings, float totalWidth, bool hasCenterLine, bool dashedEdges)
         {
             CenterPath = center;
             CenterLinePath = centerLine;
             LeftEdgePath = left;
             RightEdgePath = right;
             LanePaths = lanes;
+            TypeMarkingPaths = typeMarkings;
             TotalWidth = totalWidth;
             HasCenterLine = hasCenterLine;
             DashedEdges = dashedEdges;
@@ -1107,6 +1189,7 @@ public class RoadRenderer
             LeftEdgePath.Dispose();
             RightEdgePath.Dispose();
             foreach (var p in LanePaths) p.Dispose();
+            foreach (var p in TypeMarkingPaths) p.Dispose();
         }
     }
 }

@@ -8,11 +8,14 @@ namespace Roads.App.Rendering;
 /// <summary>
 /// Screen-space overview panel in the bottom-right corner showing the whole road network,
 /// the current camera viewport as a rectangle, and supporting click/drag to jump the camera.
-/// The network geometry is recorded once into an <see cref="SKPicture"/> (in panel-local
-/// pixels) and re-recorded only when the graph changes, so per-frame cost is one picture
-/// draw plus one rectangle. The world→panel transform (<see cref="_scale"/>, <see cref="_offsetX"/>,
-/// <see cref="_offsetY"/>, <see cref="_worldMin"/>) and the last panel rect are kept so input
-/// hit-testing and screen→world mapping stay consistent with what was drawn.
+/// The panel background is a dark desaturated terrain green and road segments are colored
+/// (and Highway/Arterial slightly thickened) by <see cref="RoadType"/>, drawn in ascending
+/// visual importance so highways sit on top. The network geometry is recorded once into an
+/// <see cref="SKPicture"/> (in panel-local pixels) and re-recorded only when the graph
+/// changes, so per-frame cost is one picture draw plus one rectangle. The world→panel
+/// transform (<see cref="_scale"/>, <see cref="_offsetX"/>, <see cref="_offsetY"/>,
+/// <see cref="_worldMin"/>) and the last panel rect are kept so input hit-testing and
+/// screen→world mapping stay consistent with what was drawn.
 /// </summary>
 public class MinimapRenderer
 {
@@ -29,10 +32,15 @@ public class MinimapRenderer
     /// <summary>Whether the minimap is shown and accepts input.</summary>
     public bool Visible { get; set; } = true;
 
-    private readonly SKPaint _bgPaint = new() { Color = new SKColor(20, 22, 28, 200), Style = SKPaintStyle.Fill, IsAntialias = true };
+    private readonly SKPaint _bgPaint = new() { Color = new SKColor(30, 38, 25, 200), Style = SKPaintStyle.Fill, IsAntialias = true };
     private readonly SKPaint _borderPaint = new() { Color = new SKColor(80, 82, 88), Style = SKPaintStyle.Stroke, StrokeWidth = 1f, IsAntialias = true };
-    private readonly SKPaint _roadPaint = new() { Color = new SKColor(150, 155, 165), Style = SKPaintStyle.Stroke, StrokeWidth = 1.1f, IsAntialias = true, StrokeCap = SKStrokeCap.Round };
+    /// <summary>Reusable road stroke; color and width are set per road type while recording.</summary>
+    private readonly SKPaint _roadPaint = new() { Style = SKPaintStyle.Stroke, IsAntialias = true, StrokeCap = SKStrokeCap.Round };
     private readonly SKPaint _viewportPaint = new() { Color = new SKColor(120, 200, 255, 230), Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f, IsAntialias = true };
+
+    /// <summary>Road-type record order, ascending visual importance so highways draw on top.</summary>
+    private static readonly RoadType[] DrawOrder =
+        { RoadType.Dirt, RoadType.Residential, RoadType.Arterial, RoadType.Highway };
 
     // Cached network geometry (panel-local pixels) and the transform it was built with.
     private SKPicture? _networkPicture;
@@ -156,13 +164,19 @@ public class MinimapRenderer
         RecordNetwork(graph);
     }
 
-    /// <summary>Records the road network as straight node-to-node segments in panel-local pixels.</summary>
+    /// <summary>
+    /// Records the road network as straight node-to-node segments in panel-local pixels,
+    /// bucketed into one path per <see cref="RoadType"/> and stroked in <see cref="DrawOrder"/>
+    /// with per-type color and width (Highway/Arterial slightly thicker).
+    /// </summary>
     private void RecordNetwork(RoadGraph graph)
     {
         using var recorder = new SKPictureRecorder();
         var rec = recorder.BeginRecording(new SKRect(0, 0, BoxSize, BoxSize));
 
-        using var path = new SKPath();
+        var paths = new SKPath[4];
+        for (int t = 0; t < paths.Length; t++) paths[t] = new SKPath();
+
         var nodes = graph.Nodes;
         var edges = graph.Edges;
         for (int i = 0; i < edges.Count; i++)
@@ -171,14 +185,45 @@ public class MinimapRenderer
             if (e.FromNode < 0) continue; // defunct
             var a = nodes[e.FromNode].Position;
             var b = nodes[e.ToNode].Position;
+            if (float.IsNaN(a.X) || float.IsNaN(b.X)) continue;
+            int t = (int)e.RoadType;
+            if (t < 0 || t >= paths.Length) t = (int)RoadType.Residential;
             var pa = WorldToPanel(a.X, a.Y);
             var pb = WorldToPanel(b.X, b.Y);
-            path.MoveTo(pa);
-            path.LineTo(pb);
+            paths[t].MoveTo(pa);
+            paths[t].LineTo(pb);
         }
-        rec.DrawPath(path, _roadPaint);
+
+        foreach (var type in DrawOrder)
+        {
+            var path = paths[(int)type];
+            if (!path.IsEmpty)
+            {
+                _roadPaint.Color = GetRoadColor(type);
+                _roadPaint.StrokeWidth = GetRoadWidth(type);
+                rec.DrawPath(path, _roadPaint);
+            }
+            path.Dispose();
+        }
 
         _networkPicture?.Dispose();
         _networkPicture = recorder.EndRecording();
     }
+
+    /// <summary>Minimap stroke color for a road type — muted grays by importance, brown for dirt.</summary>
+    private static SKColor GetRoadColor(RoadType type) => type switch
+    {
+        RoadType.Highway  => new SKColor(170, 175, 185),
+        RoadType.Arterial => new SKColor(148, 150, 156),
+        RoadType.Dirt     => new SKColor(122, 100, 68),
+        _                 => new SKColor(118, 120, 124),
+    };
+
+    /// <summary>Minimap stroke width (panel pixels) — Highway/Arterial slightly thicker.</summary>
+    private static float GetRoadWidth(RoadType type) => type switch
+    {
+        RoadType.Highway  => 1.7f,
+        RoadType.Arterial => 1.4f,
+        _                 => 1.1f,
+    };
 }

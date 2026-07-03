@@ -8,9 +8,11 @@ using Roads.App.World;
 namespace Roads.App.Rendering;
 
 /// <summary>
-/// Composes all renderers to draw the complete scene: background grid, roads,
-/// vehicles, markers, editor overlays, and screen-space UI. All state is read-only
-/// within the render pass.
+/// Composes all renderers to draw the complete scene: terrain background, faint editor
+/// grid, roads, buildings, props, vehicles, traffic-control signs, markers, editor
+/// overlays, and screen-space UI. All state is read-only within the render pass.
+/// The terrain/building/prop/sign renderers are owned privately here (like the heat
+/// map) since nothing outside the scene needs them.
 /// </summary>
 public class SceneRenderer
 {
@@ -29,6 +31,36 @@ public class SceneRenderer
     /// before the road draw pass and forwarded to the road renderer.
     /// </summary>
     private readonly CongestionHeatMap _heatMap = new();
+
+    /// <summary>Procedural terrain background (grass mottling); replaces the old flat clear color.</summary>
+    private readonly TerrainRenderer _terrain = new();
+
+    /// <summary>Deterministic building placement derived from destination nodes; rebuilt on graph version change.</summary>
+    private readonly BuildingLayer _buildingLayer = new();
+
+    /// <summary>Draws the buildings computed by <see cref="_buildingLayer"/> (and far-zoom POI dots).</summary>
+    private readonly BuildingRenderer _buildingRenderer = new();
+
+    /// <summary>Street lights, trees, and bushes. Rebuilt after the building layer so props avoid footprints.</summary>
+    private readonly PropRenderer _propRenderer = new();
+
+    /// <summary>Realistic traffic signals, stop/yield signs, and change-only speed-limit signs.</summary>
+    private readonly SignRenderer _signRenderer = new();
+
+    /// <summary>Building world AABBs handed to the prop renderer; refreshed when scenery rebuilds.</summary>
+    private readonly List<SKRect> _buildingBounds = new();
+    private int _buildingBoundsVersion = -1;
+
+    /// <summary>
+    /// Frames the graph version must hold still before scenery (buildings, props, speed-sign
+    /// placements) rebuilds. Node/control-point drags bump the version every mouse-move frame;
+    /// without this gate the full placement pass (~tens of ms at city scale) would re-run per
+    /// frame for the whole drag. Stale scenery draws safely in the interim — positions are
+    /// baked and node indices are stable. Roads/markings still rebuild live for drag feedback.
+    /// </summary>
+    private const int SceneryRebuildDelayFrames = 8;
+    private int _lastSeenGraphVersion = -1;
+    private int _graphStableFrames;
 
     /// <summary>Reusable buffer of visible edge indices, refilled each frame from the edge grid.</summary>
     private readonly List<int> _visibleEdges = new();
@@ -77,18 +109,19 @@ public class SceneRenderer
         int spawnNodeCount, Point currentMousePos)
     {
         float darkness = simLoop.Clock.Darkness;
-        var (bgColor, gridColor) = GetEnvironmentColors(darkness);
-        canvas.Clear(bgColor);
+        canvas.Clear(TerrainRenderer.GetBaseColor(darkness));
 
         var transform = camera.GetTransformMatrix(info.Width, info.Height);
         canvas.SetMatrix(transform);
 
-        // Draw grid
-        DrawGrid(canvas, camera, info, gridColor);
-
         // Compute the visible world-space rectangle once; forwarded to renderers for
         // frustum culling so they can skip off-screen geometry cheaply.
         var viewRect = camera.GetVisibleWorldRect(info.Width, info.Height);
+
+        // Terrain detail (grass mottling) over the base clear color, then a faint
+        // 100 m reference grid kept as an editor alignment aid.
+        _terrain.Draw(canvas, viewRect, camera.Zoom, darkness);
+        DrawGrid(canvas, camera, info, GetGridColor(darkness));
 
         // Update congestion heat-map before the road draw pass so values are current
         // (cheap no-op when the overlay is disabled).
@@ -98,12 +131,33 @@ public class SceneRenderer
         // passes iterate only on-screen edges instead of the whole network (big win when zoomed in).
         simLoop.EdgeGrid.QueryVisible(graph.Edges.Count, viewRect.Left, viewRect.Top, viewRect.Right, viewRect.Bottom, _visibleEdges);
 
-        // Draw roads (heat-map forwarded so the renderer can tint surfaces)
-        _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness, _heatMap, viewRect, _visibleEdges, stopSigns);
-        _roadRenderer.DrawSignals(canvas, graph, trafficSignals, stopLineCache, camera.Zoom, viewRect);
-        _roadRenderer.DrawStopSigns(canvas, graph, stopSigns, stopLineCache, camera.Zoom, viewRect);
-        _roadRenderer.DrawYieldSigns(canvas, graph, yieldSigns, stopLineCache, camera.Zoom, viewRect);
-        _roadRenderer.DrawSpeedLimitSigns(canvas, graph, camera.Zoom, viewRect);
+        // Draw roads (heat-map forwarded so the renderer can tint surfaces; traffic
+        // signals forwarded so light-controlled approaches get crosswalks).
+        _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness, _heatMap, viewRect, _visibleEdges, stopSigns, trafficSignals);
+
+        // Buildings and props sit under vehicles. Placement rebuilds are deferred until the
+        // graph version has held still for SceneryRebuildDelayFrames (drags bump it every
+        // frame); the very first build runs immediately. Rebuild order matters: the building
+        // layer first, then bounds collection, then props so they avoid footprints.
+        if (graph.Version != _lastSeenGraphVersion)
+        {
+            _lastSeenGraphVersion = graph.Version;
+            _graphStableFrames = 0;
+        }
+        else if (_graphStableFrames <= SceneryRebuildDelayFrames)
+        {
+            _graphStableFrames++;
+        }
+        bool scenerySettled = _graphStableFrames >= SceneryRebuildDelayFrames || _buildingBoundsVersion < 0;
+        if (scenerySettled && graph.Version != _buildingBoundsVersion)
+        {
+            _buildingLayer.RebuildIfNeeded(graph, simLoop.EdgeGrid);
+            _buildingLayer.CollectBounds(_buildingBounds);
+            _buildingBoundsVersion = graph.Version;
+            _propRenderer.Rebuild(graph, simLoop.EdgeGrid, _buildingBounds, graph.Version);
+        }
+        _buildingRenderer.Draw(canvas, _buildingLayer, graph, viewRect, camera.Zoom, darkness);
+        _propRenderer.Draw(canvas, viewRect, camera.Zoom, darkness);
 
         // Draw hover and selection highlights
         DrawEdgeHoverHighlight(canvas, graph, editorState);
@@ -126,9 +180,14 @@ public class SceneRenderer
         if (editorState.SelectedVehicle >= 0)
             _vehicleRenderer.DrawSelectionOverlay(canvas, vehicles, editorState.SelectedVehicle, graph, stopLineCache, intersectionArcs);
 
-        // Draw spawn and destination node markers (entry/exit nodes render via their POI dot)
+        // Traffic-control furniture draws above vehicles so signal state stays readable.
+        // Speed-sign placement (which reads the StopLineCache) rebuilds only once the graph
+        // has settled, so it never caches positions derived from a not-yet-rebuilt cache.
+        _signRenderer.Draw(canvas, graph, stopLineCache, trafficSignals, stopSigns, yieldSigns,
+            camera.Zoom, viewRect, darkness, allowRebuild: scenerySettled);
+
+        // Spawn markers (destinations render as buildings/dots via BuildingRenderer)
         _spawnPointRenderer.DrawForFlag(canvas, graph, NodeFlags.Spawn, camera.Zoom);
-        MarkerRenderer.DrawPOIMarkers(canvas, graph, camera.Zoom);
 
         // Destination placement ghost (translucent preview of dest node + connector + foot node)
         DrawDestinationPlacementGhost(canvas, editorState, camera);
@@ -460,6 +519,46 @@ public class SceneRenderer
         canvas.DrawCircle(dest.X, dest.Y, radius, destFill);
         canvas.DrawCircle(dest.X, dest.Y, radius, destStroke);
         canvas.DrawCircle(dest.X, dest.Y, innerRadius, destInner);
+
+        // --- Building footprint preview (mirrors BuildingLayer's base placement: default
+        // size for the POI type, front facing the foot node, 3 m base setback). The real
+        // placement may nudge/shrink to avoid collisions; the ghost shows intent, not the
+        // final result. EntryExit gets no footprint (it renders as a gateway, not a building).
+        if (editorState.SelectedPOIType != POIType.EntryExit)
+        {
+            var (halfW, halfD) = BuildingLayer.GetDefaultFootprint(editorState.SelectedPOIType);
+            var facing = new Vector2(foot.X - dest.X, foot.Y - dest.Y);
+            float facingLen = facing.Length();
+            if (halfW > 0f && halfD > 0f && facingLen > 0.001f)
+            {
+                facing /= facingLen;
+                float cx = dest.X - facing.X * (3f + halfD);
+                float cy = dest.Y - facing.Y * (3f + halfD);
+
+                using var fpFill = new SKPaint
+                {
+                    Color = new SKColor(c.Red, c.Green, c.Blue, 55),
+                    Style = SKPaintStyle.Fill,
+                    IsAntialias = true,
+                };
+                using var fpStroke = new SKPaint
+                {
+                    Color = new SKColor(c.Red, c.Green, c.Blue, ghostAlpha),
+                    Style = SKPaintStyle.Stroke,
+                    StrokeWidth = Math.Max(0.4f, 1.5f / zoom),
+                    IsAntialias = true,
+                };
+
+                canvas.Save();
+                canvas.Translate(cx, cy);
+                canvas.RotateDegrees(MathF.Atan2(facing.Y, facing.X) * (180f / MathF.PI));
+                // Same local axes as BuildingRenderer: X = depth (front at +X), Y = facade width.
+                var fpRect = new SKRect(-halfD, -halfW, halfD, halfW);
+                canvas.DrawRect(fpRect, fpFill);
+                canvas.DrawRect(fpRect, fpStroke);
+                canvas.Restore();
+            }
+        }
     }
 
     private static void DrawControlPointHandles(SKCanvas canvas, RoadGraph graph,
@@ -614,29 +713,17 @@ public class SceneRenderer
         return $"Zoom: {camera.Zoom:F2}x  |  Speed: {timeInfo}  |  Edges: {graph.ActiveEdgeCount}  |  Vehicles: {vehicles.Count}{popInfo}  |  {spawnInfo}{status}{selInfo}{debugInfo}";
     }
 
-    private static (SKColor bg, SKColor grid) GetEnvironmentColors(float darkness)
+    /// <summary>
+    /// Faint editor-grid color: a lightened, translucent variant of the terrain base so the
+    /// 100 m alignment grid stays visible over grass without competing with the scenery.
+    /// </summary>
+    private static SKColor GetGridColor(float darkness)
     {
-        // Warmth peaks mid-transition (dawn/dusk center) and is zero at full day or full night
-        float warmth = (darkness > 0f && darkness < 1f)
-            ? 1f - MathF.Abs(darkness * 2f - 1f)
-            : 0f;
-
-        // Day: (55,58,52)  Night: (12,14,22)  Dawn/Dusk warm bias: +R, -B
-        float bgR = Lerp(55, 12, darkness) + warmth * 18;
-        float bgG = Lerp(58, 14, darkness) - warmth * 4;
-        float bgB = Lerp(52, 22, darkness) - warmth * 14;
-
-        // Grid: slightly lighter than background
-        float grR = Lerp(75, 25, darkness) + warmth * 14;
-        float grG = Lerp(78, 27, darkness) - warmth * 4;
-        float grB = Lerp(72, 35, darkness) - warmth * 12;
-
-        return (
-            new SKColor(ClampByte(bgR), ClampByte(bgG), ClampByte(bgB)),
-            new SKColor(ClampByte(grR), ClampByte(grG), ClampByte(grB))
-        );
+        var b = TerrainRenderer.GetBaseColor(darkness);
+        return new SKColor(
+            (byte)Math.Min(b.Red + 20, 255),
+            (byte)Math.Min(b.Green + 20, 255),
+            (byte)Math.Min(b.Blue + 20, 255),
+            70);
     }
-
-    private static float Lerp(float a, float b, float t) => a + (b - a) * t;
-    private static byte ClampByte(float v) => (byte)Math.Clamp((int)v, 0, 255);
 }

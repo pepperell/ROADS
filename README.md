@@ -21,7 +21,10 @@ A real-time, city-scale traffic simulation built in C# with a graphical editor. 
 - **A\* pathfinding** on a directed road graph with path caching
 - **Spatial indexing** via uniform grids for fast collision queries, nearest-road lookups, and render culling
 - **Adjustable time scale** from paused (0x) to 64x speed
-- **Day/night cycle** (planned) with schedule-driven commuter behavior
+- **Day/night cycle** with schedule-driven commuter behavior, warm dawn/dusk tinting, and lit windows, street lights, and signal lenses at night
+- **Procedural scenery** — grass terrain, buildings drawn per destination type (homes, offices, shops, schools, parking), roadside trees/bushes, and street lights, all deterministically placed with no road/building overlap
+- **Visually distinct road types** — residential, arterial, highway, and dirt differ in surface, shoulders/sidewalks, lane markings, and medians, not just color
+- **Realistic traffic furniture** — signal heads with colored lenses, octagonal stop signs, yield triangles, and speed-limit signs posted only where the limit actually changes
 
 ---
 
@@ -122,13 +125,24 @@ Roads/
 │   │   └── LaneRestrictionTool.cs    # Lane restriction editing
 │   │
 │   └── Rendering/
-│       ├── SceneRenderer.cs          # Main render orchestrator
+│       ├── SceneRenderer.cs          # Main render orchestrator (layer/z-order authority)
 │       ├── SkiaCanvas.cs             # SkiaSharp surface management
-│       ├── RoadRenderer.cs           # Road/lane/marking drawing
+│       ├── TerrainRenderer.cs        # Procedural grass terrain background
+│       ├── RoadRenderer.cs           # Per-type road surfaces, markings, shoulders, crosswalks
+│       ├── RoadTypeVisuals.cs        # Per-RoadType style table (colors, widths, shoulders)
+│       ├── BuildingLayer.cs          # Deterministic building placement from destination nodes
+│       ├── BuildingRenderer.cs       # Procedural building art (roofs, lots, night windows)
+│       ├── PropRenderer.cs           # Street lights, trees, bushes (deterministic scatter)
+│       ├── SignRenderer.cs           # Signal heads, stop/yield signs, change-only speed signs
 │       ├── VehicleRenderer.cs        # Vehicle shape drawing
-│       ├── MarkerRenderer.cs         # Spawn/destination/signal markers
+│       ├── MarkerRenderer.cs         # Spawn-point markers
+│       ├── MinimapRenderer.cs        # Corner minimap (cached SKPicture)
+│       ├── CongestionHeatMap.cs      # Per-edge congestion overlay (H key)
+│       ├── RenderDetail.cs           # LOD thresholds and frustum-culling helpers
 │       ├── UIRenderer.cs             # Toolbar and overlay panels
 │       ├── SliderPanel.cs            # Runtime-tunable parameter sliders
+│       ├── StatisticsPanel.cs        # Population/traffic statistics overlay
+│       ├── PerformanceHud.cs         # FPS / sim / draw / GC readout (P key)
 │       └── VehicleInfoPanel.cs       # Selected vehicle info display
 ```
 

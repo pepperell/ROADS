@@ -73,6 +73,14 @@ What remains:
 - [SimulationLoop.cs:138](Roads.App/SimulationLoop.cs#L138): `_spawner.ScheduleModeActive` is hand-copied from `_populationManager.ScheduleModeEnabled` each tick — it must land after `Population.Update` and before `AutoSpawn`.
 - PopulationManager tracks the graph version **twice** ([POIRegistry's internal copy](Roads.App/Vehicles/PopulationManager.cs#L71) and its own [`_poiGraphVersion`](Roads.App/Vehicles/PopulationManager.cs#L88-L92)) with different reactions to a change — easy to update one and not the other.
 
+## 8. Scenery pipeline — settle-gated, ordered, and deliberately stale during edits
+
+The procedural scenery renderers (TerrainRenderer, BuildingLayer/BuildingRenderer, PropRenderer, SignRenderer's speed-sign cache) are wired in [SceneRenderer.Render](Roads.App/Rendering/SceneRenderer.cs) with three contracts that differ from the rest of the render pass:
+
+- **Settle-gate.** Building/prop/speed-sign *placement* is expensive (per-destination road sampling + OBB fitting; per-candidate multi-edge clearance queries). Node/control-point drags bump `graph.Version` every mouse-move frame, so a naive `Version`-keyed rebuild would re-run the full placement pass ~60×/sec for the whole drag. Instead SceneRenderer rebuilds scenery only after the version has held still for `SceneryRebuildDelayFrames` (the first build runs immediately). **Consequence: scenery is intentionally 1 settle-window stale during a drag** — this is safe only because placements bake world positions and node indices are stable, so a stale building/prop never dereferences a defunct edge. Roads/markings/vehicles still rebuild live for drag feedback. Terrain is exempt (purely positional, no graph dependency).
+- **Build order within a settled frame.** `BuildingLayer.RebuildIfNeeded` → `CollectBounds` → `PropRenderer.Rebuild(bounds)`: props reject candidates inside building AABBs, so the building layer must rebuild and publish its bounds first. PropRenderer's early-out key is `(graphVersion, buildingBounds.Count)`; the settle-gate drives both from the same settled version so the count-based key never goes stale mid-drag.
+- **Speed-sign cache vs. StopLineCache.** `SignRenderer` places speed-limit signs using `StopLineCache` trims, but that cache is rebuilt by `SimulationLoop.Tick`, not the render pass. Between an edit and the next tick the render pass can see a bumped `graph.Version` with a not-yet-rebuilt StopLineCache. SceneRenderer passes `allowRebuild: scenerySettled` so the speed-sign placement cache is only burned once the graph — and therefore its tick-driven caches — have settled, preventing a sign from being anchored at a stale trim after an edge split renumbers edges.
+
 ---
 
 ## Common thread
