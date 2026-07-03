@@ -1294,6 +1294,7 @@ public class MainForm : Form
         _editorState.GhostEdge = -1;
         _editorState.NodeGhostPos = null;
         _editorState.RoadCrossingPreviews.Clear();
+        _editorState.RoadAnchorGhostPos = null;
 
         // A captured UI drag (minimap scrub, slider thumb) owns every move until release,
         // even with the cursor far outside the panel.
@@ -1439,10 +1440,16 @@ public class MainForm : Form
                     _editorState.HoveredNode = -1;
                     _editorState.HoveredEdge = -1;
 
+                    // Anchor ghost, shown at all times: where a click would land — the
+                    // chain start before the first click, the segment end while drawing.
+                    var anchorGhost = RoadTool.ComputeAnchorGhost(worldVec, _roadGraph, _edgeSpatialGrid);
+                    _editorState.RoadAnchorGhostPos = anchorGhost;
+
                     // Ghost the intersection nodes the in-progress segment will create
                     // where the preview line crosses existing roads (the commit runs the
-                    // same crossing detection on the real edge). Cleared at the top of
-                    // this handler, so the list is stale-free on every path.
+                    // same crossing detection on the real edge). The segment ends at the
+                    // SNAPPED anchor, matching the edge the commit creates. Cleared at
+                    // the top of this handler, so the list is stale-free on every path.
                     if (_editorState.IsDrawingRoad)
                     {
                         Vector2 startPos;
@@ -1459,7 +1466,7 @@ public class MainForm : Form
                         {
                             startPos = _editorState.RoadStartAnchorPos!.Value;
                         }
-                        _roadGraph.FindSegmentCrossings(startPos, worldVec, ignoreNode,
+                        _roadGraph.FindSegmentCrossings(startPos, anchorGhost, ignoreNode,
                             _editorState.RoadStartEdge, _editorState.RoadCrossingPreviews);
                     }
                     break;

@@ -186,9 +186,8 @@ public class SceneRenderer
         // Draw control point handles in Select mode
         DrawControlPointHandles(canvas, graph, editorState, camera);
 
-        // Draw road tool preview and snap indicator
+        // Draw road tool preview (anchor ghost, dashed segment line, crossing ghosts)
         DrawRoadPreview(canvas, graph, editorState, camera, currentMousePos, info);
-        DrawSnapIndicator(canvas, graph, editorState, camera, currentMousePos, info);
 
         // Reset transform, then draw the entire screen-space UI as one retained-mode pass
         // (status bar, menu bar, POI submenu, legend, sliders, bottom-left stack, minimap;
@@ -652,16 +651,23 @@ public class SceneRenderer
     }
 
     /// <summary>
-    /// Draws the road tool's in-progress preview: a dashed line from the chain's start
-    /// anchor to the cursor, a ghost node when the start is still a PENDING anchor
-    /// (first click landed on empty space or mid-road; nothing commits until the second
-    /// click, so the anchor renders as a ghost rather than a real node), and a ghost node
-    /// at every crossing where the segment will split an existing road into an intersection.
+    /// Draws the road tool's preview. At ALL times a ghost node marks the anchor a click
+    /// would use (the snapped existing node, the clamped on-road split point, or the raw
+    /// cursor in empty space) — the chain start before the first click, the segment end
+    /// while drawing (this replaced the old snap-indicator ring). While drawing it adds a
+    /// dashed line from the start anchor to the snapped end anchor, a ghost node when the
+    /// start is still a PENDING anchor (nothing commits until the second click), and a
+    /// ghost node at every crossing where the segment will split an existing road.
     /// </summary>
     private static void DrawRoadPreview(SKCanvas canvas, RoadGraph graph, EditorState editorState,
         Camera camera, Point currentMousePos, SKImageInfo info)
     {
-        if (editorState.ActiveTool != EditorTool.Road || !editorState.IsDrawingRoad) return;
+        if (editorState.ActiveTool != EditorTool.Road) return;
+
+        if (editorState.RoadAnchorGhostPos is { } anchorGhost)
+            DrawGhostNode(canvas, anchorGhost, camera);
+
+        if (!editorState.IsDrawingRoad) return;
 
         Vector2 startPos;
         if (editorState.RoadStartNode is { } startNode)
@@ -675,7 +681,18 @@ public class SceneRenderer
             DrawGhostNode(canvas, startPos, camera);
         }
 
-        var mouseWorld = camera.ScreenToWorld(currentMousePos.X, currentMousePos.Y, info.Width, info.Height);
+        // The preview line ends at the SNAPPED anchor (the edge the commit will create);
+        // raw cursor as fallback when no ghost has been computed yet this frame.
+        float endX, endY;
+        if (editorState.RoadAnchorGhostPos is { } end)
+        {
+            endX = end.X; endY = end.Y;
+        }
+        else
+        {
+            var mouseWorld = camera.ScreenToWorld(currentMousePos.X, currentMousePos.Y, info.Width, info.Height);
+            endX = mouseWorld.X; endY = mouseWorld.Y;
+        }
 
         using var previewPaint = new SKPaint
         {
@@ -685,31 +702,11 @@ public class SceneRenderer
             IsAntialias = true,
             PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0),
         };
-        canvas.DrawLine(startPos.X, startPos.Y, mouseWorld.X, mouseWorld.Y, previewPaint);
+        canvas.DrawLine(startPos.X, startPos.Y, endX, endY, previewPaint);
 
         // Intersection nodes the commit will create where the segment crosses roads.
         foreach (var crossing in editorState.RoadCrossingPreviews)
             DrawGhostNode(canvas, crossing, camera);
-    }
-
-    private static void DrawSnapIndicator(SKCanvas canvas, RoadGraph graph, EditorState editorState,
-        Camera camera, Point currentMousePos, SKImageInfo info)
-    {
-        if (editorState.ActiveTool != EditorTool.Road) return;
-
-        var mouseWorld = camera.ScreenToWorld(currentMousePos.X, currentMousePos.Y, info.Width, info.Height);
-        int nearNode = graph.FindNearestNode(new Vector2(mouseWorld.X, mouseWorld.Y), EditorState.SnapDistance);
-        if (nearNode < 0) return;
-
-        var nodePos = graph.Nodes[nearNode].Position;
-        using var snapPaint = new SKPaint
-        {
-            Color = new SKColor(100, 180, 255, 180),
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = Math.Max(1f, 1.5f / camera.Zoom),
-            IsAntialias = true,
-        };
-        canvas.DrawCircle(nodePos.X, nodePos.Y, Math.Max(4f, 6f / camera.Zoom), snapPaint);
     }
 
     /// <summary>

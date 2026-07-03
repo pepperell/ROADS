@@ -54,19 +54,22 @@ public class RoadTool
     }
 
     /// <summary>
-    /// Records the chain's start anchor WITHOUT mutating the graph: an existing node when
-    /// within snap distance, otherwise a pending split point on the nearest road, otherwise
-    /// a pending free position — the pending kinds render as a ghost node until committed.
+    /// Where a click at <paramref name="worldPos"/> would anchor: an existing node
+    /// (<see cref="Node"/> ≥ 0), a clamped split point on the nearest road
+    /// (<see cref="Edge"/> ≥ 0), or a free position. <see cref="Position"/> is always the
+    /// anchor's world position. Shared by the first click (<see cref="BeginChain"/>), the
+    /// commit (<see cref="ResolveAnchor"/>), and the hover ghost
+    /// (<see cref="ComputeAnchorGhost"/>) so all three always agree.
     /// </summary>
-    private static void BeginChain(Vector2 worldPos, RoadGraph graph, EditorState state,
-        EdgeSpatialGrid? edgeSpatialGrid)
+    private readonly record struct Anchor(int Node, int Edge, float T, Vector2 Position);
+
+    /// <summary>Probes the anchor a click at <paramref name="worldPos"/> would use, without
+    /// mutating the graph: snap node → clamped on-road split → free position.</summary>
+    private static Anchor ProbeAnchor(Vector2 worldPos, RoadGraph graph, EdgeSpatialGrid? edgeSpatialGrid)
     {
         int existingNode = graph.FindNearestNode(worldPos, EditorState.SnapDistance);
         if (existingNode >= 0)
-        {
-            state.RoadStartNode = existingNode;
-            return;
-        }
+            return new Anchor(existingNode, -1, 0f, graph.Nodes[existingNode].Position);
 
         if (edgeSpatialGrid != null)
         {
@@ -75,14 +78,38 @@ public class RoadTool
             if (nearEdge >= 0)
             {
                 nearT = Math.Clamp(nearT, SplitMarginT(graph, nearEdge), 1f - SplitMarginT(graph, nearEdge));
-                state.RoadStartEdge = nearEdge;
-                state.RoadStartT = nearT;
-                state.RoadStartAnchorPos = graph.EvaluateBezier(nearEdge, nearT);
-                return;
+                return new Anchor(-1, nearEdge, nearT, graph.EvaluateBezier(nearEdge, nearT));
             }
         }
 
-        state.RoadStartAnchorPos = worldPos;
+        return new Anchor(-1, -1, 0f, worldPos);
+    }
+
+    /// <summary>
+    /// World position where a click would anchor — the hover ghost shown at ALL times with
+    /// the Road tool: on the snapped existing node, the clamped on-road split point, or
+    /// the raw cursor in empty space. Same probe the click uses, so ghost = result.
+    /// </summary>
+    public static Vector2 ComputeAnchorGhost(Vector2 worldPos, RoadGraph graph, EdgeSpatialGrid edgeSpatialGrid)
+        => ProbeAnchor(worldPos, graph, edgeSpatialGrid).Position;
+
+    /// <summary>
+    /// Records the chain's start anchor WITHOUT mutating the graph: an existing node when
+    /// within snap distance, otherwise a pending split point on the nearest road, otherwise
+    /// a pending free position — the pending kinds render as a ghost node until committed.
+    /// </summary>
+    private static void BeginChain(Vector2 worldPos, RoadGraph graph, EditorState state,
+        EdgeSpatialGrid? edgeSpatialGrid)
+    {
+        var anchor = ProbeAnchor(worldPos, graph, edgeSpatialGrid);
+        if (anchor.Node >= 0)
+        {
+            state.RoadStartNode = anchor.Node;
+            return;
+        }
+        state.RoadStartEdge = anchor.Edge;
+        state.RoadStartT = anchor.T;
+        state.RoadStartAnchorPos = anchor.Position;
     }
 
     /// <summary>
@@ -109,27 +136,19 @@ public class RoadTool
     /// Resolves a click position to a node, mutating as needed: snaps to an existing node,
     /// splits the nearest road within snap distance, or adds a new node. The split is
     /// clamped a fixed DISTANCE from the endpoints (not a t-fraction, which grows with
-    /// road length) so long roads can be split close to where the user clicked. Rebuilds
-    /// the edge grid first — the start anchor's split may have just changed the graph.
+    /// road length) so long roads can be split close to where the user clicked. The probe
+    /// rebuilds the edge grid first — the start anchor's split may have just changed the graph.
     /// </summary>
     private static int ResolveAnchor(Vector2 worldPos, RoadGraph graph, EdgeSpatialGrid? edgeSpatialGrid)
     {
-        int existingNode = graph.FindNearestNode(worldPos, EditorState.SnapDistance);
-        if (existingNode >= 0) return existingNode;
-
-        if (edgeSpatialGrid != null)
+        var anchor = ProbeAnchor(worldPos, graph, edgeSpatialGrid);
+        if (anchor.Node >= 0) return anchor.Node;
+        if (anchor.Edge >= 0)
         {
-            edgeSpatialGrid.RebuildIfNeeded(graph);
-            var (nearEdge, nearT) = edgeSpatialGrid.FindNearestEdgeWithT(graph, worldPos, EditorState.SnapDistance);
-            if (nearEdge >= 0)
-            {
-                nearT = Math.Clamp(nearT, SplitMarginT(graph, nearEdge), 1f - SplitMarginT(graph, nearEdge));
-                var (midNode, _, _) = graph.SplitEdge(nearEdge, nearT);
-                return midNode;
-            }
+            var (midNode, _, _) = graph.SplitEdge(anchor.Edge, anchor.T);
+            return midNode;
         }
-
-        return graph.AddNode(worldPos);
+        return graph.AddNode(anchor.Position);
     }
 
     /// <summary>

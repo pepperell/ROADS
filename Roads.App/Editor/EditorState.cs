@@ -56,6 +56,15 @@ public class EditorState
     /// mouse-move while drawing; empty otherwise.</summary>
     public List<System.Numerics.Vector2> RoadCrossingPreviews { get; } = new();
 
+    /// <summary>
+    /// Road-tool hover ghost: world position where a click would anchor (the snapped
+    /// existing node, the clamped on-road split point, or the raw cursor in empty space).
+    /// Shown at ALL times with the Road tool — before the first click it previews the
+    /// chain start; while drawing it previews the segment end. <c>null</c> when inactive
+    /// (over UI, mid-pan); recomputed each mouse-move.
+    /// </summary>
+    public System.Numerics.Vector2? RoadAnchorGhostPos { get; set; }
+
     /// <summary>Index of the currently selected edge, or -1 if none.</summary>
     public int SelectedEdge { get; set; } = -1;
 
@@ -146,6 +155,7 @@ public class EditorState
         RoadStartEdge = -1;
         RoadStartAnchorPos = null;
         RoadCrossingPreviews.Clear();
+        RoadAnchorGhostPos = null;
         SelectedEdge = -1;
         HoveredEdge = -1;
         HoveredNode = -1;
