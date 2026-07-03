@@ -204,11 +204,14 @@ A **PID steering controller** tracks the lane center Bezier curve with a speed-s
 | Tool | Action |
 |------|--------|
 | **Road** | Click to place nodes; creates connected road edges with Bezier curves |
+| **Node** | Click to add a node — splits a nearby road at the ghost-preview position, or places a free node in empty space |
 | **Delete** | Click to remove road segments or nodes |
-| **Signal** | Click intersection to cycle: none → stop sign → yield → traffic light |
+| **Signal** | Click intersection to cycle: none → stop sign → yield → traffic light; Shift+click tunes (per-edge stop/yield exemption, light phase rotation) |
 | **Destination** | Click to place vehicle destination points (incl. Entry/Exit nodes, where traffic enters and leaves the map) |
 | **Lane Restriction** | Configure lane-specific rules |
 | **Edge Snap** | Snap new connections to existing road edges |
+
+Right-click (or ESC) is the universal cancel: it aborts the in-progress operation (road chain, lane-restrict mode, selection) one step per press, and with nothing left to cancel switches back to the Select tool.
 
 Roads can be added and removed **while the simulation is running** — vehicles on affected routes automatically repath or despawn gracefully.
 

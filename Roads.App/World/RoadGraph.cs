@@ -1622,6 +1622,81 @@ public class RoadGraph
     }
 
     /// <summary>
+    /// Finds the world positions where a hypothetical STRAIGHT segment (the Road tool's
+    /// in-progress preview line) would cross existing roads — the intersection nodes the
+    /// commit will create. Mirrors <see cref="FindEdgeCrossings"/>'s rules (primary edges
+    /// only, the endpoint setback on both curves) without mutating anything, so the ghost
+    /// preview and the committed intersections agree. <paramref name="ignoreNode"/>
+    /// excludes edges sharing the segment's start node (they connect, not cross);
+    /// <paramref name="ignoreEdge"/> excludes the pending start anchor's edge and its
+    /// reverse twin (the segment starts ON that road).
+    /// </summary>
+    public void FindSegmentCrossings(Vector2 segStart, Vector2 segEnd,
+        int ignoreNode, int ignoreEdge, List<Vector2> result)
+    {
+        result.Clear();
+        float segLen = Vector2.Distance(segStart, segEnd);
+        if (segLen < 0.01f) return;
+
+        // Segment bounding box, expanded for control-point bulge on other edges.
+        const float margin = 20f;
+        float minX = MathF.Min(segStart.X, segEnd.X) - margin;
+        float maxX = MathF.Max(segStart.X, segEnd.X) + margin;
+        float minY = MathF.Min(segStart.Y, segEnd.Y) - margin;
+        float maxY = MathF.Max(segStart.Y, segEnd.Y) + margin;
+
+        const int segments = 20;
+        float setback = SimConstants.MinSplitSetback;
+
+        for (int other = 0; other < _edges.Count; other++)
+        {
+            if (other == ignoreEdge) continue;
+            var otherEdge = _edges[other];
+            if (otherEdge.FromNode < 0) continue; // defunct
+
+            // Skip reverse twins: of a two-way pair only the primary is tested, and the
+            // ignored anchor edge's twin is skipped along with it.
+            int otherReverse = FindReverseEdge(other);
+            if (otherReverse >= 0 && (otherReverse < other || otherReverse == ignoreEdge)) continue;
+
+            // Edges sharing the start node connect rather than cross.
+            if (ignoreNode >= 0
+                && (otherEdge.FromNode == ignoreNode || otherEdge.ToNode == ignoreNode))
+                continue;
+
+            // Bounding box cull (same policy as FindEdgeCrossings).
+            var op0 = _nodes[otherEdge.FromNode].Position;
+            var op3 = _nodes[otherEdge.ToNode].Position;
+            float oMinX = MathF.Min(MathF.Min(op0.X, op3.X), MathF.Min(otherEdge.ControlPoint1.X, otherEdge.ControlPoint2.X));
+            float oMaxX = MathF.Max(MathF.Max(op0.X, op3.X), MathF.Max(otherEdge.ControlPoint1.X, otherEdge.ControlPoint2.X));
+            float oMinY = MathF.Min(MathF.Min(op0.Y, op3.Y), MathF.Min(otherEdge.ControlPoint1.Y, otherEdge.ControlPoint2.Y));
+            float oMaxY = MathF.Max(MathF.Max(op0.Y, op3.Y), MathF.Max(otherEdge.ControlPoint1.Y, otherEdge.ControlPoint2.Y));
+            if (oMaxX < minX || oMinX > maxX || oMaxY < minY || oMinY > maxY)
+                continue;
+
+            var otherPoints = SampleBezier(other, segments);
+            float otherLen = MathF.Max(otherEdge.Length, 0.01f);
+
+            for (int j = 0; j < segments; j++)
+            {
+                if (TryLineLineIntersection(segStart, segEnd,
+                        otherPoints[j], otherPoints[j + 1], out float u, out float v))
+                {
+                    float tOther = (j + v) / segments;
+
+                    // Same endpoint setback the commit applies: crossings within a fixed
+                    // distance of either curve's end would coincide with an existing node.
+                    if (u * segLen < setback || (1f - u) * segLen < setback ||
+                        tOther * otherLen < setback || (1f - tOther) * otherLen < setback)
+                        continue;
+
+                    result.Add(segStart + (segEnd - segStart) * u);
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Finds all crossing world positions for edges connected to a given node.
     /// Returns the intersection points (for preview rendering) and the detailed
     /// crossing data (for later splitting).

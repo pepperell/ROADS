@@ -5,66 +5,131 @@ namespace Roads.App.Editor;
 
 /// <summary>
 /// Editor tool that builds two-way road segments by clicking to place nodes.
-/// Each click either snaps to an existing node, splits a nearby edge to create a T-intersection,
-/// or adds a new node. If a road start node exists in <see cref="EditorState"/>,
-/// a two-way edge pair is created between the start and the new node.
+/// The FIRST click of a chain only RECORDS the start anchor — an existing node, a pending
+/// on-road split point, or a pending free position (the latter two drawn as a ghost node)
+/// — without mutating the graph, so a right-click/ESC cancel leaves nothing behind.
+/// The second click commits: the pending anchor materializes (splitting its edge when
+/// on-road), the end anchor resolves the same way, and a two-way edge pair is created.
+/// The chain then continues from the now-real end node.
 /// </summary>
 public class RoadTool
 {
     /// <summary>
-    /// Handles a click to place or extend a road segment. Snaps to existing nodes or edges
-    /// when within <see cref="EditorState.SnapDistance"/>, otherwise creates a new node.
-    /// If <see cref="EditorState.RoadStartNode"/> is set, creates a two-way edge pair and
-    /// splits any crossed edges to form intersections.
+    /// Handles a click to place or extend a road segment. The first click of a chain
+    /// records the start anchor via <see cref="BeginChain"/> (no graph mutation); each
+    /// later click materializes the pending start if any, resolves the clicked end anchor
+    /// (snap to node / split nearby edge / new node, within
+    /// <see cref="EditorState.SnapDistance"/>), creates a two-way edge pair, and splits
+    /// any crossed edges to form intersections.
     /// </summary>
     /// <param name="worldPos">Click position in world space.</param>
-    /// <param name="graph">Road graph to add nodes and edges to.</param>
-    /// <param name="state">Editor state tracking the in-progress road start node.</param>
+    /// <param name="state">Editor state tracking the in-progress chain anchor.</param>
     /// <param name="edgeSpatialGrid">Optional spatial grid for edge-snap and T-intersection support.</param>
     public void OnClick(Vector2 worldPos, RoadGraph graph, EditorState state, EdgeSpatialGrid? edgeSpatialGrid = null)
     {
-        // Try to snap to an existing node first
-        int existingNode = graph.FindNearestNode(worldPos, EditorState.SnapDistance);
-
-        int nodeIndex;
-        if (existingNode >= 0)
+        if (!state.IsDrawingRoad)
         {
-            nodeIndex = existingNode;
-        }
-        else if (edgeSpatialGrid != null)
-        {
-            // Try to snap to the nearest edge — split it to create a T-intersection
-            var (nearEdge, nearT) = edgeSpatialGrid.FindNearestEdgeWithT(graph, worldPos, EditorState.SnapDistance);
-            if (nearEdge >= 0)
-            {
-                // Clamp the split a fixed DISTANCE from the endpoints (not a t-fraction,
-                // which grows with road length) so long roads can be split close to where
-                // the user clicked instead of snapping far inward.
-                nearT = Math.Clamp(nearT, SplitMarginT(graph, nearEdge), 1f - SplitMarginT(graph, nearEdge));
-                var (midNode, _, _) = graph.SplitEdge(nearEdge, nearT);
-                nodeIndex = midNode;
-            }
-            else
-            {
-                nodeIndex = graph.AddNode(worldPos);
-            }
-        }
-        else
-        {
-            nodeIndex = graph.AddNode(worldPos);
+            BeginChain(worldPos, graph, state, edgeSpatialGrid);
+            return;
         }
 
-        // If we have a start node, create edges in both directions (two-way road)
-        if (state.RoadStartNode.HasValue && state.RoadStartNode.Value != nodeIndex)
+        // Commit order matters: the start anchor's deferred split runs first, then the
+        // end anchor resolves against the CURRENT graph (fresh lookups, grid rebuilt), so
+        // an end click on the same edge as the pending start lands on the correct half.
+        int startNode = ResolveStartAnchor(graph, state);
+        int endNode = ResolveAnchor(worldPos, graph, edgeSpatialGrid);
+
+        if (startNode != endNode)
         {
-            int forwardEdge = graph.AddEdge(state.RoadStartNode.Value, nodeIndex);
-            graph.AddEdge(nodeIndex, state.RoadStartNode.Value);
+            int forwardEdge = graph.AddEdge(startNode, endNode);
+            graph.AddEdge(endNode, startNode);
             // Only split forward edge; SplitEdge handles reverse automatically
             SplitAtCrossings(graph, forwardEdge);
         }
 
-        // This node becomes the start of the next segment
-        state.RoadStartNode = nodeIndex;
+        // The (real, committed) end node becomes the start of the next segment.
+        state.RoadStartNode = endNode;
+        state.RoadStartEdge = -1;
+        state.RoadStartAnchorPos = null;
+    }
+
+    /// <summary>
+    /// Records the chain's start anchor WITHOUT mutating the graph: an existing node when
+    /// within snap distance, otherwise a pending split point on the nearest road, otherwise
+    /// a pending free position — the pending kinds render as a ghost node until committed.
+    /// </summary>
+    private static void BeginChain(Vector2 worldPos, RoadGraph graph, EditorState state,
+        EdgeSpatialGrid? edgeSpatialGrid)
+    {
+        int existingNode = graph.FindNearestNode(worldPos, EditorState.SnapDistance);
+        if (existingNode >= 0)
+        {
+            state.RoadStartNode = existingNode;
+            return;
+        }
+
+        if (edgeSpatialGrid != null)
+        {
+            edgeSpatialGrid.RebuildIfNeeded(graph);
+            var (nearEdge, nearT) = edgeSpatialGrid.FindNearestEdgeWithT(graph, worldPos, EditorState.SnapDistance);
+            if (nearEdge >= 0)
+            {
+                nearT = Math.Clamp(nearT, SplitMarginT(graph, nearEdge), 1f - SplitMarginT(graph, nearEdge));
+                state.RoadStartEdge = nearEdge;
+                state.RoadStartT = nearT;
+                state.RoadStartAnchorPos = graph.EvaluateBezier(nearEdge, nearT);
+                return;
+            }
+        }
+
+        state.RoadStartAnchorPos = worldPos;
+    }
+
+    /// <summary>
+    /// Materializes the pending start anchor at commit time: an existing node passes
+    /// through; a pending on-road anchor splits its edge NOW (deferred from the first
+    /// click); a pending free anchor adds its node. A pending edge that went stale between
+    /// clicks (defunct/out of range) falls back to a free node at the recorded ghost
+    /// position, so the committed road always starts where the ghost showed.
+    /// </summary>
+    private static int ResolveStartAnchor(RoadGraph graph, EditorState state)
+    {
+        if (state.RoadStartNode is { } startNode) return startNode;
+
+        int edge = state.RoadStartEdge;
+        if (edge >= 0 && edge < graph.Edges.Count && graph.Edges[edge].FromNode >= 0)
+        {
+            var (midNode, _, _) = graph.SplitEdge(edge, state.RoadStartT);
+            return midNode;
+        }
+        return graph.AddNode(state.RoadStartAnchorPos!.Value);
+    }
+
+    /// <summary>
+    /// Resolves a click position to a node, mutating as needed: snaps to an existing node,
+    /// splits the nearest road within snap distance, or adds a new node. The split is
+    /// clamped a fixed DISTANCE from the endpoints (not a t-fraction, which grows with
+    /// road length) so long roads can be split close to where the user clicked. Rebuilds
+    /// the edge grid first — the start anchor's split may have just changed the graph.
+    /// </summary>
+    private static int ResolveAnchor(Vector2 worldPos, RoadGraph graph, EdgeSpatialGrid? edgeSpatialGrid)
+    {
+        int existingNode = graph.FindNearestNode(worldPos, EditorState.SnapDistance);
+        if (existingNode >= 0) return existingNode;
+
+        if (edgeSpatialGrid != null)
+        {
+            edgeSpatialGrid.RebuildIfNeeded(graph);
+            var (nearEdge, nearT) = edgeSpatialGrid.FindNearestEdgeWithT(graph, worldPos, EditorState.SnapDistance);
+            if (nearEdge >= 0)
+            {
+                nearT = Math.Clamp(nearT, SplitMarginT(graph, nearEdge), 1f - SplitMarginT(graph, nearEdge));
+                var (midNode, _, _) = graph.SplitEdge(nearEdge, nearT);
+                return midNode;
+            }
+        }
+
+        return graph.AddNode(worldPos);
     }
 
     /// <summary>

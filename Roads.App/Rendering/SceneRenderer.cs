@@ -180,6 +180,9 @@ public class SceneRenderer
         // Destination placement ghost (translucent preview of dest node + connector + foot node)
         DrawDestinationPlacementGhost(canvas, editorState, camera);
 
+        // Node tool placement ghost (translucent preview at the exact click-result position)
+        DrawNodeGhost(canvas, editorState, camera);
+
         // Draw control point handles in Select mode
         DrawControlPointHandles(canvas, graph, editorState, camera);
 
@@ -534,6 +537,45 @@ public class SceneRenderer
         }
     }
 
+    /// <summary>
+    /// Draws the Node tool's placement ghost at the exact point a click would create the
+    /// node — snapped onto the nearest road (a split) or free at the cursor. A null ghost
+    /// (cursor over an existing node, over UI, or mid-pan — recomputed every mouse-move)
+    /// draws nothing.
+    /// </summary>
+    private static void DrawNodeGhost(SKCanvas canvas, EditorState editorState, Camera camera)
+    {
+        if (editorState.ActiveTool != EditorTool.Node) return;
+        if (editorState.NodeGhostPos is not { } pos) return;
+        DrawGhostNode(canvas, pos, camera);
+    }
+
+    /// <summary>
+    /// Shared ghost-node visual (translucent blue fill, dashed white ring, node-highlight
+    /// radius) used by the Node tool's placement ghost and the Road tool's pending start
+    /// anchor — a node that will exist only after the operation commits.
+    /// </summary>
+    private static void DrawGhostNode(SKCanvas canvas, Vector2 pos, Camera camera)
+    {
+        const float radius = 5f; // matches the node hover/selection highlight radius
+        using var fill = new SKPaint
+        {
+            Color = new SKColor(100, 200, 255, 90),
+            Style = SKPaintStyle.Fill,
+            IsAntialias = true,
+        };
+        using var stroke = new SKPaint
+        {
+            Color = new SKColor(255, 255, 255, 150),
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = Math.Max(1f, 1.5f / camera.Zoom),
+            IsAntialias = true,
+            PathEffect = SKPathEffect.CreateDash(new[] { 3f, 3f }, 0),
+        };
+        canvas.DrawCircle(pos.X, pos.Y, radius, fill);
+        canvas.DrawCircle(pos.X, pos.Y, radius, stroke);
+    }
+
     private static void DrawControlPointHandles(SKCanvas canvas, RoadGraph graph,
         EditorState editorState, Camera camera)
     {
@@ -609,12 +651,30 @@ public class SceneRenderer
         }
     }
 
+    /// <summary>
+    /// Draws the road tool's in-progress preview: a dashed line from the chain's start
+    /// anchor to the cursor, a ghost node when the start is still a PENDING anchor
+    /// (first click landed on empty space or mid-road; nothing commits until the second
+    /// click, so the anchor renders as a ghost rather than a real node), and a ghost node
+    /// at every crossing where the segment will split an existing road into an intersection.
+    /// </summary>
     private static void DrawRoadPreview(SKCanvas canvas, RoadGraph graph, EditorState editorState,
         Camera camera, Point currentMousePos, SKImageInfo info)
     {
         if (editorState.ActiveTool != EditorTool.Road || !editorState.IsDrawingRoad) return;
 
-        var startNode = graph.Nodes[editorState.RoadStartNode!.Value];
+        Vector2 startPos;
+        if (editorState.RoadStartNode is { } startNode)
+        {
+            startPos = graph.Nodes[startNode].Position;
+            if (float.IsNaN(startPos.X)) return; // start node went defunct mid-draw
+        }
+        else
+        {
+            startPos = editorState.RoadStartAnchorPos!.Value;
+            DrawGhostNode(canvas, startPos, camera);
+        }
+
         var mouseWorld = camera.ScreenToWorld(currentMousePos.X, currentMousePos.Y, info.Width, info.Height);
 
         using var previewPaint = new SKPaint
@@ -625,7 +685,11 @@ public class SceneRenderer
             IsAntialias = true,
             PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0),
         };
-        canvas.DrawLine(startNode.Position.X, startNode.Position.Y, mouseWorld.X, mouseWorld.Y, previewPaint);
+        canvas.DrawLine(startPos.X, startPos.Y, mouseWorld.X, mouseWorld.Y, previewPaint);
+
+        // Intersection nodes the commit will create where the segment crosses roads.
+        foreach (var crossing in editorState.RoadCrossingPreviews)
+            DrawGhostNode(canvas, crossing, camera);
     }
 
     private static void DrawSnapIndicator(SKCanvas canvas, RoadGraph graph, EditorState editorState,

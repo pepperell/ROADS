@@ -137,8 +137,8 @@ public class MinimapPanel : Panel
     /// <summary>
     /// Recomputes the network bounds, world→panel transform, and cached picture when the
     /// graph version changes. Bounds come from live edge endpoints — a stray node with no
-    /// edges (an in-progress road start) does not count as content, and a blank map draws
-    /// an empty box (no network, no viewport rect).
+    /// edges (e.g. one placed by the Node tool) does not count as content, and a blank map
+    /// draws an empty box (no network, no viewport rect).
     /// </summary>
     private void EnsureCache(RoadGraph graph)
     {

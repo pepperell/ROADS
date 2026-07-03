@@ -26,6 +26,7 @@ public class MainForm : Form
     private readonly VehicleStore _vehicles = new();
     private readonly EditorState _editorState = new();
     private readonly RoadTool _roadTool = new();
+    private readonly NodeTool _nodeTool = new();
     private readonly DeleteTool _deleteTool = new();
     private readonly Ui.SliderPanel _sliderPanel = new();
     private readonly DestinationTool _destinationTool = new();
@@ -681,11 +682,12 @@ public class MainForm : Form
             e.Handled = true;
         }
 
-        // Escape exits lane restriction mode
-        if (e.KeyCode == Keys.Escape && _editorState.LaneRestrictionMode)
+        // Escape = universal cancel (same as right-click): aborts the in-progress tool
+        // operation (road chain, lane-restrict mode, selection) one step per press;
+        // with nothing left to cancel it switches back to the Select tool.
+        if (e.KeyCode == Keys.Escape)
         {
-            _editorState.LaneRestrictionMode = false;
-            _editorState.LaneRestrictionEdge = -1;
+            CancelActiveTool();
             e.Handled = true;
         }
 
@@ -844,12 +846,7 @@ public class MainForm : Form
         _simLoop.Paused = false;
         _simLoop.TimeScaleExponent = 0;
 
-        _editorState.SelectedEdge = -1;
-        _editorState.SelectedNode = -1;
-        _editorState.SelectedVehicle = -1;
-        _editorState.LaneRestrictionMode = false;
-        _editorState.LaneRestrictionEdge = -1;
-        _editorState.RoadStartNode = null;
+        _editorState.ResetToolState();
         _editorState.ActiveTool = Editor.EditorTool.Select;
     }
 
@@ -948,13 +945,8 @@ public class MainForm : Form
             // Start paused after loading
             _simLoop.Paused = true;
 
-            // Reset editor state
-            _editorState.SelectedEdge = -1;
-            _editorState.SelectedNode = -1;
-            _editorState.SelectedVehicle = -1;
-            _editorState.LaneRestrictionMode = false;
-            _editorState.LaneRestrictionEdge = -1;
-            _editorState.RoadStartNode = null;
+            // Reset editor state (selection, drags, lane mode, pending road anchor)
+            _editorState.ResetToolState();
         }
         catch (Exception ex)
         {
@@ -1011,8 +1003,9 @@ public class MainForm : Form
 
     /// <summary>
     /// Handles mouse-down: middle button starts panning, left button dispatches to the
-    /// retained-mode UI first, then the active editor tool (Select, Road, Delete,
-    /// Destination, Signal). Right button cancels the road tool.
+    /// retained-mode UI first, then the active editor tool (Select, Road, Node, Delete,
+    /// Destination, Signal). Right button is the universal cancel (see
+    /// <see cref="CancelActiveTool"/>).
     /// </summary>
     private void OnCanvasMouseDown(object? sender, MouseEventArgs e)
     {
@@ -1048,7 +1041,15 @@ public class MainForm : Form
                         break;
                     }
 
-                    // Try vehicle hit-test first
+                    // Visible Bézier handles get FIRST claim on the click — they draw
+                    // topmost, so they hit-test topmost. Without this the click fell
+                    // through: a control point usually lies within a meter of its own
+                    // curve (and often near a node), so the distance-based vehicle/node/
+                    // edge tests below won even when the click was dead on the handle.
+                    if (TryStartControlPointDrag(worldVec, e.Location))
+                        break;
+
+                    // Try vehicle hit-test next
                     var hitResults = new List<int>();
                     _vehicleGrid.QueryFiltered(worldVec.X, worldVec.Y, 5f, _vehicles.PosX, _vehicles.PosY, hitResults);
                     int closestVeh = -1;
@@ -1076,56 +1077,7 @@ public class MainForm : Form
 
                     // Find nearest node (hit radius matches the visual highlight)
                     int nearNode = _roadGraph.FindNearestNode(worldVec, 5f);
-
-                    // Only hit-test control points whose handles are currently visible:
-                    // on the selected edge, or on edges adjacent to the selected node.
-                    int cpEdgeIdx = -1, cpIdx = -1;
-                    if (_editorState.SelectedEdge >= 0 || _editorState.SelectedNode >= 0)
-                    {
-                        var (ce, ci) = _roadGraph.FindNearestControlPoint(worldVec, EditorState.SnapDistance);
-                        if (ce >= 0)
-                        {
-                            bool accept = false;
-                            var cePrimary = ce;
-                            int ceReverse = _roadGraph.FindReverseEdge(ce);
-                            if (ceReverse >= 0 && ceReverse < ce) cePrimary = ceReverse;
-
-                            // Accept if CP belongs to the selected edge
-                            if (_editorState.SelectedEdge >= 0)
-                            {
-                                int selPrimary = _editorState.SelectedEdge;
-                                int selReverse = _roadGraph.FindReverseEdge(selPrimary);
-                                if (selReverse >= 0 && selReverse < selPrimary) selPrimary = selReverse;
-                                if (cePrimary == selPrimary) accept = true;
-                            }
-
-                            // Accept if CP belongs to an edge adjacent to the selected node
-                            if (!accept && _editorState.SelectedNode >= 0)
-                            {
-                                var edge = _roadGraph.Edges[ce];
-                                if (edge.FromNode == _editorState.SelectedNode
-                                    || edge.ToNode == _editorState.SelectedNode)
-                                    accept = true;
-                            }
-
-                            if (accept)
-                            {
-                                cpEdgeIdx = ce;
-                                cpIdx = ci;
-                            }
-                        }
-                    }
-
-                    float nodeDist = nearNode >= 0
-                        ? Vector2.Distance(worldVec, _roadGraph.Nodes[nearNode].Position)
-                        : float.MaxValue;
-                    float cpDist = cpEdgeIdx >= 0
-                        ? Vector2.Distance(worldVec, cpIdx == 1
-                            ? _roadGraph.Edges[cpEdgeIdx].ControlPoint1
-                            : _roadGraph.Edges[cpEdgeIdx].ControlPoint2)
-                        : float.MaxValue;
-
-                    if (nearNode >= 0 && nodeDist <= cpDist)
+                    if (nearNode >= 0)
                     {
                         _editorState.SelectedNode = nearNode;
                         _editorState.SelectedEdge = -1;
@@ -1134,47 +1086,6 @@ public class MainForm : Form
                         _dragOffset = _roadGraph.Nodes[nearNode].Position - worldVec;
                         _dragActive = false;
                         _canvas.Cursor = Cursors.Hand;
-                    }
-                    else if (cpEdgeIdx >= 0)
-                    {
-                        // Check if the click is actually closer to an edge curve than to the CP handle.
-                        // If so, prefer edge selection (the user clicked the road, not the handle).
-                        var (nearEdgeForCp, nearEdgeT) = _edgeSpatialGrid.FindNearestEdgeWithT(_roadGraph, worldVec, EditorState.SnapDistance);
-                        float edgeDist = float.MaxValue;
-                        if (nearEdgeForCp >= 0)
-                        {
-                            var edgePt = _roadGraph.EvaluateBezier(nearEdgeForCp, nearEdgeT);
-                            edgeDist = Vector2.Distance(worldVec, edgePt);
-                        }
-
-                        if (nearEdgeForCp >= 0 && edgeDist < cpDist)
-                        {
-                            // Click is closer to the edge curve — select the edge
-                            _editorState.SelectedNode = -1;
-                            _editorState.SelectedEdge = nearEdgeForCp;
-                        }
-                        else
-                        {
-                            // Click is closer to the CP handle — start CP drag
-                            var cpEdge = _roadGraph.Edges[cpEdgeIdx];
-                            bool adjacentToSelectedNode = _editorState.SelectedNode >= 0
-                                && (cpEdge.FromNode == _editorState.SelectedNode
-                                    || cpEdge.ToNode == _editorState.SelectedNode);
-                            if (!adjacentToSelectedNode)
-                            {
-                                _editorState.SelectedNode = -1;
-                                _editorState.SelectedEdge = cpEdgeIdx;
-                            }
-                            _editorState.DragEdgeIndex = cpEdgeIdx;
-                            _editorState.DragControlPointIndex = cpIdx;
-                            var cpPos = cpIdx == 1
-                                ? cpEdge.ControlPoint1
-                                : cpEdge.ControlPoint2;
-                            _dragStartScreenPos = e.Location;
-                            _dragOffset = cpPos - worldVec;
-                            _dragActive = false;
-                            _canvas.Cursor = Cursors.Hand;
-                        }
                     }
                     else
                     {
@@ -1187,6 +1098,9 @@ public class MainForm : Form
                 }
                 case EditorTool.Road:
                     _roadTool.OnClick(worldVec, _roadGraph, _editorState, _edgeSpatialGrid);
+                    break;
+                case EditorTool.Node:
+                    _nodeTool.OnClick(worldVec, _roadGraph, _edgeSpatialGrid);
                     break;
                 case EditorTool.Delete:
                     _deleteTool.OnClick(worldVec, _roadGraph, _edgeSpatialGrid, _populationManager);
@@ -1208,41 +1122,127 @@ public class MainForm : Form
                     }
                     break;
                 case EditorTool.Signal:
-                    _signalTool.OnClick(worldVec, _roadGraph);
+                    // Shift+click tunes the signal (per-edge stop/yield exemption or
+                    // light-phase rotation — formerly on right-click, which is now the
+                    // universal cancel); a plain click cycles the node's signal type.
+                    if ((ModifierKeys & Keys.Shift) != 0)
+                        _signalTool.TuneSignal(worldVec, _roadGraph, _edgeSpatialGrid,
+                            _trafficSignals, _stopSigns, _yieldSigns);
+                    else
+                        _signalTool.OnClick(worldVec, _roadGraph);
                     break;
             }
         }
         else if (e.Button == MouseButtons.Right)
         {
-            var rWorldPos = _camera.ScreenToWorld(e.X, e.Y, _canvas.Width, _canvas.Height);
-            var rWorldVec = new Vector2(rWorldPos.X, rWorldPos.Y);
+            // Right-click is the universal CANCEL (same as ESC): abort whatever the
+            // active tool has in progress, or fall back to the Select tool.
+            CancelActiveTool();
+        }
+    }
 
-            switch (_editorState.ActiveTool)
+    /// <summary>
+    /// Shared right-click / ESC "cancel" semantics, one step per invocation: aborts the
+    /// in-progress road chain, then exits lane-restrict mode, then clears any selection;
+    /// with nothing left to cancel, switches the active tool back to Select.
+    /// </summary>
+    private void CancelActiveTool()
+    {
+        if (_editorState.IsDrawingRoad)
+        {
+            _roadTool.OnCancel(_editorState);
+            return;
+        }
+        if (_editorState.LaneRestrictionMode)
+        {
+            _editorState.LaneRestrictionMode = false;
+            _editorState.LaneRestrictionEdge = -1;
+            return;
+        }
+        if (_editorState.SelectedNode >= 0 || _editorState.SelectedEdge >= 0
+            || _editorState.SelectedVehicle >= 0)
+        {
+            _editorState.SelectedNode = -1;
+            _editorState.SelectedEdge = -1;
+            _editorState.SelectedVehicle = -1;
+            return;
+        }
+        _editorState.ResetToolState();
+        _editorState.ActiveTool = EditorTool.Select;
+    }
+
+    /// <summary>
+    /// Starts a control-point drag when the click lands on a VISIBLE Bézier handle — both
+    /// handles of the selected edge, or the node-adjacent handle of each edge incident to
+    /// the selected node (exactly the set SceneRenderer.DrawControlPointHandles draws).
+    /// Handles draw topmost in Select mode, so they take the click BEFORE the
+    /// vehicle/node/edge hit-tests; the grab radius mirrors the drawn handle radius
+    /// (max(3, 5/zoom)) plus slop. Handles on a two-way pair resolve to the primary
+    /// (lower-index) edge, matching the renderer; SetControlPoint syncs the reverse twin
+    /// during the drag.
+    /// </summary>
+    /// <returns>True when a drag was started (the click is consumed).</returns>
+    private bool TryStartControlPointDrag(Vector2 worldVec, Point screenPos)
+    {
+        float grabRadius = MathF.Max(4.5f, 8f / _camera.Zoom);
+        float bestDistSq = grabRadius * grabRadius;
+        int bestEdge = -1, bestCp = -1;
+        bool bestIsNodeAdjacent = false;
+
+        // Tests one handle, first mapping the edge to its drawn primary twin (lower index
+        // of a two-way pair) and flipping the CP side when the mapping crosses the pair.
+        void Test(int edgeIdx, int cpSide, bool nodeAdjacent)
+        {
+            if (edgeIdx < 0 || edgeIdx >= _roadGraph.Edges.Count) return;
+            int rev = _roadGraph.FindReverseEdge(edgeIdx);
+            if (rev >= 0 && rev < edgeIdx) { edgeIdx = rev; cpSide = cpSide == 1 ? 2 : 1; }
+            var edge = _roadGraph.Edges[edgeIdx];
+            if (edge.FromNode < 0) return;
+            var cp = cpSide == 1 ? edge.ControlPoint1 : edge.ControlPoint2;
+            float d = Vector2.DistanceSquared(worldVec, cp);
+            if (d < bestDistSq)
             {
-                case EditorTool.Road:
-                    _roadTool.OnCancel(_editorState);
-                    break;
-                case EditorTool.Destination:
-                    RemoveNearestDestination(rWorldVec);
-                    break;
-                case EditorTool.Signal:
-                    _signalTool.OnRightClick(rWorldVec, _roadGraph, _edgeSpatialGrid,
-                        _trafficSignals, _stopSigns, _yieldSigns);
-                    break;
-                case EditorTool.Select:
-                {
-                    // Right-click on edge: split it to create a new node
-                    var (nearEdge, nearT) = _edgeSpatialGrid.FindNearestEdgeWithT(
-                        _roadGraph, rWorldVec, EditorState.SnapDistance);
-                    if (nearEdge >= 0)
-                    {
-                        nearT = Math.Clamp(nearT, 0.05f, 0.95f);
-                        _roadGraph.SplitEdge(nearEdge, nearT);
-                    }
-                    break;
-                }
+                bestDistSq = d;
+                bestEdge = edgeIdx;
+                bestCp = cpSide;
+                bestIsNodeAdjacent = nodeAdjacent;
             }
         }
+
+        // Both handles of the selected edge (side flips cancel out across the pair).
+        if (_editorState.SelectedEdge >= 0)
+        {
+            Test(_editorState.SelectedEdge, 1, nodeAdjacent: false);
+            Test(_editorState.SelectedEdge, 2, nodeAdjacent: false);
+        }
+
+        // The node-adjacent handle of each edge incident to the selected node.
+        int selNode = _editorState.SelectedNode;
+        if (selNode >= 0 && selNode < _roadGraph.Nodes.Count
+            && !float.IsNaN(_roadGraph.Nodes[selNode].Position.X))
+        {
+            foreach (int eIdx in _roadGraph.GetOutgoingEdges(selNode)) Test(eIdx, 1, nodeAdjacent: true);
+            foreach (int eIdx in _roadGraph.GetIncomingEdges(selNode)) Test(eIdx, 2, nodeAdjacent: true);
+        }
+
+        if (bestEdge < 0) return false;
+
+        // A node-adjacent handle keeps the node selected (its handle set stays visible);
+        // an edge handle keeps its edge selected.
+        if (!bestIsNodeAdjacent)
+        {
+            _editorState.SelectedNode = -1;
+            _editorState.SelectedEdge = bestEdge;
+        }
+        _editorState.DragEdgeIndex = bestEdge;
+        _editorState.DragControlPointIndex = bestCp;
+        var dragEdge = _roadGraph.Edges[bestEdge];
+        var cpPos = bestCp == 1 ? dragEdge.ControlPoint1 : dragEdge.ControlPoint2;
+        _dragStartScreenPos = screenPos;
+        _dragOffset = cpPos - worldVec;
+        _dragActive = false;
+        _canvas.Cursor = Cursors.Hand;
+        return true;
     }
 
     /// <summary>
@@ -1285,13 +1285,15 @@ public class MainForm : Form
     {
         _currentMousePos = e.Location;
 
-        // Clear the destination-placement ghost up front; the Destination hover case below
-        // recomputes it when applicable. This guarantees no stale ghost renders down any
+        // Clear the placement ghosts up front; the Destination/Node hover cases below
+        // recompute them when applicable. This guarantees no stale ghost renders down any
         // early-return path (UI, pan, slider, node/control-point drag) — e.g. during a
-        // middle-button pan while the Destination tool is active.
+        // middle-button pan while the Destination or Node tool is active.
         _editorState.GhostDestPos = null;
         _editorState.GhostFootPos = null;
         _editorState.GhostEdge = -1;
+        _editorState.NodeGhostPos = null;
+        _editorState.RoadCrossingPreviews.Clear();
 
         // A captured UI drag (minimap scrub, slider thumb) owns every move until release,
         // even with the cursor far outside the panel.
@@ -1421,6 +1423,47 @@ public class MainForm : Form
                     _editorState.HoveredNode = _roadGraph.FindNearestNode(worldVec, EditorState.SnapDistance);
                     break;
                 }
+                case EditorTool.Node:
+                {
+                    // Over an existing node: highlight it, no ghost (a click adds nothing).
+                    // Otherwise show the ghost exactly where the click will create the node
+                    // (snapped onto the nearest road, or free at the cursor).
+                    _editorState.HoveredEdge = -1;
+                    _editorState.HoveredNode = _roadGraph.FindNearestNode(worldVec, EditorState.SnapDistance);
+                    if (_editorState.HoveredNode < 0)
+                        _editorState.NodeGhostPos = NodeTool.ComputeGhost(worldVec, _roadGraph, _edgeSpatialGrid);
+                    break;
+                }
+                case EditorTool.Road:
+                {
+                    _editorState.HoveredNode = -1;
+                    _editorState.HoveredEdge = -1;
+
+                    // Ghost the intersection nodes the in-progress segment will create
+                    // where the preview line crosses existing roads (the commit runs the
+                    // same crossing detection on the real edge). Cleared at the top of
+                    // this handler, so the list is stale-free on every path.
+                    if (_editorState.IsDrawingRoad)
+                    {
+                        Vector2 startPos;
+                        int ignoreNode = -1;
+                        if (_editorState.RoadStartNode is { } startNode)
+                        {
+                            if (startNode >= _roadGraph.Nodes.Count
+                                || float.IsNaN(_roadGraph.Nodes[startNode].Position.X))
+                                break; // start node went defunct mid-draw
+                            startPos = _roadGraph.Nodes[startNode].Position;
+                            ignoreNode = startNode;
+                        }
+                        else
+                        {
+                            startPos = _editorState.RoadStartAnchorPos!.Value;
+                        }
+                        _roadGraph.FindSegmentCrossings(startPos, worldVec, ignoreNode,
+                            _editorState.RoadStartEdge, _editorState.RoadCrossingPreviews);
+                    }
+                    break;
+                }
                 case EditorTool.Destination:
                 {
                     _editorState.HoveredEdge = -1;
@@ -1474,32 +1517,6 @@ public class MainForm : Form
     }
 
     /// <summary>
-    /// Right-click removal for destination nodes: clears both the Destination flag and POI type.
-    /// </summary>
-    private void RemoveNearestDestination(Vector2 worldPos)
-    {
-        int bestNode = -1;
-        float bestDist = EditorState.SnapDistance * EditorState.SnapDistance;
-        for (int i = 0; i < _roadGraph.Nodes.Count; i++)
-        {
-            var node = _roadGraph.Nodes[i];
-            if (float.IsNaN(node.Position.X)) continue;
-            if (!node.Flags.HasFlag(NodeFlags.Destination)) continue;
-            float d = Vector2.DistanceSquared(worldPos, node.Position);
-            if (d < bestDist)
-            {
-                bestDist = d;
-                bestNode = i;
-            }
-        }
-        if (bestNode >= 0)
-        {
-            _roadGraph.SetNodeFlags(bestNode, _roadGraph.Nodes[bestNode].Flags & ~NodeFlags.Destination);
-            _roadGraph.SetNodePOIType(bestNode, POIType.None);
-        }
-    }
-
-    /// <summary>
     /// Replaces the current map with a 50×50 grid road network and bulk-spawns 10,000 vehicles
     /// for Phase 5 stress-testing. No confirmation dialog — the intent is immediate load testing.
     /// Camera is centered on the grid center and zoomed out to fit the full ~5 km extent.
@@ -1533,12 +1550,7 @@ public class MainForm : Form
         _simLoop.TimeScaleExponent = 0;
 
         // Reset editor selection/tool exactly as NewMap() does.
-        _editorState.SelectedEdge = -1;
-        _editorState.SelectedNode = -1;
-        _editorState.SelectedVehicle = -1;
-        _editorState.LaneRestrictionMode = false;
-        _editorState.LaneRestrictionEdge = -1;
-        _editorState.RoadStartNode = null;
+        _editorState.ResetToolState();
         _editorState.ActiveTool = Editor.EditorTool.Select;
 
         // Show FPS HUD immediately so the user sees the load metrics.

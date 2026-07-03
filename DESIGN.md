@@ -439,7 +439,7 @@ Per frame:
 |------|--------|
 | **Select** | Click to select road/vehicle/POI, show properties panel |
 | **Road** | Click to place nodes, drag to set curve control points, creates road edges |
-| **Intersection** | Click road to split and create intersection node |
+| **Node** | Click to add a node: splits a nearby road (ghost preview shows the spot) or places a free node in empty space |
 | **Delete** | Click to remove road segment, node, or POI |
 | **POI Place** | Click to place Point of Interest (type selector submenu; the Entry/Exit type is where vehicles spawn/despawn) |
 | **Signal** | Click intersection to cycle: none → stop sign → traffic light |
@@ -451,7 +451,7 @@ Per frame:
 2. Click to place second node — a straight road segment appears
 3. Drag either endpoint to curve the road (adjusts Bezier control points)
 4. Continue clicking to chain segments (auto-connects at intersections)
-5. Right-click to finish road chain
+5. Right-click (or ESC) to finish the road chain — the universal cancel
 6. Properties panel: set lane count, speed limit, road type, one-way
 
 ### 9.3 Live Editing
@@ -688,6 +688,7 @@ Phases are built by an Opus "director" that hands self-contained milestones to l
 - [X] Retained-mode UI: Panel/Label/Button hierarchy under UiRoot (hover + mouse capture; panels consume background clicks; bottom-left panel stacking fixed; pan no longer stalls over buttons)
 - [X] Status bar dissolved into panels (clock panel with analog dial + AM/PM, selection-info panel; stats/minimap absorb edges/residents/zoom; no free-floating UI text)
 - [X] UI reorganization + spawn-point removal: spawn points removed from the simulation (Entry/Exit nodes only; legacy flag masked on load); New/Save/Load far left, transport buttons (<< Pause >>) on the clock panel; menu bar + clock panel raised into the old status-bar row; stats/perf/selection panels shown by default with matching 256-px width, title rows, and UiTheme background/border (selection panel shows "No selection" when idle; bottom-left stack moved beside the legend)
+- [X] Editor UX: Bézier handles hit-test topmost (grab radius tracks the drawn handle); new Node tool (ghost preview; splits a nearby road or places a free node); right-click/ESC = universal cancel, falling back to the Select tool; Signal tuning (exemptions/phase) moved to Shift+click; Road tool first click is a deferred ghost anchor (no split/node until the segment commits — cancel leaves the graph untouched); crossing intersections ghost along the preview line
 - [X] Vehicle type variety (sedan, SUV, truck, bus, motorcycle)
 - [ ] Sound effects (optional: ambient traffic hum scaling with density)
 - [ ] Tooltip / info on hover (vehicle speed, driver traits, destination)

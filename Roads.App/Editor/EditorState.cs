@@ -9,6 +9,7 @@ public enum EditorTool
 {
     Select,
     Road,
+    Node,
     Delete,
     Destination,
     Signal,
@@ -29,11 +30,31 @@ public class EditorState
     /// <summary>POI type to assign when placing destination nodes (sticky across tool switches).</summary>
     public POIType SelectedPOIType { get; set; } = POIType.Home;
 
-    /// <summary>Index of the node where the current road segment starts, or <c>null</c> if not drawing.</summary>
+    /// <summary>Index of the EXISTING node the current road segment starts from, or <c>null</c>
+    /// when the start is a pending ghost anchor (<see cref="RoadStartAnchorPos"/>) or no
+    /// road is being drawn.</summary>
     public int? RoadStartNode { get; set; }
 
-    /// <summary>Whether a road segment is being drawn (i.e. <see cref="RoadStartNode"/> is set).</summary>
-    public bool IsDrawingRoad => RoadStartNode.HasValue;
+    /// <summary>Edge carrying a PENDING mid-road start anchor (drawn as a ghost node), or -1.
+    /// The split is deferred until the segment commits on the second click, so canceling
+    /// the road leaves the graph untouched.</summary>
+    public int RoadStartEdge { get; set; } = -1;
+
+    /// <summary>Clamped split parameter on <see cref="RoadStartEdge"/> for the pending anchor.</summary>
+    public float RoadStartT { get; set; }
+
+    /// <summary>World position of a PENDING start anchor — the on-road split point or the
+    /// free-space click — used for the ghost preview and as the commit fallback. <c>null</c>
+    /// when the start is an existing node or no road is being drawn.</summary>
+    public System.Numerics.Vector2? RoadStartAnchorPos { get; set; }
+
+    /// <summary>Whether a road segment is being drawn (from an existing node or a pending ghost anchor).</summary>
+    public bool IsDrawingRoad => RoadStartNode.HasValue || RoadStartAnchorPos.HasValue;
+
+    /// <summary>Ghost positions of the intersection nodes the in-progress road segment
+    /// will create where its preview line crosses existing roads. Recomputed each
+    /// mouse-move while drawing; empty otherwise.</summary>
+    public List<System.Numerics.Vector2> RoadCrossingPreviews { get; } = new();
 
     /// <summary>Index of the currently selected edge, or -1 if none.</summary>
     public int SelectedEdge { get; set; } = -1;
@@ -91,6 +112,14 @@ public class EditorState
     public float GhostT { get; set; }
 
     /// <summary>
+    /// Node-tool placement ghost: world position where a click would create the node (the
+    /// snapped on-road split position, or the raw cursor in empty space), or <c>null</c>
+    /// when inactive (cursor over an existing node, over UI, or mid-pan). Recomputed each
+    /// mouse-move by the Node hover case.
+    /// </summary>
+    public System.Numerics.Vector2? NodeGhostPos { get; set; }
+
+    /// <summary>
     /// Edge whose one-way cycle (the <c>O</c> key) is mid-progress, or -1. Tracks where the
     /// three-state cycle (two-way → one-way → one-way reversed → two-way) is, since the two
     /// one-way states are topologically identical. Reset lazily when a different edge is cycled.
@@ -114,6 +143,9 @@ public class EditorState
     public void ResetToolState()
     {
         RoadStartNode = null;
+        RoadStartEdge = -1;
+        RoadStartAnchorPos = null;
+        RoadCrossingPreviews.Clear();
         SelectedEdge = -1;
         HoveredEdge = -1;
         HoveredNode = -1;
@@ -131,5 +163,6 @@ public class EditorState
         GhostFootPos = null;
         GhostEdge = -1;
         GhostT = 0f;
+        NodeGhostPos = null;
     }
 }

@@ -5,8 +5,9 @@ namespace Roads.App.Editor;
 
 /// <summary>
 /// Editor tool that cycles intersection signal types on click.
-/// Left-click cycles the node-level signal type. Right-click toggles per-edge stop/yield
-/// exemptions or rotates traffic light phase groupings.
+/// A plain click cycles the node-level signal type; Shift+click tunes it — toggling
+/// per-edge stop/yield exemptions or rotating traffic light phase groupings (right-click
+/// is the universal tool-cancel, so tuning lives on the modifier).
 /// </summary>
 public class SignalTool
 {
@@ -55,7 +56,7 @@ public class SignalTool
     }
 
     /// <summary>
-    /// Right-click handler: toggles per-edge stop/yield exemptions, or rotates traffic light
+    /// Shift+click handler: toggles per-edge stop/yield exemptions, or rotates traffic light
     /// phase groupings. For stop/yield nodes, finds the nearest incoming edge at the node and
     /// toggles its exempt status. For traffic light nodes, rotates the phase pairing.
     /// </summary>
@@ -66,7 +67,7 @@ public class SignalTool
     /// <param name="stopSigns">Stop sign system (for edge exemptions).</param>
     /// <param name="yieldSigns">Yield sign system (for edge exemptions).</param>
     /// <returns><c>true</c> if a signal property was changed; otherwise <c>false</c>.</returns>
-    public bool OnRightClick(Vector2 worldPos, RoadGraph graph, EdgeSpatialGrid edgeGrid,
+    public bool TuneSignal(Vector2 worldPos, RoadGraph graph, EdgeSpatialGrid edgeGrid,
         TrafficSignalSystem signals, StopSignSystem stopSigns, YieldSignSystem yieldSigns)
     {
         // First, try to find a signal node near the click

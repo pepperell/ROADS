@@ -49,8 +49,8 @@ public class PoiSubmenu : Panel
             Add(button);
         }
 
-        // Anchored under the Dest Pt tool button (index 3), padded like the old backdrop.
-        Margin = new SKPoint(MenuBar.ToolButtonLeft(3) - Pad, MenuBar.SubmenuY - Pad);
+        // Anchored under the Dest Pt tool button (index 4), padded like the old backdrop.
+        Margin = new SKPoint(MenuBar.ToolButtonLeft(4) - Pad, MenuBar.SubmenuY - Pad);
         Size = new SKSize(
             PoiLabels.Length * ButtonWidth + (PoiLabels.Length - 1) * ButtonSpacing + 2f * Pad,
             ButtonHeight + 2f * Pad);
