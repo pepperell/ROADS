@@ -71,8 +71,22 @@ public static class SteeringController
     /// </summary>
     private static int[] _edgeOccupancy = Array.Empty<int>();
 
+    /// <summary>Per-vehicle count of consecutive sim ticks spent overlap-stalled (fully stopped with a
+    /// stopped vehicle overlapping it). Drives the merge deadlock-breaker; reset the moment it clears.</summary>
+    private static int[] _overlapStall = Array.Empty<int>();
+    /// <summary>Per-vehicle breaker flag: when set, this vehicle is the "front" of a stuck overlap tangle
+    /// and is allowed to creep forward through the overlap (it ignores overlapping cars in its threat /
+    /// hard-overlap checks). Set by the breaker pass at the end of <see cref="UpdateAll"/>, consumed by
+    /// <see cref="FindNearbyThreats"/> and <see cref="ApplyHardOverlapBrake"/> on the next tick.</summary>
+    private static bool[] _breakerProceed = Array.Empty<bool>();
+    /// <summary>Sim ticks a vehicle must be overlap-stalled before the breaker frees the tangle's front
+    /// (~3 s at the 30 Hz sim rate) — far longer than any legitimate merge/yield wait.</summary>
+    private const int OverlapStallTicks = 90;
+
     /// <summary>Thread-local buffer for the merge-into-exit-lane spatial query.</summary>
     [ThreadStatic] private static List<int>? _scan2Buffer;
+    /// <summary>Thread-local buffer for the merge-yield / breaker overlap scans.</summary>
+    [ThreadStatic] private static List<int>? _overlapBuffer;
 
     /// <summary>Thread-local buffer for the arc-mode outgoing-edge leader query.</summary>
     [ThreadStatic] private static List<int>? _arcLeaderBuffer;
@@ -152,6 +166,171 @@ public static class SteeringController
         return false;
     }
 
+    // ── Merge safety ────────────────────────────────────────────────────
+    // A "merge" is two intersection arcs feeding the SAME outgoing edge (a lane-drop, or two roads
+    // joining into one). Both arcs end in the same physical throat, so two cars crossing at once collide
+    // and get shoved off-lane into a permanent overlap. These helpers let a car yield into a merge that
+    // another car is already crossing, so only one uses the throat at a time.
+
+    /// <summary>
+    /// True if <paramref name="arcIdx"/> shares its outgoing edge with a conflicting arc (i.e. it is a
+    /// merge arc) AND at least one such merge-sibling arc currently has another vehicle on it. Keyed on
+    /// live <see cref="_arcOccupancy"/>, so whoever commits to its arc first is seen by the rest.
+    /// </summary>
+    private static bool MergeSiblingOccupied(IntersectionArcCache arcCache, int arcIdx, int selfIndex)
+    {
+        int outEdge = arcCache.GetArc(arcIdx).OutgoingEdge;
+        foreach (int c in arcCache.GetConflictingArcs(arcIdx))
+        {
+            if (arcCache.GetArc(c).OutgoingEdge != outEdge) continue; // only siblings that merge onto the same edge
+            int occ = _arcOccupancy.OccupantCount(c);
+            for (int k = 0; k < occ; k++)
+                if (_arcOccupancy.OccupantAt(c, k) != selfIndex) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// True when the vehicle is approaching a merge (its next turn's arc shares its outgoing edge with
+    /// another arc) that another vehicle is currently crossing — so it should brake to its stop line
+    /// instead of driving into the occupied throat. Read-only: resolves the intended arc via the cache
+    /// (no reroute). Returns false when the car has no next edge or the turn has no arc.
+    /// </summary>
+    private static bool ApproachingOccupiedMerge(VehicleStore store, int index, RoadGraph graph,
+        IntersectionArcCache arcCache, int edgeIdx)
+    {
+        var path = store.Path[index];
+        int pathIdx = store.PathIndex[index];
+        if (path == null || pathIdx + 1 >= path.Count) return false;
+        int nextEdge = path[pathIdx + 1];
+        if (nextEdge < 0 || nextEdge >= graph.Edges.Count || graph.Edges[nextEdge].FromNode < 0) return false;
+        byte inLane = store.CurrentLane[index];
+        byte outLane = (byte)Math.Min(inLane, graph.Edges[nextEdge].LaneCount - 1);
+        int arcIdx = arcCache.GetArcIndex(edgeIdx, nextEdge, inLane, outLane);
+        if (arcIdx < 0) return false;
+        return MergeSiblingOccupied(arcCache, arcIdx, index);
+    }
+
+    // ── Merge deadlock-breaker ──────────────────────────────────────────
+    // Last-resort recovery: if two cars still wedge in a merge throat despite the yield (a same-tick
+    // race, tight geometry, or a pre-existing tangle), they hard-brake on each other forever. The
+    // breaker tracks how long each car has been overlap-stalled and, past a threshold, frees the FRONT
+    // of the tangle — the car with no stopped car genuinely ahead — by letting it creep forward and
+    // bypass the merge gate (via _breakerProceed). The rest hold; once the front drains, the next car
+    // becomes the front, and the pile unwinds. Bounded and self-clearing.
+
+    private const float BreakerStoppedSpeed = 0.1f;   // m/s below which a car counts as stopped here
+    private const float BreakerCreepSpeed = 1.5f;     // cap the freed front's creep speed
+    private const float BreakerCreepThrottle = 0.35f; // gentle forward throttle while creeping out
+
+    /// <summary>True while this vehicle is the breaker-freed front of a stuck overlap tangle: it bypasses
+    /// the merge yield/gate and is creep-driven out of the pile. Set by <see cref="RunDeadlockBreaker"/>.</summary>
+    private static bool BreakerFront(int index) => index < _breakerProceed.Length && _breakerProceed[index];
+
+    /// <summary>True if another stopped Driving vehicle physically OVERLAPS <paramref name="i"/> — its
+    /// body is past <paramref name="i"/>'s in both axes of <paramref name="i"/>'s frame. The tight lateral
+    /// bound (≈ car width, well under a lane) is deliberate: it must NOT fire for cars legitimately queued
+    /// behind/ahead (forward gap ≥ a car length) or sitting side-by-side in adjacent lanes at a light,
+    /// only for a genuine bumper-overlap wedge.</summary>
+    private static bool HasStoppedOverlap(VehicleStore store, int i, SpatialGrid grid)
+    {
+        var buf = _overlapBuffer ??= new List<int>();
+        buf.Clear();
+        float vx = store.PosX[i], vy = store.PosY[i];
+        float cosH = MathF.Cos(store.Heading[i]), sinH = MathF.Sin(store.Heading[i]);
+        grid.QueryFiltered(vx, vy, VehicleLength * 1.2f, store.PosX, store.PosY, buf);
+        foreach (int j in buf)
+        {
+            if (j == i || store.State[j] != VehicleState.Driving) continue;
+            if (store.Speed[j] >= BreakerStoppedSpeed) continue;
+            float dx = store.PosX[j] - vx, dy = store.PosY[j] - vy;
+            float forward = MathF.Abs(dx * cosH + dy * sinH);
+            float lateral = MathF.Abs(-dx * sinH + dy * cosH);
+            if (forward < VehicleLength * 0.9f && lateral < VehicleLength * 0.6f) return true;
+        }
+        return false;
+    }
+
+    /// <summary>True if <paramref name="i"/> is the front of its tangle: no nearby STOPPED vehicle sits
+    /// ahead of it ALONG ITS PATH (same edge/arc further along, on its outgoing edge, or on the arc/edge
+    /// it feeds into). Path-relative rather than physical-cone, because at a merge the cars are crossed
+    /// and shoved off-lane, so a physical "ahead" cone mistakes the car behind on the feeding arc for a
+    /// leader and no one is ever the front. The front can be safely creeped out; others hold.</summary>
+    private static bool IsTangleFront(VehicleStore store, int i, SpatialGrid grid, RoadGraph graph, IntersectionArcCache arcCache)
+    {
+        var buf = _overlapBuffer ??= new List<int>();
+        buf.Clear();
+        grid.QueryFiltered(store.PosX[i], store.PosY[i], VehicleLength * 3f, store.PosX, store.PosY, buf);
+        foreach (int j in buf)
+        {
+            if (j == i || store.State[j] != VehicleState.Driving) continue;
+            if (store.Speed[j] >= BreakerStoppedSpeed) continue;          // a moving car ahead isn't a deadlock
+            if (IsAheadAlongPath(store, graph, arcCache, i, j)) return false;
+        }
+        return true;
+    }
+
+    /// <summary>True if vehicle <paramref name="j"/> is ahead of <paramref name="i"/> along i's route:
+    /// on the same arc/edge further along, on i's outgoing edge (i on an arc), or on the next edge/arc i
+    /// is about to take. Path-relative so it stays correct when merge geometry crosses cars over.</summary>
+    private static bool IsAheadAlongPath(VehicleStore store, RoadGraph graph, IntersectionArcCache arcCache, int i, int j)
+    {
+        int ia = store.CurrentArc[i], ja = store.CurrentArc[j];
+        if (ia >= 0)
+        {
+            if (ja == ia && store.ArcProgress[j] > store.ArcProgress[i]) return true;             // same arc, ahead
+            if (ja < 0 && store.CurrentEdge[j] == arcCache.GetArc(ia).OutgoingEdge) return true;  // j exited onto i's outgoing edge
+            return false;
+        }
+        int ie = store.CurrentEdge[i];
+        if (ja < 0)
+        {
+            if (store.CurrentEdge[j] == ie && store.EdgeProgress[j] > store.EdgeProgress[i]) return true; // same edge, ahead
+            var path = store.Path[i];
+            int pi = store.PathIndex[i];
+            if (path != null && pi + 1 < path.Count && store.CurrentEdge[j] == path[pi + 1]) return true; // j on i's next edge
+        }
+        else if (arcCache.GetArc(ja).IncomingEdge == ie)
+        {
+            return true; // j is on the arc leaving i's current edge — committed into the intersection ahead of i
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// End-of-pass deadlock breaker. Ages an overlap-stall counter per vehicle and, once a car has been
+    /// wedged past <see cref="OverlapStallTicks"/>, frees it if it is the tangle front (creep + merge-gate
+    /// bypass). Cheap: only stopped cars run the overlap scans.
+    /// </summary>
+    private static void RunDeadlockBreaker(VehicleStore store, SpatialGrid grid, RoadGraph graph, IntersectionArcCache arcCache)
+    {
+        int n = store.Count;
+        if (_overlapStall.Length < n) Array.Resize(ref _overlapStall, n + 64);
+        if (_breakerProceed.Length < n) Array.Resize(ref _breakerProceed, n + 64);
+
+        for (int i = 0; i < n; i++)
+        {
+            if (store.State[i] != VehicleState.Driving || store.Speed[i] >= BreakerStoppedSpeed)
+            {
+                _overlapStall[i] = 0;
+                _breakerProceed[i] = false;
+                continue;
+            }
+
+            bool stalled = HasStoppedOverlap(store, i, grid);
+            _overlapStall[i] = stalled ? _overlapStall[i] + 1 : 0;
+
+            bool front = _overlapStall[i] >= OverlapStallTicks && IsTangleFront(store, i, grid, graph, arcCache);
+            _breakerProceed[i] = front;
+            if (front && store.Speed[i] < BreakerCreepSpeed)
+            {
+                store.Brake[i] = 0f;
+                store.Throttle[i] = BreakerCreepThrottle;
+                LogDiag(store, i, $"MERGE_BREAKER creep front (stall={_overlapStall[i]})");
+            }
+        }
+    }
+
     /// <summary>
     /// Updates a vehicle's steering angle, throttle, brake, and edge/arc progress.
     /// Combines PD heading control, lateral error correction, IDM car-following,
@@ -223,7 +402,7 @@ public static class SteeringController
         ComputeSteering(store, index, graph, edgeIdx, rawProgress, progress, edgeLength, minProgressT, vx, vy, dt);
 
         // IDM car-following + throttle/brake
-        ApplySpeedControl(store, index, graph, grid, stopLines, edgeIdx, edgeLength, speed, targetSpeed, progress, stopAtT, signal, yieldSignal);
+        ApplySpeedControl(store, index, graph, grid, stopLines, arcCache, edgeIdx, edgeLength, speed, targetSpeed, progress, stopAtT, signal, yieldSignal);
 
         // Detect multi-segment skip within a single tick
         int exitPathIdx = store.PathIndex[index];
@@ -460,6 +639,20 @@ public static class SteeringController
                             store.Speed[index] = 0f;
                             return TransitionResult.Returned;
                         }
+                    }
+
+                    // Merge gate: don't enter a merge arc (one sharing its outgoing edge with another arc)
+                    // while a vehicle is crossing the merge from a conflicting approach — the two would
+                    // collide in the single throat and wedge off-lane. Backstop at the line for the
+                    // approach-phase merge yield; mirrors the shared-lane gate above. A breaker front is
+                    // exempt so it can drive out of an existing tangle.
+                    if (!BreakerFront(index) && MergeSiblingOccupied(arcCache, arcIdx, index))
+                    {
+                        store.EdgeProgress[index] = stopAtT;
+                        store.Throttle[index] = 0f;
+                        store.Brake[index] = 1.0f;
+                        store.Speed[index] = 0f;
+                        return TransitionResult.Returned;
                     }
 
                     // Enter the intersection arc (SetArc keeps the occupancy index live so later
@@ -723,12 +916,13 @@ public static class SteeringController
     /// Sets throttle and brake on the vehicle.
     /// </summary>
     private static void ApplySpeedControl(VehicleStore store, int index, RoadGraph graph,
-        SpatialGrid grid, StopLineCache stopLines, int edgeIdx, float edgeLength,
+        SpatialGrid grid, StopLineCache stopLines, IntersectionArcCache arcCache, int edgeIdx, float edgeLength,
         float speed, float targetSpeed, float progress, float stopAtT,
         SignalState signal, SignalState yieldSignal)
     {
         float comfortDecel = store.BrakingComfort[index];
         float timeHeadway = MapAggressivenessToTimeHeadway(store.Aggressiveness[index]);
+        bool breakerFront = BreakerFront(index);
 
         var (aheadDist, leaderSpeed) = FindNearbyThreats(store, index, grid, graph);
 
@@ -772,6 +966,20 @@ public static class SteeringController
                     gap = distToStop;
                     deltaV = speed - creepSpeed;
                 }
+            }
+        }
+
+        // Merge yield: don't drive into a merge another car is already crossing — brake to the stop line
+        // and wait there, so the two don't collide in the single throat and get shoved off-lane into a
+        // permanent overlap. Independent of stop-sign right-of-way (applies on exempt approaches too).
+        // Skipped for a breaker front, which is being freed from an existing tangle and must not re-yield.
+        if (!breakerFront && ApproachingOccupiedMerge(store, index, graph, arcCache, edgeIdx))
+        {
+            float distToStop = (stopAtT - progress) * edgeLength;
+            if (distToStop > 0f && distToStop < gap)
+            {
+                gap = distToStop;
+                deltaV = speed;
             }
         }
 
@@ -1363,6 +1571,10 @@ public static class SteeringController
             _prevEdgeProg[i] = afterProg;
             _prevEdge[i] = afterEdge;
         }
+
+        // Break any merge/overlap deadlock that survived the per-vehicle pass (after all controls are set,
+        // so the breaker's creep override is the final word before physics integrates this tick).
+        RunDeadlockBreaker(store, grid, graph, arcCache);
 
 #if DEBUG
         // Collision tripwire: count vehicle pairs simultaneously on mutually-conflicting arcs.

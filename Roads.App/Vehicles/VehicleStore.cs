@@ -1,5 +1,7 @@
 using System.Diagnostics;
 
+using Roads.App.Core;
+
 namespace Roads.App.Vehicles;
 
 /// <summary>
@@ -183,7 +185,7 @@ public class VehicleStore
     /// <returns>RGB tuple for the selected color.</returns>
     public static (byte r, byte g, byte b) RandomCarColor()
     {
-        int roll = Random.Shared.Next(TotalWeight);
+        int roll = SimRandom.Next(TotalWeight);
         int cumulative = 0;
         foreach (var (r, g, b, w) in CarColors)
         {

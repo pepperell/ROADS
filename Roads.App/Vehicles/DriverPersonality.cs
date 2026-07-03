@@ -1,3 +1,5 @@
+using Roads.App.Core;
+
 namespace Roads.App.Vehicles;
 
 /// <summary>
@@ -137,7 +139,7 @@ public static class DriverPersonalityGenerator
         var weights = VehicleWeights[archetypeIndex];
         int total = 0;
         foreach (var (_, w) in weights) total += w;
-        int roll = Random.Shared.Next(total);
+        int roll = SimRandom.Next(total);
         int cumulative = 0;
         foreach (var (type, w) in weights)
         {
@@ -149,7 +151,7 @@ public static class DriverPersonalityGenerator
 
     private static DriverArchetype PickRandomArchetype()
     {
-        int roll = Random.Shared.Next(TotalWeight);
+        int roll = SimRandom.Next(TotalWeight);
         int cumulative = 0;
         foreach (var (archetype, weight) in ArchetypeWeights)
         {
@@ -164,8 +166,8 @@ public static class DriverPersonalityGenerator
     /// </summary>
     private static float Gaussian(float mean, float stddev)
     {
-        float u1 = 1f - (float)Random.Shared.NextDouble(); // (0, 1]
-        float u2 = (float)Random.Shared.NextDouble();
+        float u1 = 1f - (float)SimRandom.NextDouble(); // (0, 1]
+        float u2 = (float)SimRandom.NextDouble();
         float z = MathF.Sqrt(-2f * MathF.Log(u1)) * MathF.Cos(2f * MathF.PI * u2);
         return mean + stddev * z;
     }

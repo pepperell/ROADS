@@ -58,6 +58,12 @@ public class SimulationLoop
     /// <summary>Gets the population manager for resident/schedule info.</summary>
     public PopulationManager Population => _populationManager;
 
+    /// <summary>Number of fixed sim substeps advanced by the most recent <see cref="Tick"/> (0 while
+    /// paused; grows with time-scale and frame backlog). Lets per-frame UI bookkeeping measure elapsed
+    /// SIM time rather than UI frames — e.g. the stuck-vehicle tracker, so its duration is correct at any
+    /// fast-forward speed.</summary>
+    public int LastTickSubsteps { get; private set; }
+
     /// <summary>Edge spatial grid (rebuilt on graph change) — used by the renderer for visible-edge culling.</summary>
     public EdgeSpatialGrid EdgeGrid => _edgeSpatialGrid;
 
@@ -138,6 +144,7 @@ public class SimulationLoop
             // grid was bulk-cleared and no sim step has indexed the new vehicles.
             _vehicleGrid.Rebuild(_vehicles.PosX, _vehicles.PosY, _vehicles.Count);
             RebuildWorldCaches();
+            LastTickSubsteps = 0; // no sim time advanced while paused
             return;
         }
 
@@ -199,6 +206,8 @@ public class SimulationLoop
         if (steps >= MaxStepsPerFrame)
             _simAccumulator = 0;
 
+        LastTickSubsteps = steps; // sim substeps advanced this Tick (scales with time-scale & load)
+
         if (steps > 0)
         {
             double toMs = 1000.0 / Stopwatch.Frequency;
@@ -215,6 +224,49 @@ public class SimulationLoop
             "SelectedVehicle out of range — a vehicle removal bypassed centralized fixup.");
         if (selVeh >= _vehicles.Count)
             _editorState.SelectedVehicle = -1; // release-mode self-heal
+    }
+
+    /// <summary>
+    /// Advances the simulation by exactly <paramref name="substeps"/> fixed timesteps with NO
+    /// wall-clock, accumulator, or <see cref="Paused"/> dependency — the timing-independent core
+    /// the headless <see cref="Roads.App.Diagnostics.SimTestHarness"/> drives for reproducible runs.
+    /// Each substep runs the IDENTICAL subsystem order as the <see cref="Tick"/> inner loop (grid →
+    /// caches → traffic control → lane change → steering → physics → reroute → population/spawn →
+    /// clock), so behaviour matches the GUI step-for-step. Unlike Tick it skips the wall-time backlog
+    /// math and per-subsystem timing publication; <see cref="LastTickSubsteps"/> is set to the count
+    /// run. Step 0 graph-change convergence still runs once up front so editor fix-ups settle.
+    /// </summary>
+    public void StepDeterministic(int substeps)
+    {
+        _graphChangeHandler.HandleIfNeeded();
+        _populationManager.ValidateMappings();
+
+        for (int s = 0; s < substeps; s++)
+        {
+            _vehicleGrid.Rebuild(_vehicles.PosX, _vehicles.PosY, _vehicles.Count);
+            RebuildWorldCaches();
+
+            _trafficSignals.Update(_graph, SimDt);
+            _stopSigns.Update(_graph, _vehicles, _stopLineCache, SimDt);
+            _yieldSigns.Update(_graph, _vehicles, _stopLineCache, _intersectionArcs, SimDt);
+
+            LaneChangeLogic.UpdateAll(_vehicles, _graph, _vehicleGrid, _intersectionArcs, _stopLineCache, SimDt);
+            LaneChangeLogic.ApplyMergeSpeedBias(_vehicles, _graph, _vehicleGrid, _intersectionArcs, _stopLineCache);
+
+            SteeringController.UpdateAll(_vehicles, _graph, _vehicleGrid, _stopLineCache, _intersectionArcs, _trafficSignals, _stopSigns, _yieldSigns, SimDt);
+
+            VehiclePhysics.UpdateAll(_vehicles, SimDt);
+
+            _spawner.RerouteFinished();
+
+            _populationManager.Update(SimDt, Clock.TimeOfDay, Clock.DayNumber);
+            _spawner.ScheduleModeActive = _populationManager.ScheduleModeEnabled;
+            _spawner.AutoSpawn(SimDt, MaxVehicles);
+
+            Clock.Advance(SimDt);
+        }
+
+        LastTickSubsteps = substeps;
     }
 
     /// <summary>Graph version after the last normalize pass; phase 1 of

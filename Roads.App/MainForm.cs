@@ -86,10 +86,10 @@ public class MainForm : Form
     private int[] _stuckTicks = System.Array.Empty<int>();
     /// <summary>Speed (m/s) below which a vehicle counts as "stopped" for stuck-time tracking.</summary>
     private const float StuckSpeedThreshold = 0.1f;
-    /// <summary>Ticks stopped before a vehicle is treated as a deadlock candidate by the cluster dump
-    /// (press <c>D</c> with nothing selected). ~6 s at the sim tick rate — long past any stop-sign wait
-    /// or queue, so a normal red light never trips it.</summary>
-    private const int StuckTickThreshold = 360;
+    /// <summary>SIM substeps stopped before a vehicle is treated as a deadlock candidate by the cluster
+    /// dump (press <c>D</c> with nothing selected). Counted in sim substeps (30 Hz), NOT UI frames, so the
+    /// duration is correct at any fast-forward speed — 120 ≈ 4 s of sim time, long past normal stop-and-go.</summary>
+    private const int StuckTickThreshold = 120;
 
     public MainForm(int autoBenchFrames = 0)
     {
@@ -186,10 +186,14 @@ public class MainForm : Form
         if (_stuckTicks.Length < _vehicles.Count)
             System.Array.Resize(ref _stuckTicks, _vehicles.Count + 64);
 
+        // Advance by the SIM substeps this Tick covered (not +1 per UI frame), so stuck-time reflects
+        // elapsed simulation time and stays correct when fast-forwarded — at high time-scale one UI frame
+        // is many sim substeps, and a per-frame counter would wildly under-count a jam.
+        int simTicks = _simLoop.LastTickSubsteps;
         for (int v = 0; v < _vehicles.Count; v++)
         {
             if (_vehicles.State[v] == VehicleState.Driving && _vehicles.Speed[v] < StuckSpeedThreshold)
-                _stuckTicks[v]++;
+                _stuckTicks[v] += simTicks;
             else
                 _stuckTicks[v] = 0;
         }
@@ -367,7 +371,7 @@ public class MainForm : Form
         sb.AppendLine("  --- BLOCKER ANALYSIS ---");
 
         int stuckTicks = i < _stuckTicks.Length ? _stuckTicks[i] : 0;
-        sb.AppendLine($"  Stuck for: {stuckTicks} ticks (~{stuckTicks / 60f:F1}s continuously stopped at ~60Hz)");
+        sb.AppendLine($"  Stuck for: {stuckTicks} sim-ticks (~{stuckTicks / 30f:F1}s of sim time continuously stopped)");
 
         int leader = NearestVehicleAhead(i, out float gap, out float lat);
         if (leader >= 0)
@@ -376,10 +380,19 @@ public class MainForm : Form
         else
             sb.AppendLine("  Nearest ahead: none within 30m (so it is held by a signal/stop, not a car)");
 
-        // Stop-sign first-come-first-served detail (explains a never-granted green).
-        if (edgeIdx >= 0 && edgeIdx < _roadGraph.Edges.Count && _roadGraph.Edges[edgeIdx].FromNode >= 0
-            && _stopSigns.CanQuery(_roadGraph))
-            sb.AppendLine($"  StopSign FCFS: {_stopSigns.DescribeStopState(_roadGraph, edgeIdx)}");
+        // Stop-sign first-come-first-served detail (explains a never-granted green). Dumped even when
+        // CanQuery is false (e.g. just after a pause rebuilt caches) — the arrays still hold the last
+        // Update's state, which is exactly what we want to inspect; flagged STALE so it's not misread.
+        if (edgeIdx >= 0 && edgeIdx < _roadGraph.Edges.Count && _roadGraph.Edges[edgeIdx].FromNode >= 0)
+        {
+            string stale = _stopSigns.CanQuery(_roadGraph) ? "" : " [STALE: not updated since last cache rebuild]";
+            sb.AppendLine($"  StopSign FCFS: {_stopSigns.DescribeStopState(_roadGraph, edgeIdx)}{stale}");
+            // Full per-incoming-edge FCFS state of the approached node — shows which approach (if any,
+            // incl. a stale phantom) is winning the queue when a clear waiter is never served.
+            int toNode = _roadGraph.Edges[edgeIdx].ToNode;
+            if (toNode >= 0 && _stopSigns.IsStopSign(toNode))
+                sb.AppendLine(_stopSigns.DescribeNodeFull(_roadGraph, toNode));
+        }
 
         // Intended turn arc + conflicting arcs and who occupies them (the intersection-deadlock view).
         if (_vehicles.CurrentArc[i] < 0 && edgeIdx >= 0 && path != null && pathIdx + 1 < path.Count)

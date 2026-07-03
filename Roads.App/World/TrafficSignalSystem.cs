@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Numerics;
 
+using Roads.App.Core;
+
 namespace Roads.App.World;
 
 /// <summary>
@@ -203,7 +205,7 @@ public class TrafficSignalSystem
             if (n < oldIsTrafficLight.Length && oldIsTrafficLight[n])
                 _nodeTimer[n] = oldTimer[n];
             else if (_nodeTimer[n] == 0f)
-                _nodeTimer[n] = Random.Shared.NextSingle() * CycleDuration;
+                _nodeTimer[n] = SimRandom.NextSingle() * CycleDuration;
 
             ComputePhaseGroups(graph, n, graph.GetIncomingEdges(n));
         }

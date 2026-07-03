@@ -311,7 +311,17 @@ public class StopSignSystem
         // Detect stopped vehicles at stop lines
         for (int e = 0; e < edgeCount; e++)
         {
-            if (!_isStopSignEdge[e]) continue;
+            if (!_isStopSignEdge[e])
+            {
+                // Clear any stale stopped-state on an edge that is NOT (or is no longer) a stop-sign
+                // approach, so the queue resolver below can't treat it as a phantom waiter. This strands
+                // otherwise: when an approach is exempted (or its ToNode loses its stop sign) while a car
+                // is stopped at its line, detection stops touching the edge, leaving _edgeHasStoppedVeh
+                // true with a fixed _edgeArrivalTime. That phantom then wins the FCFS forever (oldest
+                // arrival, but lead vehicle -1), starving the node's real approaches.
+                if (_edgeHasStoppedVeh[e]) { _edgeHasStoppedVeh[e] = false; _edgeArrivalTime[e] = float.NaN; }
+                continue;
+            }
 
             float stopT = stopLines.GetStopTAtToNode(e);
             float leadProgress = _edgeLeadProgress[e];
@@ -349,11 +359,22 @@ public class StopSignSystem
                 int servedVeh = _servedVehicle[n];
                 bool expired = _simTime - _grantedTime[n] >= MaxGrantTime;
 
-                // Served vehicle departed if: it's no longer the lead on this edge
-                // (it transitioned to the next edge, was removed, or a different vehicle is now lead)
+                // The served vehicle has departed only when IT has actually left the approach:
+                // removed, no longer driving, crossed into the intersection (now on an arc), or
+                // moved onto a different edge. We deliberately do NOT treat "a different vehicle is
+                // now the lead on this edge" as departure: a stop-sign grant turns the WHOLE edge
+                // green (all lanes go at once — see GetSignal), so on a multi-lane approach a
+                // parallel-lane car can out-creep the served vehicle and steal the tracked lead.
+                // The old proxy (_edgeLeadVehicle[serving] != servedVeh) then fired a false departure
+                // on the very next tick of every grant, re-arming clearance before either car could
+                // cross — a livelock that strands two cars side-by-side at the line forever. Anchoring
+                // departure to the served vehicle itself lets the granted edge stay green long enough
+                // for its lane(s) to clear; MaxGrantTime still caps a vehicle blocked downstream.
                 bool departed = servedVeh < 0
-                    || _edgeLeadVehicle[serving] != servedVeh
-                    || _edgeLeadProgress[serving] == 0f;
+                    || servedVeh >= vehicles.Count
+                    || vehicles.State[servedVeh] != VehicleState.Driving
+                    || vehicles.CurrentArc[servedVeh] >= 0
+                    || vehicles.CurrentEdge[servedVeh] != serving;
 
                 if (departed || expired)
                 {
@@ -375,6 +396,12 @@ public class StopSignSystem
                 {
                     if (edgeIdx < 0 || edgeIdx >= edgeCount) continue;
                     if (!_edgeHasStoppedVeh[edgeIdx]) continue;
+                    // Only serve an approach that actually has a lead vehicle tracked this tick. Without
+                    // this, a stale "stopped" flag (see the clear in the detection pass) would select a
+                    // phantom edge whose lead is -1; it would be granted, then immediately judged
+                    // "departed" (servedVeh < 0) every cycle — a livelock that never serves the genuine
+                    // waiters. Defends the resolver against any path that leaves the flag set with no car.
+                    if (_edgeLeadVehicle[edgeIdx] < 0) continue;
 
                     float waited = _simTime - _edgeArrivalTime[edgeIdx];
                     if (waited < MinWaitTime) continue;
@@ -501,6 +528,37 @@ public class StopSignSystem
         float clearIn = node < _clearanceEndTime.Length ? MathF.Max(0f, _clearanceEndTime[node] - _simTime) : 0f;
         return $"node {node}: servedEdge={served} servedVeh={servedVeh} thisEdgeAtLine={stoppedHere} " +
                $"waited={waited:F2}s (min {MinWaitTime:F1}s) clearanceIn={clearIn:F2}s";
+    }
+
+    /// <summary>
+    /// Full FCFS state for a stop-sign node and EVERY one of its incoming edges, for diagnosing a
+    /// "green never comes" stall: the node-level serving/clearance, plus per-edge whether it's a live
+    /// stop-sign approach, exempt, recognised at the line, how long it's waited, and the tracked lead
+    /// vehicle. Reveals which edge (if any) is winning the queue — including a stale/phantom one.
+    /// </summary>
+    public string DescribeNodeFull(RoadGraph graph, int node)
+    {
+        if (node < 0 || node >= _isStopSign.Length || !_isStopSign[node]) return "  FCFS: not a stop-sign node";
+        var sb = new System.Text.StringBuilder();
+        int served = node < _currentlyServingEdge.Length ? _currentlyServingEdge[node] : -1;
+        int servedVeh = node < _servedVehicle.Length ? _servedVehicle[node] : -1;
+        float grantAge = node < _grantedTime.Length ? _simTime - _grantedTime[node] : -1f;
+        float clearIn = node < _clearanceEndTime.Length ? MathF.Max(0f, _clearanceEndTime[node] - _simTime) : 0f;
+        sb.AppendLine($"  FCFS node {node}: serving={served} servedVeh={servedVeh} grantAge={grantAge:F2}s "
+            + $"clearanceIn={clearIn:F2}s maxGrant={MaxGrantTime:F1}s");
+        foreach (int e in graph.GetIncomingEdges(node))
+        {
+            bool isSS = e < _isStopSignEdge.Length && _isStopSignEdge[e];
+            bool exempt = e < _edgeExempt.Length && _edgeExempt[e];
+            bool stopped = e < _edgeHasStoppedVeh.Length && _edgeHasStoppedVeh[e];
+            float arr = e < _edgeArrivalTime.Length ? _edgeArrivalTime[e] : float.NaN;
+            float waited = float.IsNaN(arr) ? -1f : _simTime - arr;
+            int lead = e < _edgeLeadVehicle.Length ? _edgeLeadVehicle[e] : -1;
+            float leadProg = e < _edgeLeadProgress.Length ? _edgeLeadProgress[e] : 0f;
+            sb.AppendLine($"    inEdge {e} ({graph.Edges[e].FromNode}->{graph.Edges[e].ToNode}): "
+                + $"isSS={isSS} exempt={exempt} atLine={stopped} waited={waited:F1}s lead={lead} leadProg={leadProg:F3}");
+        }
+        return sb.ToString().TrimEnd('\r', '\n');
     }
 
     /// <summary>Returns indices of all edges marked exempt from stop sign enforcement.</summary>
