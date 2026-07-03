@@ -35,7 +35,7 @@ A real-time, city-scale traffic simulation built in C# with a graphical editor. 
 | Language | C# / .NET 8 |
 | Rendering | SkiaSharp 3.x (GPU-accelerated 2D) |
 | Windowing | WinForms |
-| UI | Immediate-mode toolbar & slider panels rendered via SkiaSharp |
+| UI | Retained-mode control hierarchy (WinForms-like panels/labels/buttons) rendered via SkiaSharp |
 | Architecture | Double-buffered sim/render, SoA data layout, spatial grid indexing |
 
 ---
@@ -103,9 +103,7 @@ Roads/
 │   │   ├── StopLineCache.cs          # Precomputed stop line positions
 │   │   ├── TrafficSignalSystem.cs    # Traffic light phase logic
 │   │   ├── StopSignSystem.cs         # Stop sign queue logic
-│   │   ├── YieldSignSystem.cs        # Yield sign logic
-│   │   ├── SpawnPoint.cs             # Vehicle spawn locations
-│   │   └── DestinationPoint.cs       # Vehicle destination locations
+│   │   └── YieldSignSystem.cs        # Yield sign logic
 │   │
 │   ├── Vehicles/
 │   │   ├── VehicleStore.cs           # SoA vehicle data store
@@ -119,7 +117,6 @@ Roads/
 │   │   ├── RoadTool.cs               # Road drawing (click to place nodes)
 │   │   ├── DeleteTool.cs             # Road/node deletion
 │   │   ├── SignalTool.cs             # Traffic signal assignment
-│   │   ├── SpawnPointTool.cs         # Spawn point placement
 │   │   ├── DestinationTool.cs        # Destination point placement
 │   │   ├── EdgeSnapTool.cs           # Snap-to-edge helpers
 │   │   └── LaneRestrictionTool.cs    # Lane restriction editing
@@ -135,15 +132,29 @@ Roads/
 │       ├── PropRenderer.cs           # Street lights, trees, bushes (deterministic scatter)
 │       ├── SignRenderer.cs           # Signal heads, stop/yield signs, change-only speed signs
 │       ├── VehicleRenderer.cs        # Vehicle shape drawing
-│       ├── MarkerRenderer.cs         # Spawn-point markers
-│       ├── MinimapRenderer.cs        # Corner minimap (cached SKPicture)
 │       ├── CongestionHeatMap.cs      # Per-edge congestion overlay (H key)
 │       ├── RenderDetail.cs           # LOD thresholds and frustum-culling helpers
-│       ├── UIRenderer.cs             # Toolbar and overlay panels
-│       ├── SliderPanel.cs            # Runtime-tunable parameter sliders
-│       ├── StatisticsPanel.cs        # Population/traffic statistics overlay
-│       ├── PerformanceHud.cs         # FPS / sim / draw / GC readout (P key)
-│       └── VehicleInfoPanel.cs       # Selected vehicle info display
+│       ├── PerfTelemetry.cs          # Frame timing + pathfind stats (feeds HUD & benchmarks)
+│       │
+│       └── Ui/                       # Retained-mode control hierarchy (WinForms-like)
+│           ├── Panel.cs              # Base control: bounds, background/border, mouse events
+│           ├── Label.cs              # Panel + font/text (static or live TextSource)
+│           ├── Button.cs             # Label + hover/pressed/active/disabled color states
+│           ├── UiRoot.cs             # Z-order, layout, hover tracking, mouse capture
+│           ├── UiTheme.cs            # Shared fonts, colors, POI palette, scratch paints
+│           ├── MenuBar.cs            # File actions (New/Save/Load) + tool buttons (top-left)
+│           ├── PoiSubmenu.cs         # POI-type buttons under the Dest Pt tool
+│           ├── ClockPanel.cs         # Analog 12h clock (AM/PM), digital time, speed + transport buttons
+│           ├── SelectionInfoPanel.cs # Selected node/edge details (always shown; "No selection" idle)
+│           ├── LegendPanel.cs        # Keyboard shortcut legend
+│           ├── SliderPanel.cs        # Runtime-tunable parameter sliders (container)
+│           ├── Slider.cs             # One labeled slider row (drag with capture)
+│           ├── MinimapPanel.cs       # Corner minimap (cached SKPicture, click/scrub)
+│           ├── StatisticsPanel.cs    # Population/traffic statistics (on by default; N toggles)
+│           ├── VehicleInfoPanel.cs   # Selected vehicle info (auto height)
+│           ├── PerformanceHudPanel.cs# FPS / sim / draw / GC readout (on by default; P toggles)
+│           ├── PerformanceBar.cs     # Stacked sim/draw/idle frame-time bar
+│           └── BottomLeftStack.cs    # Overlap-free stacking of HUD/stats/vehicle/selection info
 ```
 
 ---
@@ -195,8 +206,7 @@ A **PID steering controller** tracks the lane center Bezier curve with a speed-s
 | **Road** | Click to place nodes; creates connected road edges with Bezier curves |
 | **Delete** | Click to remove road segments or nodes |
 | **Signal** | Click intersection to cycle: none → stop sign → yield → traffic light |
-| **Spawn Point** | Click to place vehicle entry points |
-| **Destination** | Click to place vehicle destination points |
+| **Destination** | Click to place vehicle destination points (incl. Entry/Exit nodes, where traffic enters and leaves the map) |
 | **Lane Restriction** | Configure lane-specific rules |
 | **Edge Snap** | Snap new connections to existing road edges |
 
@@ -247,7 +257,7 @@ Achieved via struct-of-arrays layout and value types.
 | :white_check_mark: | Multi-lane roads (lane offset computation, lane rendering) |
 | :white_check_mark: | A* pathfinding on the road graph |
 | :white_check_mark: | Path representation (edge sequence) and vehicle path-following |
-| :white_check_mark: | Spawn points: place in editor, vehicles spawn and pick random destination |
+| :white_check_mark: | Spawn points: place in editor, vehicles spawn and pick random destination *(since removed — traffic enters/leaves via Entry/Exit nodes)* |
 | :white_check_mark: | Multiple vehicles (VehicleStore SoA, batch update loop) |
 | :white_check_mark: | Spatial grid for vehicles |
 | :white_check_mark: | Basic collision avoidance (brake if vehicle ahead is too close) |

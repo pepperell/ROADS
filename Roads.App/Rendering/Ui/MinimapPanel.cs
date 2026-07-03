@@ -3,37 +3,31 @@ using SkiaSharp;
 using Roads.App.Core;
 using Roads.App.World;
 
-namespace Roads.App.Rendering;
+namespace Roads.App.Rendering.Ui;
 
 /// <summary>
-/// Screen-space overview panel in the bottom-right corner showing the whole road network,
-/// the current camera viewport as a rectangle, and supporting click/drag to jump the camera.
-/// The panel background is a dark desaturated terrain green and road segments are colored
-/// (and Highway/Arterial slightly thickened) by <see cref="RoadType"/>, drawn in ascending
-/// visual importance so highways sit on top. The network geometry is recorded once into an
-/// <see cref="SKPicture"/> (in panel-local pixels) and re-recorded only when the graph
-/// changes, so per-frame cost is one picture draw plus one rectangle. The world→panel
-/// transform (<see cref="_scale"/>, <see cref="_offsetX"/>, <see cref="_offsetY"/>,
-/// <see cref="_worldMin"/>) and the last panel rect are kept so input hit-testing and
-/// screen→world mapping stay consistent with what was drawn.
+/// Bottom-right overview panel showing the whole road network, the current camera viewport
+/// as a rectangle, and click/drag camera control: mouse-down jumps the camera to the
+/// clicked world point and begins a scrub-drag (no dead zone — the jump happens on the
+/// down), captured moves keep scrubbing while the cursor stays on the panel and freeze the
+/// camera when it leaves (returning resumes). A blank map still shows (and swallows clicks
+/// on) the empty box. A chip in the box's top-left corner shows the current camera zoom.
+/// Road segments are colored/thickened by <see cref="RoadType"/> and
+/// recorded once into an <see cref="SKPicture"/> (panel-local pixels), re-recorded only
+/// when the graph version changes; the world→panel transform is kept alongside so
+/// screen→world mapping stays consistent with what was drawn.
 /// </summary>
-public class MinimapRenderer
+public class MinimapPanel : Panel
 {
-    /// <summary>Fixed side length of the (square) minimap panel in pixels. Constant so the panel
-    /// never changes size as roads are added — the network is fit (letterboxed) inside it.</summary>
+    /// <summary>Fixed side length of the (square) panel — the network is fit (letterboxed) inside.</summary>
     private const float BoxSize = 200f;
-    /// <summary>Gap in pixels between the panel and the canvas edges.</summary>
-    private const float Margin = 10f;
-    /// <summary>World-space padding added around the network bounds (meters), so roads near the
-    /// edge of the map aren't drawn flush against the panel border. Also guarantees a non-zero
-    /// extent for single-node / degenerate networks.</summary>
+    /// <summary>World-space padding (meters) around the network bounds so edge roads aren't
+    /// flush against the border; also guarantees a non-zero extent for degenerate networks.</summary>
     private const float WorldPad = 12f;
 
-    /// <summary>Whether the minimap is shown and accepts input.</summary>
-    public bool Visible { get; set; } = true;
+    private readonly Camera _camera;
+    private readonly RoadGraph _graph;
 
-    private readonly SKPaint _bgPaint = new() { Color = new SKColor(30, 38, 25, 200), Style = SKPaintStyle.Fill, IsAntialias = true };
-    private readonly SKPaint _borderPaint = new() { Color = new SKColor(80, 82, 88), Style = SKPaintStyle.Stroke, StrokeWidth = 1f, IsAntialias = true };
     /// <summary>Reusable road stroke; color and width are set per road type while recording.</summary>
     private readonly SKPaint _roadPaint = new() { Style = SKPaintStyle.Stroke, IsAntialias = true, StrokeCap = SKStrokeCap.Round };
     private readonly SKPaint _viewportPaint = new() { Color = new SKColor(120, 200, 255, 230), Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f, IsAntialias = true };
@@ -49,35 +43,40 @@ public class MinimapRenderer
     private float _scale, _offsetX, _offsetY;
     private Vector2 _worldMin;
 
-    // Last drawn panel rect (screen pixels) — used by input between frames.
-    private SKRect _panelRect = SKRect.Empty;
+    // Canvas size captured at layout, needed for the camera's visible-rect query at draw.
+    private float _canvasWidth, _canvasHeight;
 
-    /// <summary>
-    /// Draws the minimap panel when enabled: the fixed-size background box always, plus the
-    /// cached road network and live viewport rectangle when there are roads. On a blank map the
-    /// box is still shown, just empty. Rebuilds the cached network/transform when the graph changes.
-    /// </summary>
-    public void Draw(SKCanvas canvas, Camera camera, RoadGraph graph, int canvasWidth, int canvasHeight)
+    public MinimapPanel(Camera camera, RoadGraph graph)
     {
-        if (!Visible) { _panelRect = SKRect.Empty; return; }
-        EnsureCache(graph);
+        _camera = camera;
+        _graph = graph;
+        Anchor = UiAnchor.BottomRight;
+        Margin = new SKPoint(10f, 10f);
+        Size = new SKSize(BoxSize, BoxSize);
+        BackgroundColor = UiTheme.PanelBackground;
+        BorderColor = UiTheme.Outline;
+    }
 
-        float left = canvasWidth - Margin - BoxSize;
-        float top = canvasHeight - Margin - BoxSize;
-        _panelRect = new SKRect(left, top, left + BoxSize, top + BoxSize);
+    public override void Layout(float canvasWidth, float canvasHeight)
+    {
+        _canvasWidth = canvasWidth;
+        _canvasHeight = canvasHeight;
+        base.Layout(canvasWidth, canvasHeight);
+    }
 
-        canvas.DrawRoundRect(_panelRect, 4f, 4f, _bgPaint);
-
+    protected override void OnDraw(SKCanvas canvas)
+    {
+        EnsureCache(_graph);
         if (_hasContent)
         {
             canvas.Save();
-            canvas.Translate(left, top);
+            canvas.Translate(Bounds.Left, Bounds.Top);
             canvas.ClipRect(new SKRect(0, 0, BoxSize, BoxSize));
 
             if (_networkPicture != null) canvas.DrawPicture(_networkPicture);
 
             // Viewport rectangle: the visible world rect mapped into panel-local pixels.
-            var view = camera.GetVisibleWorldRect(canvasWidth, canvasHeight);
+            var view = _camera.GetVisibleWorldRect((int)_canvasWidth, (int)_canvasHeight);
             var tl = WorldToPanel(view.Left, view.Top);
             var br = WorldToPanel(view.Right, view.Bottom);
             canvas.DrawRect(new SKRect(tl.X, tl.Y, br.X, br.Y), _viewportPaint);
@@ -85,23 +84,46 @@ public class MinimapRenderer
             canvas.Restore();
         }
 
-        canvas.DrawRoundRect(_panelRect, 4f, 4f, _borderPaint);
+        // Zoom chip (top-left corner of the box): a translucent backdrop keeps the value
+        // readable over roads. Lives here since the status bar was dissolved.
+        var chip = SKRect.Create(Bounds.Left + 4f, Bounds.Top + 4f, 52f, 16f);
+        UiTheme.FillScratch.Color = UiTheme.HudBackground;
+        canvas.DrawRoundRect(chip, 3f, 3f, UiTheme.FillScratch);
+        UiTheme.TextScratch.Color = UiTheme.TextPrimary;
+        canvas.DrawText($"{_camera.Zoom:F2}x", chip.MidX, chip.Bottom - 4f,
+            SKTextAlign.Center, UiTheme.Font11, UiTheme.TextScratch);
     }
 
-    /// <summary>True if a screen-space point lies on the visible minimap panel (even when blank,
-    /// so clicks on the box are swallowed rather than placing a road behind it).</summary>
-    public bool HitTest(float x, float y) => Visible && _panelRect.Contains(x, y);
+    /// <summary>Click-to-jump plus scrub start. Always consumes (a blank box swallows the
+    /// click rather than placing a road behind it); the camera moves only when the map has
+    /// content. Capture then routes all moves to <see cref="OnMouseMove"/> for scrubbing.</summary>
+    public override bool OnMouseDown(float x, float y)
+    {
+        if (TryScreenToWorld(x, y, out var world))
+            _camera.CenterOnWorld(world.X, world.Y);
+        RaiseClick();
+        return true;
+    }
+
+    /// <summary>Captured scrub: keeps centering the camera while the cursor is on the panel;
+    /// leaving the panel freezes the camera until the cursor returns (historical behavior).</summary>
+    public override void OnMouseMove(float x, float y)
+    {
+        if (!IsPressed) return;
+        if (TryScreenToWorld(x, y, out var world))
+            _camera.CenterOnWorld(world.X, world.Y);
+    }
 
     /// <summary>
     /// Maps a screen-space point on the panel back to the world position it represents.
-    /// Returns false when the minimap is hidden, off the panel, or blank (no transform yet).
+    /// False when off the panel or the map is blank (no transform yet).
     /// </summary>
-    public bool TryScreenToWorld(float x, float y, out Vector2 world)
+    private bool TryScreenToWorld(float x, float y, out Vector2 world)
     {
         world = default;
-        if (!HitTest(x, y) || !_hasContent || _scale <= 0f) return false;
-        float localX = x - _panelRect.Left;
-        float localY = y - _panelRect.Top;
+        if (!Bounds.Contains(x, y) || !_hasContent || _scale <= 0f) return false;
+        float localX = x - Bounds.Left;
+        float localY = y - Bounds.Top;
         world = new Vector2(
             (localX - _offsetX) / _scale + _worldMin.X,
             (localY - _offsetY) / _scale + _worldMin.Y);
@@ -113,17 +135,16 @@ public class MinimapRenderer
         => new(_offsetX + (wx - _worldMin.X) * _scale, _offsetY + (wy - _worldMin.Y) * _scale);
 
     /// <summary>
-    /// Recomputes the network bounds, world→panel transform, and cached picture when the graph
-    /// version changes. Sets <see cref="_hasContent"/> false when there are no roads, so the panel
-    /// is drawn blank (no network, no viewport rect). Bounds come from live edge endpoints — a
-    /// stray node with no edges (e.g. an in-progress road start) does not count.
+    /// Recomputes the network bounds, world→panel transform, and cached picture when the
+    /// graph version changes. Bounds come from live edge endpoints — a stray node with no
+    /// edges (an in-progress road start) does not count as content, and a blank map draws
+    /// an empty box (no network, no viewport rect).
     /// </summary>
     private void EnsureCache(RoadGraph graph)
     {
         if (graph.Version == _cachedVersion) return;
         _cachedVersion = graph.Version;
 
-        // World bounds over the endpoints of live (non-defunct) edges.
         float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
         bool any = false;
         var nodes = graph.Nodes;

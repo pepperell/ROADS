@@ -16,8 +16,8 @@ public enum NodeFlags : byte
     StopSign = 2,
     /// <summary>Node has yield signs (vehicles slow and check for cross-traffic).</summary>
     Yield = 4,
-    /// <summary>Node is a vehicle spawn point (only valid on nodes with ≤ 2 outgoing edges).</summary>
-    Spawn = 8,
+    // 8 reserved (was Spawn, removed with spawn points — vehicles enter/leave via EntryExit nodes;
+    // MapSerializer.Load masks the bit out of legacy files)
     /// <summary>Signal was explicitly placed by the user (not auto-assigned).</summary>
     ManualSignal = 16,
     /// <summary>Node is a vehicle destination (only valid on nodes with ≤ 2 outgoing edges).</summary>

@@ -381,7 +381,7 @@ struct PointOfInterest      // 24 bytes
 
 ### 7.3 Spawn / Despawn / Parking
 
-- **Spawn:** vehicle appears at spawn points (residential area, city edge entry point) with a slight fade-in; immediately begins pathfinding to first destination
+- **Spawn:** vehicle appears at an Entry/Exit node (city edge entry point) — there are no dedicated spawn-point markers; immediately begins pathfinding to first destination
 - **Despawn:** vehicle reaches city edge exit point and fades out; removed from simulation
 - **Park:** vehicle arrives at destination POI, decelerates to stop in nearest parking area, state changes to Parked (removed from physics sim but retained in schedule system); when departure time arrives, vehicle re-enters road
 - **Population control:** a maximum vehicle count can be set; spawners adjust spawn rates to never exceed the maximum
@@ -441,8 +441,7 @@ Per frame:
 | **Road** | Click to place nodes, drag to set curve control points, creates road edges |
 | **Intersection** | Click road to split and create intersection node |
 | **Delete** | Click to remove road segment, node, or POI |
-| **POI Place** | Click to place Point of Interest (type selector submenu) |
-| **Spawn Point** | Click to place vehicle spawn/despawn point |
+| **POI Place** | Click to place Point of Interest (type selector submenu; the Entry/Exit type is where vehicles spawn/despawn) |
 | **Signal** | Click intersection to cycle: none → stop sign → traffic light |
 | **Zone Paint** | Paint residential/commercial/industrial zones (auto-generates appropriate POIs) |
 
@@ -507,10 +506,9 @@ Binary format for fast load/save:
 Header: magic number, version, timestamp
 Section 1: Road graph (nodes, edges, adjacency)
 Section 2: POI list
-Section 3: Spawn points
-Section 4: Simulation state (vehicle positions, paths, driver states)
-Section 5: Editor state (camera, selected tool)
-Section 6: Settings (time scale, maximum population, etc.)
+Section 3: Simulation state (vehicle positions, paths, driver states)
+Section 4: Editor state (camera, selected tool)
+Section 5: Settings (time scale, maximum population, etc.)
 ```
 
 - Also support JSON export for interop / debugging
@@ -578,7 +576,7 @@ Phases are built by an Opus "director" that hands self-contained milestones to l
 - [X] Multi-lane roads (lane offset computation, lane rendering)
 - [X] A* pathfinding on the road graph
 - [X] Path representation (edge sequence) and vehicle path-following
-- [X] Spawn points: place in editor, vehicles spawn and pick random destination
+- [X] Spawn points: place in editor, vehicles spawn and pick random destination *(since removed — traffic enters/leaves via Entry/Exit nodes only)*
 - [X] Multiple vehicles (VehicleStore SoA, batch update loop)
 - [X] Spatial grid for vehicles
 - [X] Basic collision avoidance (brake if vehicle ahead is too close)
@@ -687,6 +685,9 @@ Phases are built by an Opus "director" that hands self-contained milestones to l
 - [X] Graphical overhaul: road-type visual identity (sidewalks/shoulders, per-type center-line policy, highway median, dirt tire tracks, crosswalks at lights)
 - [X] Graphical overhaul: roadside props (street lights with night glow, trees, bushes; deterministic placement off roads/buildings)
 - [X] Graphical overhaul: realistic signals & signs (signal heads with lenses, octagon stop signs; speed-limit signs only where the limit changes)
+- [X] Retained-mode UI: Panel/Label/Button hierarchy under UiRoot (hover + mouse capture; panels consume background clicks; bottom-left panel stacking fixed; pan no longer stalls over buttons)
+- [X] Status bar dissolved into panels (clock panel with analog dial + AM/PM, selection-info panel; stats/minimap absorb edges/residents/zoom; no free-floating UI text)
+- [X] UI reorganization + spawn-point removal: spawn points removed from the simulation (Entry/Exit nodes only; legacy flag masked on load); New/Save/Load far left, transport buttons (<< Pause >>) on the clock panel; menu bar + clock panel raised into the old status-bar row; stats/perf/selection panels shown by default with matching 256-px width, title rows, and UiTheme background/border (selection panel shows "No selection" when idle; bottom-left stack moved beside the legend)
 - [X] Vehicle type variety (sedan, SUV, truck, bus, motorcycle)
 - [ ] Sound effects (optional: ambient traffic hum scaling with density)
 - [ ] Tooltip / info on hover (vehicle speed, driver traits, destination)

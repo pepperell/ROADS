@@ -9,7 +9,7 @@ namespace Roads.App.Rendering;
 
 /// <summary>
 /// Composes all renderers to draw the complete scene: terrain background, faint editor
-/// grid, roads, buildings, props, vehicles, traffic-control signs, markers, editor
+/// grid, roads, buildings, props, vehicles, traffic-control signs, editor
 /// overlays, and screen-space UI. All state is read-only within the render pass.
 /// The terrain/building/prop/sign renderers are owned privately here (like the heat
 /// map) since nothing outside the scene needs them.
@@ -18,13 +18,12 @@ public class SceneRenderer
 {
     private readonly RoadRenderer _roadRenderer;
     private readonly VehicleRenderer _vehicleRenderer;
-    private readonly MarkerRenderer _spawnPointRenderer;
-    private readonly UIRenderer _uiRenderer;
-    private readonly SliderPanel _sliderPanel;
-    private readonly VehicleInfoPanel _vehicleInfoPanel;
     private readonly LaneRestrictionTool _laneRestrictionTool;
-    private readonly MinimapRenderer _minimap;
-    private readonly StatisticsPanel _statisticsPanel;
+
+    /// <summary>Retained-mode UI tree (owned by MainForm, which also routes input to it).
+    /// Drawn as the screen-space pass; legacy immediate-mode panels draw around it until
+    /// their migration lands.</summary>
+    private readonly Ui.UiRoot _uiRoot;
 
     /// <summary>
     /// Congestion heat-map overlay. Recomputed once per frame in <see cref="Render"/>
@@ -82,31 +81,23 @@ public class SceneRenderer
     /// sub-renderers are fully initialized.
     /// </summary>
     public SceneRenderer(RoadRenderer roadRenderer, VehicleRenderer vehicleRenderer,
-        MarkerRenderer spawnPointRenderer,
-        UIRenderer uiRenderer, SliderPanel sliderPanel, VehicleInfoPanel vehicleInfoPanel,
-        LaneRestrictionTool laneRestrictionTool, MinimapRenderer minimap,
-        StatisticsPanel statisticsPanel)
+        LaneRestrictionTool laneRestrictionTool, Ui.UiRoot uiRoot)
     {
         _roadRenderer = roadRenderer;
         _vehicleRenderer = vehicleRenderer;
-        _spawnPointRenderer = spawnPointRenderer;
-        _uiRenderer = uiRenderer;
-        _sliderPanel = sliderPanel;
-        _vehicleInfoPanel = vehicleInfoPanel;
         _laneRestrictionTool = laneRestrictionTool;
-        _minimap = minimap;
-        _statisticsPanel = statisticsPanel;
+        _uiRoot = uiRoot;
     }
 
     /// <summary>
-    /// Renders the entire scene: grid, roads, vehicles, markers, editor overlays, and UI.
+    /// Renders the entire scene: grid, roads, vehicles, editor overlays, and UI.
     /// </summary>
     public void Render(SKCanvas canvas, SKImageInfo info, Camera camera,
         RoadGraph graph, VehicleStore vehicles, EditorState editorState,
         StopLineCache stopLineCache, IntersectionArcCache intersectionArcs,
         TrafficSignalSystem trafficSignals, StopSignSystem stopSigns,
         YieldSignSystem yieldSigns, SimulationLoop simLoop,
-        int spawnNodeCount, Point currentMousePos)
+        Point currentMousePos)
     {
         float darkness = simLoop.Clock.Darkness;
         canvas.Clear(TerrainRenderer.GetBaseColor(darkness));
@@ -186,9 +177,6 @@ public class SceneRenderer
         _signRenderer.Draw(canvas, graph, stopLineCache, trafficSignals, stopSigns, yieldSigns,
             camera.Zoom, viewRect, darkness, allowRebuild: scenerySettled);
 
-        // Spawn markers (destinations render as buildings/dots via BuildingRenderer)
-        _spawnPointRenderer.DrawForFlag(canvas, graph, NodeFlags.Spawn, camera.Zoom);
-
         // Destination placement ghost (translucent preview of dest node + connector + foot node)
         DrawDestinationPlacementGhost(canvas, editorState, camera);
 
@@ -199,19 +187,11 @@ public class SceneRenderer
         DrawRoadPreview(canvas, graph, editorState, camera, currentMousePos, info);
         DrawSnapIndicator(canvas, graph, editorState, camera, currentMousePos, info);
 
-        // Reset transform for UI overlay
+        // Reset transform, then draw the entire screen-space UI as one retained-mode pass
+        // (status bar, menu bar, POI submenu, legend, sliders, bottom-left stack, minimap;
+        // the performance HUD is laid out here but drawn by MainForm.OnPaintSurface).
         canvas.ResetMatrix();
-
-        string statusText = BuildStatusText(graph, vehicles, editorState, spawnNodeCount, simLoop, camera);
-        _uiRenderer.Draw(canvas, editorState, statusText,
-            simLoop.Paused, simLoop.TimeScaleExponent, info.Width, info.Height);
-        _sliderPanel.Draw(canvas, info.Width);
-        if (editorState.SelectedVehicle >= 0)
-            _vehicleInfoPanel.Draw(canvas, vehicles, editorState.SelectedVehicle, graph, info.Height, intersectionArcs);
-        _statisticsPanel.Draw(canvas, vehicles, simLoop.Population, info.Width, info.Height);
-
-        // Minimap drawn last so it sits on top of the other overlays.
-        _minimap.Draw(canvas, camera, graph, info.Width, info.Height);
+        _uiRoot.Draw(canvas, info.Width, info.Height);
     }
 
     private static void DrawGrid(SKCanvas canvas, Camera camera, SKImageInfo info, SKColor gridColor)
@@ -245,7 +225,6 @@ public class SceneRenderer
         return editorState.ActiveTool switch
         {
             EditorTool.Delete     => (new SKColor(220, 60, 60, 50), new SKColor(220, 60, 60, 120)),
-            EditorTool.SpawnPoint => (new SKColor(40, 200, 80, 50), new SKColor(40, 200, 80, 120)),
             EditorTool.Destination => GetDestinationHoverColors(editorState),
             EditorTool.Signal     => (new SKColor(220, 200, 40, 50), new SKColor(220, 200, 40, 120)),
             _                     => (new SKColor(100, 200, 255, 50), new SKColor(100, 200, 255, 120)),
@@ -254,10 +233,7 @@ public class SceneRenderer
 
     private static (SKColor fill, SKColor stroke) GetDestinationHoverColors(EditorState editorState)
     {
-        int colorIdx = (int)editorState.SelectedPOIType - 1;
-        var c = colorIdx >= 0 && colorIdx < UIRenderer.POIColors.Length
-            ? UIRenderer.POIColors[colorIdx]
-            : new SKColor(200, 60, 40, 200);
+        var c = Ui.UiTheme.PoiColor(editorState.SelectedPOIType);
         return (new SKColor(c.Red, c.Green, c.Blue, 50), new SKColor(c.Red, c.Green, c.Blue, 120));
     }
 
@@ -455,15 +431,12 @@ public class SceneRenderer
         if (editorState.GhostDestPos is not { } dest || editorState.GhostFootPos is not { } foot)
             return;
 
-        // Ghost POI color: same indexing as MarkerRenderer / GetDestinationHoverColors, low alpha.
-        int colorIdx = (int)editorState.SelectedPOIType - 1;
-        var c = colorIdx >= 0 && colorIdx < UIRenderer.POIColors.Length
-            ? UIRenderer.POIColors[colorIdx]
-            : new SKColor(200, 60, 40, 200);
+        // Ghost POI color: same palette as the submenu / hover tints, low alpha.
+        var c = Ui.UiTheme.PoiColor(editorState.SelectedPOIType);
         byte ghostAlpha = 110; // ~43%, within the 50-180 range used by existing previews
 
         float zoom = camera.Zoom;
-        float radius = Math.Max(4f, 6f / zoom);          // match MarkerRenderer dot
+        float radius = Math.Max(4f, 6f / zoom);          // match the historical marker dot
         float innerRadius = radius * 0.5f;
         float footRadius = Math.Max(3f, 4f / zoom);      // smaller foot node
 
@@ -496,7 +469,7 @@ public class SceneRenderer
         canvas.DrawCircle(foot.X, foot.Y, footRadius, footFill);
         canvas.DrawCircle(foot.X, foot.Y, footRadius, footStroke);
 
-        // --- Destination dot (translucent, mimics MarkerRenderer composition) ---
+        // --- Destination dot (translucent, mimics the historical marker composition) ---
         using var destFill = new SKPaint
         {
             Color = new SKColor(c.Red, c.Green, c.Blue, ghostAlpha),
@@ -673,44 +646,6 @@ public class SceneRenderer
             IsAntialias = true,
         };
         canvas.DrawCircle(nodePos.X, nodePos.Y, Math.Max(4f, 6f / camera.Zoom), snapPaint);
-    }
-
-    private static string BuildStatusText(RoadGraph graph, VehicleStore vehicles,
-        EditorState editorState, int spawnNodeCount,
-        SimulationLoop simLoop, Camera camera)
-    {
-        string status = editorState.IsDrawingRoad ? " [drawing]" : "";
-        string selInfo = "";
-        if (editorState.SelectedNode >= 0 && editorState.SelectedNode < graph.Nodes.Count
-            && !float.IsNaN(graph.Nodes[editorState.SelectedNode].Position.X))
-        {
-            var selNode = graph.Nodes[editorState.SelectedNode];
-            string flags = selNode.Flags == NodeFlags.None ? "none" : selNode.Flags.ToString();
-            if (editorState.LaneRestrictionMode)
-            {
-                string laneInfo = editorState.LaneRestrictionEdge >= 0
-                    ? $"Input Edge {editorState.LaneRestrictionEdge} Lane {editorState.LaneRestrictionLane}"
-                    : "click input lane";
-                selInfo = $"  |  LANE RESTRICT: {laneInfo}  [click lanes, C=clear, Esc=exit]";
-            }
-            else
-                selInfo = $"  |  Node #{editorState.SelectedNode}  Flags: {flags}  [L=lane restrict, Del=delete, drag to move]";
-        }
-        else if (editorState.SelectedEdge >= 0 && editorState.SelectedEdge < graph.Edges.Count
-            && graph.Edges[editorState.SelectedEdge].FromNode >= 0)
-        {
-            var sel = graph.Edges[editorState.SelectedEdge];
-            float mph = sel.SpeedLimit * 2.23694f;
-            selInfo = $"  |  Selected: {sel.LaneCount} lane(s) [+/- lanes]  Speed: {mph:F0} mph [ [ / ] to change]  Type: {sel.RoadType} [R to cycle]";
-        }
-        string spawnInfo = spawnNodeCount > 0 ? $"Spawn Nodes: {spawnNodeCount}" : "V=spawn, or place Spawn Pts";
-        string clockDisplay = simLoop.Clock.GetDisplayTime();
-        string timeInfo = simLoop.Paused ? $"{clockDisplay} PAUSED" : $"{clockDisplay} {simLoop.TimeScale}x";
-        string debugInfo = VehicleRenderer.ShowArcConflicts ? "  |  [G] ARC DEBUG" : "";
-        string popInfo = simLoop.Population.ScheduleModeEnabled
-            ? $"  |  Residents: {simLoop.Population.TotalResidents}  Active: {simLoop.Population.ActiveDrivers}"
-            : "";
-        return $"Zoom: {camera.Zoom:F2}x  |  Speed: {timeInfo}  |  Edges: {graph.ActiveEdgeCount}  |  Vehicles: {vehicles.Count}{popInfo}  |  {spawnInfo}{status}{selInfo}{debugInfo}";
     }
 
     /// <summary>

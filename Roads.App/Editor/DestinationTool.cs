@@ -9,7 +9,7 @@ namespace Roads.App.Editor;
 /// falls back to <see cref="PlaceAndConnect"/> when it returns false):
 /// <list type="bullet">
 /// <item><see cref="OnClick"/> — legacy "flag an existing node" path. Flags the nearest eligible
-/// UNMARKED node (≤ 2 outgoing edges, no existing spawn/destination flag) as a destination. It
+/// UNMARKED node (≤ 2 outgoing edges, no existing destination flag) as a destination. It
 /// never snaps to an already-flagged node — that returns false so placement runs instead.
 /// Removing a destination is done via right-click (RemoveNearestDestination).</item>
 /// <item><see cref="PlaceAndConnect"/> — placement path used when no eligible UNMARKED node is
@@ -21,9 +21,9 @@ public class DestinationTool
     /// <summary>
     /// Flags the nearest eligible UNMARKED node within snap distance as a destination of
     /// <paramref name="poiType"/>. Returns false when there is no such node — including when the
-    /// nearest node already carries a marker (spawn or destination), which is deliberately NOT
-    /// snapped to — so the caller falls through to <see cref="PlaceAndConnect"/> and places a new
-    /// destination instead of grabbing/retyping the existing one.
+    /// nearest node is already a destination, which is deliberately NOT snapped to — so the
+    /// caller falls through to <see cref="PlaceAndConnect"/> and places a new destination
+    /// instead of grabbing/retyping the existing one.
     /// </summary>
     /// <returns>True if a node was flagged.</returns>
     public bool OnClick(Vector2 worldPos, RoadGraph graph, POIType poiType)
@@ -32,8 +32,8 @@ public class DestinationTool
         if (node < 0 || !graph.CanPlaceMarker(node)) return false;
 
         var flags = graph.Nodes[node].Flags;
-        // Never snap to a node that already carries a marker (spawn/destination).
-        if ((flags & (NodeFlags.Spawn | NodeFlags.Destination)) != 0) return false;
+        // Never snap to a node that already carries a destination marker.
+        if ((flags & NodeFlags.Destination) != 0) return false;
 
         graph.SetNodeFlags(node, flags | NodeFlags.Destination);
         graph.SetNodePOIType(node, poiType);
@@ -74,7 +74,7 @@ public class DestinationTool
 
         // Determine the on-road node. Reuse an endpoint ONLY when it is unflagged and the foot is
         // within the split setback of it; otherwise split at the clamped t. A flagged endpoint (an
-        // existing home/spawn node) is treated as non-existent: rather than reuse it, we clamp the
+        // existing destination node) is treated as non-existent: rather than reuse it, we clamp the
         // foot onto the road just shy of it and split there, so the connector attaches to the road
         // (the dirt driveway or the original road) but never extends from another marked node.
         int reuse = ProspectiveFootNode(graph, nearEdge, nearT);
@@ -82,7 +82,7 @@ public class DestinationTool
         // The through road's two incoming halves at the new node when we split (the road the
         // driveway joins). -1 when we reuse an existing node (its approaches are already set up).
         int throughInA = -1, throughInB = -1;
-        if (reuse >= 0 && (graph.Nodes[reuse].Flags & (NodeFlags.Spawn | NodeFlags.Destination)) == 0)
+        if (reuse >= 0 && (graph.Nodes[reuse].Flags & NodeFlags.Destination) == 0)
         {
             footNode = reuse;                                // reuse unflagged endpoint, no split
         }
@@ -129,16 +129,16 @@ public class DestinationTool
     /// <summary>
     /// Minimum distance (m) the connector's split keeps from a FLAGGED endpoint — larger than the
     /// normal <see cref="SimConstants.MinSplitSetback"/> so a new junction is never created right up
-    /// against an existing home/spawn node when attaching to a road that ends at one.
+    /// against an existing destination node when attaching to a road that ends at one.
     /// </summary>
     private const float FlaggedNodeSetback = 10f;
 
     /// <summary>Required setback (m) from one edge endpoint: the larger flagged setback when that
-    /// node is a spawn/destination, otherwise the normal split setback.</summary>
+    /// node is a destination, otherwise the normal split setback.</summary>
     private static float EndSetback(RoadGraph graph, int nodeIndex)
     {
         if (nodeIndex >= 0 && nodeIndex < graph.Nodes.Count
-            && (graph.Nodes[nodeIndex].Flags & (NodeFlags.Spawn | NodeFlags.Destination)) != 0)
+            && (graph.Nodes[nodeIndex].Flags & NodeFlags.Destination) != 0)
             return FlaggedNodeSetback;
         return SimConstants.MinSplitSetback;
     }
@@ -182,14 +182,14 @@ public class DestinationTool
     /// will attach — the single source of truth shared by the placement ghost and
     /// <see cref="PlaceAndConnect"/>. An UNFLAGGED endpoint within the split setback is reused (its
     /// node position); otherwise the point is the on-curve position at the endpoint-clamped parameter
-    /// where the commit will split. A FLAGGED endpoint (an existing home/spawn node) is treated as
+    /// where the commit will split. A FLAGGED endpoint (an existing destination node) is treated as
     /// non-existent — the attach point lands on the road just shy of it, never on the node — so the
     /// ghost foot matches the committed attach point exactly.
     /// </summary>
     public static Vector2 ComputeFootPoint(RoadGraph graph, int nearEdge, float nearT)
     {
         int reuse = ProspectiveFootNode(graph, nearEdge, nearT);
-        if (reuse >= 0 && (graph.Nodes[reuse].Flags & (NodeFlags.Spawn | NodeFlags.Destination)) == 0)
+        if (reuse >= 0 && (graph.Nodes[reuse].Flags & NodeFlags.Destination) == 0)
             return graph.Nodes[reuse].Position;
         return graph.EvaluateBezier(nearEdge, ClampedSplitT(graph, nearEdge, nearT));
     }

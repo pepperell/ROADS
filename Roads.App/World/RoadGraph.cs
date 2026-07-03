@@ -258,7 +258,7 @@ public class RoadGraph
     {
         var node = _nodes[nodeIndex];
         node.Position = new System.Numerics.Vector2(float.NaN, float.NaN);
-        node.Flags &= ~(NodeFlags.Spawn | NodeFlags.Destination);
+        node.Flags &= ~NodeFlags.Destination;
         node.PointOfInterest = POIType.None;
         _nodes[nodeIndex] = node;
         _turnMatrix.Remove(nodeIndex);
@@ -393,7 +393,7 @@ public class RoadGraph
     /// dead-end: if an incoming edge has no non-U-turn outgoing option, the U-turn is
     /// allowed so a vehicle can turn around at the end of a road (otherwise it would be
     /// trapped and removed). This is flag-agnostic — it applies to any terminal node,
-    /// not just Destination/Spawn nodes.
+    /// not just Destination nodes.
     /// </summary>
     private void RebuildTurnMatrix(int nodeIndex)
     {
@@ -1253,7 +1253,7 @@ public class RoadGraph
     }
 
     /// <summary>
-    /// Returns whether a node can have Spawn or Destination flags (non-defunct, ≤ 2 outgoing edges).
+    /// Returns whether a node can have the Destination flag (non-defunct, ≤ 2 outgoing edges).
     /// </summary>
     public bool CanPlaceMarker(int nodeIndex)
     {
@@ -1279,7 +1279,7 @@ public class RoadGraph
     }
 
     /// <summary>
-    /// Strips Spawn/Destination flags from any node that now has more than 2 outgoing edges,
+    /// Strips the Destination flag from any node that now has more than 2 outgoing edges,
     /// and strips signal flags (TrafficLight/StopSign/Yield/ManualSignal) from any node that is
     /// not a <see cref="IsTrafficControlJunction"/> (bends/dead-ends/pass-throughs that aren't real
     /// intersections — including one-way pass-throughs, while one-way merges are kept).
@@ -1300,9 +1300,9 @@ public class RoadGraph
             var node = _nodes[i];
             if (float.IsNaN(node.Position.X)) continue;
 
-            if (node.EdgeCount > 2 && (node.Flags & (NodeFlags.Spawn | NodeFlags.Destination)) != 0)
+            if (node.EdgeCount > 2 && (node.Flags & NodeFlags.Destination) != 0)
             {
-                node.Flags &= ~(NodeFlags.Spawn | NodeFlags.Destination);
+                node.Flags &= ~NodeFlags.Destination;
                 node.PointOfInterest = POIType.None;
                 _nodes[i] = node;
                 stripped = true;

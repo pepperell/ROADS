@@ -10,7 +10,6 @@ public enum EditorTool
     Select,
     Road,
     Delete,
-    SpawnPoint,
     Destination,
     Signal,
 }

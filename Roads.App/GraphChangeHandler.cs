@@ -57,7 +57,7 @@ public class GraphChangeHandler
              float.IsNaN(_graph.Nodes[_editorState.SelectedNode].Position.X)))
             _editorState.SelectedNode = -1;
 
-        // 3. Strip Spawn/Destination flags from nodes that now have 3+ outgoing edges
+        // 3. Strip Destination flags from nodes that now have 3+ outgoing edges
         _graph.StripMarkerFlagsFromIntersections();
 
         // 4. Fix stale vehicle edges and paths

@@ -4,10 +4,10 @@ using Roads.App.World;
 namespace Roads.App.Vehicles;
 
 /// <summary>
-/// Manages vehicle spawning, pathfinding, and rerouting. Handles both manual spawns
-/// (V key) and automatic spawning from spawn-flagged nodes on a timed interval.
-/// Spawn and destination locations are determined by NodeFlags.Spawn and NodeFlags.Destination
-/// on road graph nodes.
+/// Manages vehicle spawning, pathfinding, and rerouting. Manual spawns (V key) start on a
+/// random active edge; scheduled traffic (residents, through-cars) enters via
+/// PopulationManager at EntryExit nodes. Destination locations are determined by
+/// NodeFlags.Destination on road graph nodes.
 /// When one or more ACTIVE (two-way) EntryExit destination nodes exist, finished non-resident
 /// cars enter "regionMode": instead of picking a new random destination they route to and despawn
 /// at the nearest reachable entry/exit node (see <see cref="RerouteFinished"/>).
@@ -18,14 +18,9 @@ public class VehicleSpawner
     private readonly VehicleStore _vehicles;
     private readonly SpatialGrid _vehicleGrid;
     private readonly List<int> _spawnBlockedBuffer = new();
-    private readonly List<int> _spawnNodeCache = new();
     private readonly List<int> _destNodeCache = new();
     private readonly List<int> _entryExitCache = new();
     private int _cacheGraphVersion = -1;
-    private float _spawnTimer;
-
-    /// <summary>When true, AutoSpawn is suppressed (PopulationManager handles spawning).</summary>
-    public bool ScheduleModeActive { get; set; }
 
     public VehicleSpawner(RoadGraph graph, VehicleStore vehicles, SpatialGrid vehicleGrid)
     {
@@ -34,9 +29,6 @@ public class VehicleSpawner
         _vehicleGrid = vehicleGrid;
     }
 
-    /// <summary>Number of nodes with the Spawn flag (updated on cache rebuild).</summary>
-    public int SpawnNodeCount => EnsureCache()._spawnNodeCache.Count;
-
     /// <summary>Number of nodes with the Destination flag (updated on cache rebuild).</summary>
     public int DestinationNodeCount => EnsureCache()._destNodeCache.Count;
 
@@ -44,7 +36,6 @@ public class VehicleSpawner
     {
         if (_cacheGraphVersion != _graph.Version)
         {
-            _graph.GetNodesWithFlag(NodeFlags.Spawn, _spawnNodeCache);
             _graph.GetNodesWithFlag(NodeFlags.Destination, _destNodeCache);
             // Despawn targets are EXIT-capable entry/exit nodes: a node a finished car can drive TO
             // and despawn at needs at least one INCOMING edge (a lane out of town). Outgoing is NOT
@@ -63,23 +54,15 @@ public class VehicleSpawner
     }
 
     /// <summary>
-    /// Spawns a vehicle with a pathfinding route. Uses a random spawn node if available,
-    /// otherwise picks a random active edge as the start location.
+    /// Spawns a vehicle with a pathfinding route, starting on a random active edge.
     /// </summary>
     public void SpawnRandom()
     {
         EnsureCache();
 
-        if (_spawnNodeCache.Count > 0)
-        {
-            int nodeIdx = _spawnNodeCache[Random.Shared.Next(_spawnNodeCache.Count)];
-            SpawnFromNode(nodeIdx);
-            return;
-        }
-
         if (_graph.ActiveEdgeCount == 0) return;
 
-        // Fallback: pick a random active start edge
+        // Pick a random active start edge
         int startEdge = -1;
         for (int a = 0; a < 100; a++)
         {
@@ -89,42 +72,6 @@ public class VehicleSpawner
         if (startEdge < 0) return;
 
         SpawnOnEdge(startEdge, 0f);
-    }
-
-    /// <summary>
-    /// Spawns a vehicle from a spawn-flagged node, picking a random outgoing edge.
-    /// </summary>
-    private void SpawnFromNode(int nodeIndex)
-    {
-        var node = _graph.Nodes[nodeIndex];
-        if (float.IsNaN(node.Position.X) || node.EdgeCount == 0) return;
-
-        var outgoing = _graph.GetOutgoingEdges(nodeIndex);
-        int edgeIdx = outgoing[Random.Shared.Next(outgoing.Count)];
-        SpawnOnEdge(edgeIdx, 0.05f);
-    }
-
-    /// <summary>
-    /// Auto-spawns vehicles from spawn-flagged nodes on a timed interval, respecting the vehicle cap.
-    /// Called once per simulation tick from the simulation loop.
-    /// </summary>
-    public void AutoSpawn(float dt, int maxVehicles)
-    {
-        if (ScheduleModeActive) return;
-
-        EnsureCache();
-        if (_spawnNodeCache.Count == 0 || _destNodeCache.Count == 0 || _vehicles.Count >= maxVehicles)
-            return;
-
-        _spawnTimer += dt;
-        const float spawnInterval = 2f;
-        while (_spawnTimer >= spawnInterval)
-        {
-            _spawnTimer -= spawnInterval;
-            if (_vehicles.Count >= maxVehicles) break;
-            int nodeIdx = _spawnNodeCache[Random.Shared.Next(_spawnNodeCache.Count)];
-            SpawnFromNode(nodeIdx);
-        }
     }
 
     /// <summary>
@@ -361,7 +308,7 @@ public class VehicleSpawner
     /// <summary>
     /// Bulk stress spawn: places up to <paramref name="count"/> vehicles at random positions
     /// on the graph, each routed to a random destination node.
-    /// Bypasses node Spawn/Destination flags and the 8 m IsSpawnBlocked clearance check
+    /// Bypasses node Destination flags and the 8 m IsSpawnBlocked clearance check
     /// so it works on generated grids (which have no flagged nodes) and achieves high density.
     /// Each vehicle gets one <see cref="Pathfinder.FindPath"/> call.
     /// </summary>

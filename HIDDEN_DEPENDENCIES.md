@@ -8,7 +8,7 @@ Line references are accurate as of the end of Phase 4 and will drift as the code
 
 ## 1. `RoadGraph.Version` is an invalidation bus
 
-Nearly every cache keys off [RoadGraph.Version](Roads.App/World/RoadGraph.cs#L67): StopLineCache, IntersectionArcCache, EdgeSpatialGrid, all three signal systems, RoadRenderer's path cache, VehicleSpawner's spawn-point cache, POIRegistry, PopulationManager, and GraphChangeHandler. The contract: **any mutation of nodes/edges/lane-restrictions must `Version++`, or every downstream system silently serves stale data** (bounds checks make failures silent, not crashes). The full contract lives on the [Version property's XML doc](Roads.App/World/RoadGraph.cs#L50-L67); this section is its prose home.
+Nearly every cache keys off [RoadGraph.Version](Roads.App/World/RoadGraph.cs#L67): StopLineCache, IntersectionArcCache, EdgeSpatialGrid, all three signal systems, RoadRenderer's path cache, VehicleSpawner's destination cache, POIRegistry, PopulationManager, and GraphChangeHandler. The contract: **any mutation of nodes/edges/lane-restrictions must `Version++`, or every downstream system silently serves stale data** (bounds checks make failures silent, not crashes). The full contract lives on the [Version property's XML doc](Roads.App/World/RoadGraph.cs#L50-L67); this section is its prose home.
 
 As of the Phase 4.5 audit, **every public mutator bumps Version**. The three former violators now bump:
 
@@ -32,6 +32,7 @@ After `RebuildWorldCaches` returns, every cache is current with `graph.Version`:
 ## 3. Per-frame protocols enforced only by doc comments
 
 - All three signal systems have a per-frame contract: `RebuildIfNeeded` → `Update` → `GetSignal` — **now debug-asserted** (Phase 4.5). `Update` asserts version currency in all three systems; stop/yield `GetSignal` assert the full protocol via the public `CanQuery(graph)` predicate (rebuilt at the current version, not dirty, and `Update` has run since the last real rebuild); traffic `GetSignal` asserts only that a rebuild has ever run, because the renderer legitimately reads it every frame including paused. Diagnostic callers that may run while right-of-way data is stale gate on `CanQuery` — MainForm's D-key vehicle dump prints `stopSign=n/a yield=n/a (right-of-way tracking stale)` in that case. When the graph changed, static `AutoAssign` must precede `RebuildIfNeeded` for the traffic-light and stop-sign systems (rebuilds are pure flag projections; the pipeline's normalize phase enforces this — see §2).
+- The pathfind-accumulator drain is **structural since the retained-UI migration**: it used to ride on `PerformanceHud.Draw`, which therefore had to be called every frame even while the HUD was hidden (a classic trap). It now lives in [PerfTelemetry.Sample()](Roads.App/Rendering/PerfTelemetry.cs), called unconditionally once per rendered frame from `MainForm.OnPaintSurface`; the HUD panel is a pure view and its visibility is no longer load-bearing. Remaining doc-only contract: exactly one `Sample()` per rendered frame, and PerfTelemetry is the single consumer of `Pathfinder.ReadPathfindStatsAndReset` (BenchmarkCapture and `--autobench` read PerfTelemetry's published properties after Sample).
 - User toggles like [SetEdgeExempt](Roads.App/World/StopSignSystem.cs#L73-L78) and [RotatePhase](Roads.App/World/TrafficSignalSystem.cs#L81-L86) only set `_dirty = true` — they take effect at the *next* `RebuildIfNeeded`. The paused branch runs `RebuildWorldCaches()` every 16 ms frame, so toggles made while paused apply (and render) immediately.
 - [LaneChangeLogic.ApplyMergeSpeedBias](Roads.App/Vehicles/LaneChangeLogic.cs#L543-L547) "must be called after `UpdateAll`" — it consumes `MergeUrgency`/`TargetLane` computed there.
 - [SpatialGrid.Rebuild](Roads.App/World/SpatialGrid.cs#L25) must precede all vehicle queries each tick; this holds only because `VehiclePhysics.UpdateAll` (which moves vehicles) runs last.
@@ -70,7 +71,6 @@ What remains:
 ## 7. Smaller contracts
 
 - [SplitEdge](Roads.App/World/RoadGraph.cs#L1006) must capture the reverse edge *before* `SplitEdgeSingle` (adjacency goes stale mid-operation), and `SplitEdgeSingle` intentionally skips the `RebuildAdjacency` / `RebuildTurnMatrix` / `Version++` trio — every caller doing direct edge surgery must finish with those three.
-- [SimulationLoop.cs:138](Roads.App/SimulationLoop.cs#L138): `_spawner.ScheduleModeActive` is hand-copied from `_populationManager.ScheduleModeEnabled` each tick — it must land after `Population.Update` and before `AutoSpawn`.
 - PopulationManager tracks the graph version **twice** ([POIRegistry's internal copy](Roads.App/Vehicles/PopulationManager.cs#L71) and its own [`_poiGraphVersion`](Roads.App/Vehicles/PopulationManager.cs#L88-L92)) with different reactions to a change — easy to update one and not the other.
 
 ## 8. Scenery pipeline — settle-gated, ordered, and deliberately stale during edits

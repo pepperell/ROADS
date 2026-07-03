@@ -16,7 +16,7 @@ NODE_FLAGS = {
     1: "TrafficLight",
     2: "StopSign",
     4: "Yield",
-    8: "Spawn",
+    8: "Spawn(legacy)",  # retired; the app masks this bit out on load
     16: "ManualSignal",
     32: "Destination",
 }

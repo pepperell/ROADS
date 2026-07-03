@@ -9,7 +9,7 @@ namespace Roads.App;
 /// <summary>
 /// Runs the simulation at a fixed 30 Hz timestep with time scaling.
 /// Orchestrates cache rebuilds, traffic system updates, vehicle AI, physics,
-/// rerouting, and auto-spawning each tick.
+/// rerouting, and population/schedule updates each tick.
 /// </summary>
 public class SimulationLoop
 {
@@ -114,7 +114,7 @@ public class SimulationLoop
     /// 3. Lane change logic (must precede steering)
     /// 4. Steering controller (depends on all of the above)
     /// 5. Vehicle physics (applies steering/throttle/brake computed in step 4)
-    /// 6. Reroute finished vehicles and auto-spawn new ones
+    /// 6. Reroute finished vehicles and update the population (schedule departures/arrivals)
     /// While paused, only HandleIfNeeded and <see cref="RebuildWorldCaches"/> run, so
     /// editor changes take effect immediately but simulation time and signal timers do
     /// not advance.
@@ -191,8 +191,6 @@ public class SimulationLoop
             long t7 = Stopwatch.GetTimestamp(); rerouteT += t7 - t6;
 
             _populationManager.Update(SimDt, Clock.TimeOfDay, Clock.DayNumber);
-            _spawner.ScheduleModeActive = _populationManager.ScheduleModeEnabled;
-            _spawner.AutoSpawn(SimDt, MaxVehicles);
             long t8 = Stopwatch.GetTimestamp(); popT += t8 - t7;
 
             Clock.Advance(SimDt);
@@ -231,7 +229,7 @@ public class SimulationLoop
     /// wall-clock, accumulator, or <see cref="Paused"/> dependency — the timing-independent core
     /// the headless <see cref="Roads.App.Diagnostics.SimTestHarness"/> drives for reproducible runs.
     /// Each substep runs the IDENTICAL subsystem order as the <see cref="Tick"/> inner loop (grid →
-    /// caches → traffic control → lane change → steering → physics → reroute → population/spawn →
+    /// caches → traffic control → lane change → steering → physics → reroute → population →
     /// clock), so behaviour matches the GUI step-for-step. Unlike Tick it skips the wall-time backlog
     /// math and per-subsystem timing publication; <see cref="LastTickSubsteps"/> is set to the count
     /// run. Step 0 graph-change convergence still runs once up front so editor fix-ups settle.
@@ -260,8 +258,6 @@ public class SimulationLoop
             _spawner.RerouteFinished();
 
             _populationManager.Update(SimDt, Clock.TimeOfDay, Clock.DayNumber);
-            _spawner.ScheduleModeActive = _populationManager.ScheduleModeEnabled;
-            _spawner.AutoSpawn(SimDt, MaxVehicles);
 
             Clock.Advance(SimDt);
         }

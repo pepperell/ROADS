@@ -6,6 +6,7 @@ using Roads.App.Editor;
 using Roads.App.Rendering;
 using Roads.App.Vehicles;
 using Roads.App.World;
+using Ui = Roads.App.Rendering.Ui;
 
 namespace Roads.App;
 
@@ -26,10 +27,7 @@ public class MainForm : Form
     private readonly EditorState _editorState = new();
     private readonly RoadTool _roadTool = new();
     private readonly DeleteTool _deleteTool = new();
-    private readonly UIRenderer _uiRenderer = new();
-    private readonly SliderPanel _sliderPanel = new();
-    private readonly SpawnPointTool _spawnPointTool = new();
-    private readonly MarkerRenderer _spawnPointRenderer = new(new SkiaSharp.SKColor(40, 200, 80, 200));
+    private readonly Ui.SliderPanel _sliderPanel = new();
     private readonly DestinationTool _destinationTool = new();
     private readonly SignalTool _signalTool = new();
     private readonly LaneRestrictionTool _laneRestrictionTool = new();
@@ -40,10 +38,16 @@ public class MainForm : Form
     private readonly StopSignSystem _stopSigns = new();
     private readonly YieldSignSystem _yieldSigns = new();
     private readonly IntersectionArcCache _intersectionArcs = new();
-    private readonly VehicleInfoPanel _vehicleInfoPanel = new();
-    private readonly MinimapRenderer _minimap = new();
-    private readonly PerformanceHud _perfHud = new();
-    private readonly StatisticsPanel _statisticsPanel = new();
+    /// <summary>Root of the retained-mode screen-space UI (z-order, hover, mouse capture).
+    /// Panels migrate into it step-by-step; legacy immediate-mode renderers are checked
+    /// after it in the input handlers until they are retired.</summary>
+    private readonly Ui.UiRoot _uiRoot = new();
+    private readonly Ui.MinimapPanel _minimapPanel;
+    private readonly Ui.StatisticsPanel _statisticsPanel;
+    private readonly Ui.PerformanceHudPanel _hudPanel;
+    /// <summary>Frame-timing telemetry; <see cref="PerfTelemetry.Sample"/> runs once per
+    /// paint regardless of HUD visibility (single consumer of the pathfind accumulators).</summary>
+    private readonly PerfTelemetry _perfTelemetry = new();
     private readonly Stopwatch _perfStopwatch = new();
     private readonly Stopwatch _autoSaveClock = Stopwatch.StartNew();
     private readonly POIRegistry _poiRegistry = new();
@@ -57,11 +61,10 @@ public class MainForm : Form
     private Point _lastMousePos;
     private Point _currentMousePos;
     private bool _isPanning;
-    /// <summary>Whether a left-button drag is currently scrubbing the camera via the minimap.</summary>
-    private bool _draggingMinimap;
 
     /// <summary>Screen position where a drag-candidate click occurred.</summary>
     private Point _dragStartScreenPos;
+    // (Minimap scrub-drag state now lives in UiRoot's mouse capture.)
     /// <summary>World-space offset from the cursor to the dragged item's position at click time.</summary>
     private Vector2 _dragOffset;
     /// <summary>Whether the drag dead zone (5 px) has been exceeded.</summary>
@@ -105,7 +108,32 @@ public class MainForm : Form
         _populationManager = new PopulationManager(_roadGraph, _vehicles, _vehicleGrid, _poiRegistry, SimulationLoop.MaxVehicles);
         _graphChangeHandler = new GraphChangeHandler(_roadGraph, _editorState, _vehicles, _edgeSpatialGrid, _spawner);
         _simLoop = new SimulationLoop(_roadGraph, _vehicles, _vehicleGrid, _stopLineCache, _intersectionArcs, _edgeSpatialGrid, _trafficSignals, _stopSigns, _yieldSigns, _spawner, _populationManager, _editorState, _graphChangeHandler);
-        _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _spawnPointRenderer, _uiRenderer, _sliderPanel, _vehicleInfoPanel, _laneRestrictionTool, _minimap, _statisticsPanel);
+
+        // Retained-mode UI tree (bottom→top add order = draw order; input hits topmost first).
+        _uiRoot.Add(new Ui.MenuBar(_editorState, OnUiAction));
+        _uiRoot.Add(new Ui.PoiSubmenu(_editorState));
+        _uiRoot.Add(new Ui.LegendPanel());
+        _uiRoot.Add(new Ui.ClockPanel(_simLoop, OnUiAction));
+        _uiRoot.Add(_sliderPanel);
+
+        // Bottom-left stack (second column, right of the shortcut legend): HUD at the very
+        // bottom, statistics above it, then vehicle info, selection info on top — positioned
+        // from measured heights so no combination overlaps. The HUD panel is laid out here
+        // but drawn by OnPaintSurface (ExternallyDrawn) so it stays above the minimap and
+        // outside the measured draw window.
+        _statisticsPanel = new Ui.StatisticsPanel(_vehicles, _simLoop, _roadGraph);
+        _hudPanel = new Ui.PerformanceHudPanel(_perfTelemetry, _vehicles);
+        var bottomLeftStack = new Ui.BottomLeftStack();
+        bottomLeftStack.Add(_hudPanel);
+        bottomLeftStack.Add(_statisticsPanel);
+        bottomLeftStack.Add(new Ui.VehicleInfoPanel(_vehicles, _roadGraph, _editorState, _intersectionArcs));
+        bottomLeftStack.Add(new Ui.SelectionInfoPanel(_roadGraph, _editorState));
+        _uiRoot.Add(bottomLeftStack);
+
+        _minimapPanel = new Ui.MinimapPanel(_camera, _roadGraph);
+        _uiRoot.Add(_minimapPanel);
+
+        _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _laneRestrictionTool, _uiRoot);
         // AutoSaveManager shares the same object references used by SaveMap() so the
         // backup format is identical to a manual save (minus vehicles, which are transient).
         // Triggered from the render-timer tick so it runs on the UI thread with no locking.
@@ -157,7 +185,7 @@ public class MainForm : Form
     {
         _perfStopwatch.Restart();
         _simLoop.Tick();
-        _perfHud.RecordSimTime(_perfStopwatch.Elapsed.TotalMilliseconds);
+        _perfTelemetry.RecordSimTime(_perfStopwatch.Elapsed.TotalMilliseconds);
 
         // Accumulate wall time and trigger a backup when the interval elapses.
         // The auto-save clock is independent of simulation time and pause state
@@ -680,13 +708,13 @@ public class MainForm : Form
 
         if (e.KeyCode == Keys.P)
         {
-            _perfHud.Visible = !_perfHud.Visible;
+            _hudPanel.Visible = !_hudPanel.Visible;
             e.Handled = true;
         }
 
         if (e.KeyCode == Keys.M)
         {
-            _minimap.Visible = !_minimap.Visible;
+            _minimapPanel.Visible = !_minimapPanel.Visible;
             e.Handled = true;
         }
 
@@ -937,8 +965,8 @@ public class MainForm : Form
 
     /// <summary>
     /// Renders the entire scene: background grid, roads with signals/signs, vehicles,
-    /// spawn/destination points, control point handles (in Select mode), road tool preview,
-    /// snap indicator, and the UI overlay (toolbar + status text + slider panel).
+    /// destination points, control point handles (in Select mode), road tool preview,
+    /// snap indicator, and the retained-mode UI overlay.
     /// </summary>
     private void OnPaintSurface(object? sender, SKCanvas canvas, SKImageInfo info)
     {
@@ -946,15 +974,45 @@ public class MainForm : Form
         _sceneRenderer.Render(canvas, info, _camera, _roadGraph, _vehicles, _editorState,
             _stopLineCache, _intersectionArcs,
             _trafficSignals, _stopSigns, _yieldSigns, _simLoop,
-            _spawner.SpawnNodeCount, _currentMousePos);
-        _perfHud.RecordDrawTime(_perfStopwatch.Elapsed.TotalMilliseconds);
-        _perfHud.Draw(canvas, _vehicles.Count, info.Width, info.Height);
+            _currentMousePos);
+        _perfTelemetry.RecordDrawTime(_perfStopwatch.Elapsed.TotalMilliseconds);
+        // Sample runs unconditionally (pathfind-accumulator drain + benchmark publication);
+        // the HUD panel is drawn here — outside the measured draw window and above every
+        // other overlay — and skips itself when hidden.
+        _perfTelemetry.Sample();
+        _hudPanel.Draw(canvas);
+    }
+
+    /// <summary>
+    /// Handles UI action buttons: New/Save/Load from the menu bar, Pause/speed from the
+    /// clock panel's transport row. Tool buttons set EditorState directly inside
+    /// <see cref="Ui.MenuBar"/>; only actions that need MainForm's dialogs and sim-loop
+    /// access route through here.
+    /// </summary>
+    private void OnUiAction(Ui.UIAction action)
+    {
+        switch (action)
+        {
+            case Ui.UIAction.New: NewMap(); break;
+            case Ui.UIAction.Save: SaveMap(); break;
+            case Ui.UIAction.Load: LoadMap(); break;
+            case Ui.UIAction.Pause:
+                _simLoop.Paused = !_simLoop.Paused;
+                break;
+            case Ui.UIAction.SpeedDown:
+                if (_simLoop.TimeScaleExponent > 0) _simLoop.TimeScaleExponent--;
+                break;
+            case Ui.UIAction.SpeedUp:
+                _simLoop.TimeScaleExponent++;
+                _simLoop.Paused = false;
+                break;
+        }
     }
 
     /// <summary>
     /// Handles mouse-down: middle button starts panning, left button dispatches to the
-    /// slider panel, toolbar hit-test, or the active editor tool (Select, Road, Delete,
-    /// SpawnPoint, Destination, Signal). Right button cancels the road tool.
+    /// retained-mode UI first, then the active editor tool (Select, Road, Delete,
+    /// Destination, Signal). Right button cancels the road tool.
     /// </summary>
     private void OnCanvasMouseDown(object? sender, MouseEventArgs e)
     {
@@ -970,65 +1028,11 @@ public class MainForm : Form
 
         if (e.Button == MouseButtons.Left)
         {
-            // Check slider panel first
-            if (_sliderPanel.OnMouseDown(e.X, e.Y))
+            // Retained-mode UI gets first claim on left clicks: the topmost panel under the
+            // cursor consumes the down (background clicks included) and takes mouse capture
+            // for drag-style panels (minimap scrub, slider thumbs).
+            if (_uiRoot.OnMouseDown(e.X, e.Y))
                 return;
-
-            // Minimap click-to-jump: center the camera on the clicked world point and begin a
-            // drag-scrub. Checked before tools so a click on the panel never selects or places
-            // anything behind it; jumps only when the map has roads (otherwise the box is blank).
-            if (_minimap.HitTest(e.X, e.Y))
-            {
-                if (_minimap.TryScreenToWorld(e.X, e.Y, out var minimapWorld))
-                {
-                    _camera.CenterOnWorld(minimapWorld.X, minimapWorld.Y);
-                    _draggingMinimap = true;
-                }
-                return;
-            }
-
-            // Check POI submenu (only visible when Destination tool active)
-            if (_editorState.ActiveTool == EditorTool.Destination)
-            {
-                var hitPOI = _uiRenderer.HitTestPOI(e.X, e.Y);
-                if (hitPOI.HasValue)
-                {
-                    _editorState.SelectedPOIType = hitPOI.Value;
-                    return;
-                }
-            }
-
-            // Check toolbar
-            var hitTool = _uiRenderer.HitTest(e.X, e.Y);
-            if (hitTool.HasValue)
-            {
-                _editorState.ResetToolState();
-                _editorState.ActiveTool = hitTool.Value;
-                return;
-            }
-
-            // Check action buttons
-            var hitAction = _uiRenderer.HitTestAction(e.X, e.Y);
-            if (hitAction.HasValue)
-            {
-                switch (hitAction.Value)
-                {
-                    case Rendering.UIAction.New: NewMap(); break;
-                    case Rendering.UIAction.Save: SaveMap(); break;
-                    case Rendering.UIAction.Load: LoadMap(); break;
-                    case Rendering.UIAction.Pause:
-                        _simLoop.Paused = !_simLoop.Paused;
-                        break;
-                    case Rendering.UIAction.SpeedDown:
-                        if (_simLoop.TimeScaleExponent > 0) _simLoop.TimeScaleExponent--;
-                        break;
-                    case Rendering.UIAction.SpeedUp:
-                        _simLoop.TimeScaleExponent++;
-                        _simLoop.Paused = false;
-                        break;
-                }
-                return;
-            }
 
             var worldPos = _camera.ScreenToWorld(e.X, e.Y, _canvas.Width, _canvas.Height);
             var worldVec = new Vector2(worldPos.X, worldPos.Y);
@@ -1187,9 +1191,6 @@ public class MainForm : Form
                 case EditorTool.Delete:
                     _deleteTool.OnClick(worldVec, _roadGraph, _edgeSpatialGrid, _populationManager);
                     break;
-                case EditorTool.SpawnPoint:
-                    _spawnPointTool.OnClick(worldVec, _roadGraph);
-                    break;
                 case EditorTool.Destination:
                     // Legacy fallback: if over an existing eligible node, flag/toggle it.
                     if (!_destinationTool.OnClick(worldVec, _roadGraph, _editorState.SelectedPOIType))
@@ -1220,9 +1221,6 @@ public class MainForm : Form
             {
                 case EditorTool.Road:
                     _roadTool.OnCancel(_editorState);
-                    break;
-                case EditorTool.SpawnPoint:
-                    RemoveNearestFlag(rWorldVec, NodeFlags.Spawn);
                     break;
                 case EditorTool.Destination:
                     RemoveNearestDestination(rWorldVec);
@@ -1259,8 +1257,7 @@ public class MainForm : Form
         }
         else if (e.Button == MouseButtons.Left)
         {
-            _sliderPanel.OnMouseUp();
-            _draggingMinimap = false;
+            _uiRoot.OnMouseUp(e.X, e.Y);
             if (_editorState.IsDraggingNode)
             {
                 // Split edges at any crossings created by the drag
@@ -1296,8 +1293,27 @@ public class MainForm : Form
         _editorState.GhostFootPos = null;
         _editorState.GhostEdge = -1;
 
-        // Update button hover state; suppress map hovers when over UI
-        if (_uiRenderer.UpdateHover(e.X, e.Y))
+        // A captured UI drag (minimap scrub, slider thumb) owns every move until release,
+        // even with the cursor far outside the panel.
+        if (_uiRoot.HasCapture)
+        {
+            _uiRoot.OnMouseMove(e.X, e.Y);
+            return;
+        }
+
+        // Middle-drag pan runs before UI hover so panning never stalls while the cursor
+        // crosses a panel or button.
+        if (_isPanning)
+        {
+            float dx = e.X - _lastMousePos.X;
+            float dy = e.Y - _lastMousePos.Y;
+            _camera.Pan(dx, dy);
+            _lastMousePos = e.Location;
+            return;
+        }
+
+        // Hovering any retained-mode panel suppresses map hover highlights.
+        if (_uiRoot.OnMouseMove(e.X, e.Y))
         {
             _editorState.HoveredNode = -1;
             _editorState.HoveredEdge = -1;
@@ -1305,24 +1321,7 @@ public class MainForm : Form
             return;
         }
 
-        if (_sliderPanel.OnMouseMove(e.X, e.Y))
-            return;
-
-        // Drag across the minimap to scrub the camera continuously.
-        if (_draggingMinimap && _minimap.TryScreenToWorld(e.X, e.Y, out var minimapWorld))
-        {
-            _camera.CenterOnWorld(minimapWorld.X, minimapWorld.Y);
-            return;
-        }
-
-        if (_isPanning)
-        {
-            float dx = e.X - _lastMousePos.X;
-            float dy = e.Y - _lastMousePos.Y;
-            _camera.Pan(dx, dy);
-            _lastMousePos = e.Location;
-        }
-        else if (_editorState.IsDraggingNode)
+        if (_editorState.IsDraggingNode)
         {
             if (!_dragActive)
             {
@@ -1416,7 +1415,6 @@ public class MainForm : Form
                     }
                     break;
                 }
-                case EditorTool.SpawnPoint:
                 case EditorTool.Signal:
                 {
                     _editorState.HoveredEdge = -1;
@@ -1429,12 +1427,12 @@ public class MainForm : Form
                     int nearNode = _roadGraph.FindNearestNode(worldVec, EditorState.SnapDistance);
 
                     // Snap to (and later flag) an existing node only when it is eligible AND not
-                    // already carrying a marker — never grab a spawn/destination node. Otherwise
+                    // already carrying a marker — never grab an existing destination node. Otherwise
                     // fall through to placement (the ghost), which drops a NEW destination.
                     // (Ghost fields were cleared at the top of this handler, so the snap and
                     // no-nearby-road cases simply leave them null.)
                     bool snapToNode = nearNode >= 0 && _roadGraph.CanPlaceMarker(nearNode)
-                        && (_roadGraph.Nodes[nearNode].Flags & (NodeFlags.Spawn | NodeFlags.Destination)) == 0;
+                        && (_roadGraph.Nodes[nearNode].Flags & NodeFlags.Destination) == 0;
 
                     if (snapToNode)
                     {
@@ -1473,29 +1471,6 @@ public class MainForm : Form
     {
         float zoomFactor = e.Delta > 0 ? 1.15f : 1f / 1.15f;
         _camera.ZoomAt(zoomFactor, e.X, e.Y, _canvas.Width, _canvas.Height);
-    }
-
-    /// <summary>
-    /// Clears the given flag from the nearest flagged node within snap distance (right-click removal).
-    /// </summary>
-    private void RemoveNearestFlag(Vector2 worldPos, NodeFlags flag)
-    {
-        int bestNode = -1;
-        float bestDist = EditorState.SnapDistance * EditorState.SnapDistance;
-        for (int i = 0; i < _roadGraph.Nodes.Count; i++)
-        {
-            var node = _roadGraph.Nodes[i];
-            if (float.IsNaN(node.Position.X)) continue;
-            if (!node.Flags.HasFlag(flag)) continue;
-            float d = Vector2.DistanceSquared(worldPos, node.Position);
-            if (d < bestDist)
-            {
-                bestDist = d;
-                bestNode = i;
-            }
-        }
-        if (bestNode >= 0)
-            _roadGraph.SetNodeFlags(bestNode, _roadGraph.Nodes[bestNode].Flags & ~flag);
     }
 
     /// <summary>
@@ -1567,15 +1542,16 @@ public class MainForm : Form
         _editorState.ActiveTool = Editor.EditorTool.Select;
 
         // Show FPS HUD immediately so the user sees the load metrics.
-        _perfHud.Visible = true;
+        _hudPanel.Visible = true;
 
         System.Diagnostics.Debug.WriteLine($"[StressScene] grid {gridCols}x{gridRows}, spawned {spawned}/{vehicleCount} vehicles");
     }
 
     /// <summary>
     /// Captures a non-intrusive performance baseline snapshot to benchmark.log.
-    /// Reads per-frame stats from <see cref="_perfHud"/> (which already drains the
-    /// pathfind accumulators each frame) so this method does not reset any shared state.
+    /// Reads per-frame stats from <see cref="_perfTelemetry"/> (whose Sample already
+    /// drains the pathfind accumulators each frame) so this method does not reset any
+    /// shared state.
     /// </summary>
     private void CaptureBaseline()
     {
@@ -1589,11 +1565,11 @@ public class MainForm : Form
                 offroad++;
 
         Roads.App.Rendering.BenchmarkCapture.Capture(
-            _perfHud.AvgFps, _perfHud.AvgSimMs, _perfHud.AvgDrawMs,
-            _perfHud.LastPathfindMs, _perfHud.LastPathfindCalls,
+            _perfTelemetry.AvgFps, _perfTelemetry.AvgSimMs, _perfTelemetry.AvgDrawMs,
+            _perfTelemetry.LastPathfindMs, _perfTelemetry.LastPathfindCalls,
             _vehicles.Count, Roads.App.Vehicles.SteeringController.LastConflictCoOccupancy, offroad,
             _simLoop.LastTiming);
-        System.Diagnostics.Debug.WriteLine($"[Baseline] captured: fps={_perfHud.AvgFps:F1}, vehicles={_vehicles.Count}");
+        System.Diagnostics.Debug.WriteLine($"[Baseline] captured: fps={_perfTelemetry.AvgFps:F1}, vehicles={_vehicles.Count}");
     }
 
 }

@@ -13,8 +13,11 @@ namespace Roads.App.Rendering;
 /// identical to the retired MarkerRenderer pass, for every real-POI destination node.</item>
 /// <item>0.3–0.8 — each building as a rotated flat rectangle in a muted wall color with a
 /// subtle POI-color tint and a thin dark outline.</item>
-/// <item>&gt; 0.8 — full per-type art (gable/flat/hip roofs, lawns, aprons, parking pads,
-/// stall lines); &gt; 1.5 adds close-up trim (chimneys, AC units).</item>
+/// <item>&gt; 0.8 — full per-type art in TWO passes over the visible set: first every
+/// building's ground plane (lawns, school fields, walkways, aprons, parking pads/lots),
+/// then every structure (roofs, walls, doors, windows) — so one building's ground margin
+/// can never paint over a neighboring structure; &gt; 1.5 adds close-up trim (chimneys,
+/// AC units).</item>
 /// </list>
 /// Destination nodes that received no footprint keep the dot at ALL zooms. EntryExit
 /// nodes never have footprints: below 0.3 they keep the magenta dot, at 0.3+ they get a
@@ -84,22 +87,40 @@ public sealed class BuildingRenderer
             cullRect.Inflate(nightFactor > 0f ? 40f : 4f, nightFactor > 0f ? 40f : 4f);
 
             var buildings = layer.Buildings;
-            for (int i = 0; i < buildings.Count; i++)
+            if (zoom < 0.8f)
             {
-                if (!cullRect.IntersectsWith(layer.GetBounds(i))) continue;
-                var b = buildings[i];
-
-                // Halos only at the full-detail tier: in the 0.3-0.8 overview band a whole
-                // city of homes is visible and thousands of blended circles would eat the
-                // frame budget for ~5 px halos that visually merge anyway.
-                if (nightFactor > 0f && zoom >= 0.8f
-                    && (b.Type == POIType.Home || b.Type == POIType.Shop))
-                    DrawHalo(canvas, in b, nightFactor);
-
-                if (zoom < 0.8f)
+                for (int i = 0; i < buildings.Count; i++)
+                {
+                    if (!cullRect.IntersectsWith(layer.GetBounds(i))) continue;
+                    var b = buildings[i];
                     DrawFlat(canvas, in b, ambient, zoom);
-                else
-                    DrawFull(canvas, layer, i, in b, graph, zoom, ambient, nightFactor);
+                }
+            }
+            else
+            {
+                // Full-detail tier draws in two passes: ALL ground planes first, then ALL
+                // structures. Ground art extends past the footprint (lawn margins, school
+                // fields, aprons), so an interleaved per-building pass would let a later
+                // building's ground paint over an already-drawn neighbor's roof.
+                for (int i = 0; i < buildings.Count; i++)
+                {
+                    if (!cullRect.IntersectsWith(layer.GetBounds(i))) continue;
+                    var b = buildings[i];
+                    DrawGround(canvas, layer, i, in b, graph, zoom, ambient);
+                }
+                for (int i = 0; i < buildings.Count; i++)
+                {
+                    if (!cullRect.IntersectsWith(layer.GetBounds(i))) continue;
+                    var b = buildings[i];
+
+                    // Halos only at the full-detail tier: in the 0.3-0.8 overview band a
+                    // whole city of homes is visible and thousands of blended circles would
+                    // eat the frame budget for ~5 px halos that visually merge anyway.
+                    if (nightFactor > 0f && (b.Type == POIType.Home || b.Type == POIType.Shop))
+                        DrawHalo(canvas, in b, nightFactor);
+
+                    DrawStructure(canvas, in b, graph, zoom, ambient, nightFactor);
+                }
             }
         }
 
@@ -234,45 +255,95 @@ public sealed class BuildingRenderer
     }
 
     /// <summary>
-    /// Close-zoom tier dispatcher: draws the per-type art inside a canvas transform whose
-    /// local +X axis is the building's facing direction (front/facade at x = +HalfDepth,
-    /// the node beyond it) and +Y its right-lateral axis.
+    /// Enters the building's local frame shared by both full-tier passes: computes the
+    /// facing axis, right-lateral axis, and the destination node's local position, then
+    /// pushes a canvas transform whose local +X axis is the facing direction (front/facade
+    /// at x = +HalfDepth, the node beyond it) and +Y the lateral. Returns false (no
+    /// transform pushed) for a stale footprint mid-edit; on true the caller must Restore.
     /// </summary>
-    private void DrawFull(SKCanvas canvas, BuildingLayer layer, int buildingIndex,
-        in BuildingFootprint b, RoadGraph graph, float zoom, float ambient, float nightFactor)
+    private static bool TryBeginLocalFrame(SKCanvas canvas, in BuildingFootprint b,
+        RoadGraph graph, out Vector2 axis, out Vector2 lat, out Vector2 nodeLocal)
     {
+        axis = default; lat = default; nodeLocal = default;
         var nodePos = graph.Nodes[b.NodeIndex].Position;
-        if (float.IsNaN(nodePos.X)) return; // stale footprint mid-edit; skip this frame
+        if (float.IsNaN(nodePos.X)) return false; // stale footprint mid-edit; skip this frame
 
-        var axis = new Vector2(MathF.Cos(b.FacingRadians), MathF.Sin(b.FacingRadians));
-        var lat = new Vector2(-axis.Y, axis.X);
+        axis = new Vector2(MathF.Cos(b.FacingRadians), MathF.Sin(b.FacingRadians));
+        lat = new Vector2(-axis.Y, axis.X);
         var rel = nodePos - b.Center;
-        var nodeLocal = new Vector2(Vector2.Dot(rel, axis), Vector2.Dot(rel, lat));
+        nodeLocal = new Vector2(Vector2.Dot(rel, axis), Vector2.Dot(rel, lat));
 
         canvas.Save();
         canvas.Translate(b.Center.X, b.Center.Y);
         canvas.RotateDegrees(b.FacingRadians * RadToDeg);
+        return true;
+    }
+
+    /// <summary>
+    /// Full-tier pass 1: the building's ground plane — everything at grade that may extend
+    /// past the footprint (lawn, school field, walkway, apron, parking pad, patio, the
+    /// whole unroofed parking lot). Runs for ALL visible buildings before any structure.
+    /// </summary>
+    private void DrawGround(SKCanvas canvas, BuildingLayer layer, int buildingIndex,
+        in BuildingFootprint b, RoadGraph graph, float zoom, float ambient)
+    {
+        if (!TryBeginLocalFrame(canvas, in b, graph, out var axis, out var lat, out var nodeLocal))
+            return;
 
         float outlineW = MathF.Max(0.3f, 0.8f / zoom);
         switch (b.Type)
         {
             case POIType.Home:
-                DrawHome(canvas, in b, axis, nodeLocal, ambient, zoom, outlineW);
+                DrawHomeGround(canvas, in b, nodeLocal, ambient);
                 break;
             case POIType.Work:
-                DrawWork(canvas, in b, nodeLocal, ambient, zoom, outlineW);
+                DrawWorkGround(canvas, in b, nodeLocal, ambient);
                 break;
             case POIType.Shop:
-                DrawShop(canvas, in b, nodeLocal, ambient, zoom, outlineW);
+                DrawShopGround(canvas, in b, nodeLocal, ambient, zoom);
                 break;
             case POIType.Leisure:
-                DrawLeisure(canvas, in b, axis, ambient, outlineW);
+                DrawLeisureGround(canvas, in b, ambient, outlineW);
                 break;
             case POIType.School:
-                DrawSchool(canvas, layer, buildingIndex, in b, axis, lat, ambient, zoom, outlineW);
+                DrawSchoolGround(canvas, layer, buildingIndex, in b, axis, lat, ambient, zoom);
                 break;
             case POIType.Parking:
-                DrawParking(canvas, in b, ambient, outlineW);
+                DrawParkingGround(canvas, in b, ambient, outlineW);
+                break;
+        }
+
+        canvas.Restore();
+    }
+
+    /// <summary>
+    /// Full-tier pass 2: the structure (roof, walls, door, trim, night windows). Runs after
+    /// every visible building's ground plane so no lawn/field/apron overlaps a structure.
+    /// Parking lots are entirely ground and draw nothing here.
+    /// </summary>
+    private void DrawStructure(SKCanvas canvas, in BuildingFootprint b, RoadGraph graph,
+        float zoom, float ambient, float nightFactor)
+    {
+        if (!TryBeginLocalFrame(canvas, in b, graph, out var axis, out _, out _))
+            return;
+
+        float outlineW = MathF.Max(0.3f, 0.8f / zoom);
+        switch (b.Type)
+        {
+            case POIType.Home:
+                DrawHomeStructure(canvas, in b, axis, ambient, zoom, outlineW);
+                break;
+            case POIType.Work:
+                DrawWorkStructure(canvas, in b, ambient, zoom, outlineW);
+                break;
+            case POIType.Shop:
+                DrawShopStructure(canvas, in b, ambient, outlineW);
+                break;
+            case POIType.Leisure:
+                DrawLeisureStructure(canvas, in b, axis, ambient, outlineW);
+                break;
+            case POIType.School:
+                DrawSchoolStructure(canvas, in b, ambient, outlineW);
                 break;
         }
 
@@ -284,10 +355,9 @@ public sealed class BuildingRenderer
 
     // ── Per-type art (local frame: +X toward front/node, +Y lateral) ─────
 
-    /// <summary>Home: lawn under the house, walkway to the node, two-tone gable roof,
-    /// front door, chimney at close zoom.</summary>
-    private void DrawHome(SKCanvas canvas, in BuildingFootprint b, Vector2 axis,
-        Vector2 nodeLocal, float ambient, float zoom, float outlineW)
+    /// <summary>Home ground: lawn under the house and the walkway toward the node.</summary>
+    private void DrawHomeGround(SKCanvas canvas, in BuildingFootprint b, Vector2 nodeLocal,
+        float ambient)
     {
         float hd = b.HalfDepth, hw = b.HalfWidth;
 
@@ -308,6 +378,13 @@ public sealed class BuildingRenderer
             canvas.DrawLine(hd, 0f,
                 hd + walkDir.X * (walkLen - 2f), walkDir.Y * (walkLen - 2f), _line);
         }
+    }
+
+    /// <summary>Home structure: two-tone gable roof, front door, chimney at close zoom.</summary>
+    private void DrawHomeStructure(SKCanvas canvas, in BuildingFootprint b, Vector2 axis,
+        float ambient, float zoom, float outlineW)
+    {
+        float hd = b.HalfDepth, hw = b.HalfWidth;
 
         var pal = HomeRoofPalettes[(int)(Hash(b.Seed, 11) & 3)];
         DrawGableRoof(canvas, hd, hw, axis, pal.L, pal.D, ambient, outlineW);
@@ -329,20 +406,26 @@ public sealed class BuildingRenderer
         }
     }
 
-    /// <summary>Work: concrete apron toward the node, flat roof with darker parapet inset,
-    /// AC units at close zoom.</summary>
-    private void DrawWork(SKCanvas canvas, in BuildingFootprint b, Vector2 nodeLocal,
-        float ambient, float zoom, float outlineW)
+    /// <summary>Work ground: concrete apron between the facade and the node.</summary>
+    private void DrawWorkGround(SKCanvas canvas, in BuildingFootprint b, Vector2 nodeLocal,
+        float ambient)
     {
         float hd = b.HalfDepth, hw = b.HalfWidth;
 
-        // Concrete apron between the facade and the node, stopping 2.5 m short of the node
-        // so it never paints across the sidewalk/asphalt when the node sits on a road (the
-        // driveway connector edge, drawn as a road, visually fills the gap for off-road POIs).
+        // Apron stops 2.5 m short of the node so it never paints across the
+        // sidewalk/asphalt when the node sits on a road (the driveway connector edge,
+        // drawn as a road, visually fills the gap for off-road POIs).
         float apronHalfW = MathF.Min(hw, 5f);
         float apronEnd = MathF.Max(hd + 2f, nodeLocal.X - 2.5f);
         _fill.Color = Dim(new SKColor(150, 148, 142), ambient);
         canvas.DrawRect(new SKRect(hd, -apronHalfW, apronEnd, apronHalfW), _fill);
+    }
+
+    /// <summary>Work structure: flat roof with darker parapet inset, AC units at close zoom.</summary>
+    private void DrawWorkStructure(SKCanvas canvas, in BuildingFootprint b,
+        float ambient, float zoom, float outlineW)
+    {
+        float hd = b.HalfDepth, hw = b.HalfWidth;
 
         var body = new SKRect(-hd, -hw, hd, hw);
         _fill.Color = Dim(new SKColor(128, 126, 122), ambient);
@@ -369,10 +452,9 @@ public sealed class BuildingRenderer
         }
     }
 
-    /// <summary>Shop: front parking pad with white stall lines toward the node, flat roof,
-    /// muted accent awning strip along the facade.</summary>
-    private void DrawShop(SKCanvas canvas, in BuildingFootprint b, Vector2 nodeLocal,
-        float ambient, float zoom, float outlineW)
+    /// <summary>Shop ground: front parking pad with white stall lines toward the node.</summary>
+    private void DrawShopGround(SKCanvas canvas, in BuildingFootprint b, Vector2 nodeLocal,
+        float ambient, float zoom)
     {
         float hd = b.HalfDepth, hw = b.HalfWidth;
 
@@ -391,6 +473,13 @@ public sealed class BuildingRenderer
             float y = -hw * 0.7f + (2f * hw * 0.7f) * ((k + 0.5f) / stalls);
             canvas.DrawLine(hd + 0.4f, y, padEnd - 0.4f, y, _line);
         }
+    }
+
+    /// <summary>Shop structure: flat roof, muted accent awning strip along the facade.</summary>
+    private void DrawShopStructure(SKCanvas canvas, in BuildingFootprint b,
+        float ambient, float outlineW)
+    {
+        float hd = b.HalfDepth, hw = b.HalfWidth;
 
         var body = new SKRect(-hd, -hw, hd, hw);
         _fill.Color = Dim(new SKColor(134, 130, 124), ambient);
@@ -404,16 +493,12 @@ public sealed class BuildingRenderer
         canvas.DrawRect(new SKRect(hd, -hw, hd + 1.3f, hw), _fill);
     }
 
-    /// <summary>Leisure: warm-palette gable roof with a small patio circle beside it.</summary>
-    private void DrawLeisure(SKCanvas canvas, in BuildingFootprint b, Vector2 axis,
+    /// <summary>Leisure ground: small patio circle on a hash-picked side.</summary>
+    private void DrawLeisureGround(SKCanvas canvas, in BuildingFootprint b,
         float ambient, float outlineW)
     {
-        float hd = b.HalfDepth, hw = b.HalfWidth;
+        float hw = b.HalfWidth;
 
-        var pal = LeisureRoofPalettes[(int)(Hash(b.Seed, 11) & 1)];
-        DrawGableRoof(canvas, hd, hw, axis, pal.L, pal.D, ambient, outlineW);
-
-        // Patio circle on a hash-picked side.
         float side = (Hash(b.Seed, 13) & 1) == 0 ? 1f : -1f;
         _fill.Color = Dim(new SKColor(152, 146, 136), ambient);
         canvas.DrawCircle(0f, side * (hw + 3f), 2.6f, _fill);
@@ -422,25 +507,37 @@ public sealed class BuildingRenderer
         canvas.DrawCircle(0f, side * (hw + 3f), 2.6f, _stroke);
     }
 
-    /// <summary>School: green field beside the building (when placed), large two-tone
-    /// hip-style roof (dark base, lighter inset top).</summary>
-    private void DrawSchool(SKCanvas canvas, BuildingLayer layer, int buildingIndex,
-        in BuildingFootprint b, Vector2 axis, Vector2 lat, float ambient, float zoom, float outlineW)
+    /// <summary>Leisure structure: warm-palette gable roof.</summary>
+    private void DrawLeisureStructure(SKCanvas canvas, in BuildingFootprint b, Vector2 axis,
+        float ambient, float outlineW)
+    {
+        var pal = LeisureRoofPalettes[(int)(Hash(b.Seed, 11) & 1)];
+        DrawGableRoof(canvas, b.HalfDepth, b.HalfWidth, axis, pal.L, pal.D, ambient, outlineW);
+    }
+
+    /// <summary>School ground: green field beside the building (when placed).</summary>
+    private void DrawSchoolGround(SKCanvas canvas, BuildingLayer layer, int buildingIndex,
+        in BuildingFootprint b, Vector2 axis, Vector2 lat, float ambient, float zoom)
+    {
+        if (!layer.TryGetSchoolField(buildingIndex, out var fieldCenter, out float fhw, out float fhd))
+            return;
+
+        var relField = fieldCenter - b.Center;
+        float fx = Vector2.Dot(relField, axis);
+        float fy = Vector2.Dot(relField, lat);
+        var fieldRect = new SKRect(fx - fhd, fy - fhw, fx + fhd, fy + fhw);
+        _fill.Color = Dim(FieldColor, ambient);
+        canvas.DrawRect(fieldRect, _fill);
+        _stroke.Color = new SKColor(255, 255, 255, (byte)(150 * ambient));
+        _stroke.StrokeWidth = MathF.Max(0.25f, 0.6f / zoom);
+        canvas.DrawRect(fieldRect, _stroke);
+    }
+
+    /// <summary>School structure: large two-tone hip-style roof (dark base, lighter inset top).</summary>
+    private void DrawSchoolStructure(SKCanvas canvas, in BuildingFootprint b,
+        float ambient, float outlineW)
     {
         float hd = b.HalfDepth, hw = b.HalfWidth;
-
-        if (layer.TryGetSchoolField(buildingIndex, out var fieldCenter, out float fhw, out float fhd))
-        {
-            var relField = fieldCenter - b.Center;
-            float fx = Vector2.Dot(relField, axis);
-            float fy = Vector2.Dot(relField, lat);
-            var fieldRect = new SKRect(fx - fhd, fy - fhw, fx + fhd, fy + fhw);
-            _fill.Color = Dim(FieldColor, ambient);
-            canvas.DrawRect(fieldRect, _fill);
-            _stroke.Color = new SKColor(255, 255, 255, (byte)(150 * ambient));
-            _stroke.StrokeWidth = MathF.Max(0.25f, 0.6f / zoom);
-            canvas.DrawRect(fieldRect, _stroke);
-        }
 
         var body = new SKRect(-hd, -hw, hd, hw);
         _fill.Color = Dim(new SKColor(108, 100, 90), ambient);
@@ -456,9 +553,9 @@ public sealed class BuildingRenderer
         canvas.DrawRect(body, _stroke);
     }
 
-    /// <summary>Parking: unroofed dark asphalt lot with a white perimeter line and two
-    /// banks of stall dividers along the long axis.</summary>
-    private void DrawParking(SKCanvas canvas, in BuildingFootprint b, float ambient, float outlineW)
+    /// <summary>Parking (all ground, nothing in the structure pass): unroofed dark asphalt
+    /// lot with a white perimeter line and two banks of stall dividers along the long axis.</summary>
+    private void DrawParkingGround(SKCanvas canvas, in BuildingFootprint b, float ambient, float outlineW)
     {
         float hd = b.HalfDepth, hw = b.HalfWidth;
 
@@ -582,14 +679,8 @@ public sealed class BuildingRenderer
         _               => new SKColor(130, 128, 124),
     };
 
-    /// <summary>POI palette color (UIRenderer.POIColors) with a red fallback for None.</summary>
-    private static SKColor PoiColor(POIType type)
-    {
-        int idx = (int)type - 1;
-        return idx >= 0 && idx < UIRenderer.POIColors.Length
-            ? UIRenderer.POIColors[idx]
-            : new SKColor(200, 60, 40, 200);
-    }
+    /// <summary>POI palette color (UiTheme.PoiColors) with a red fallback for None.</summary>
+    private static SKColor PoiColor(POIType type) => Ui.UiTheme.PoiColor(type);
 
     private static SKColor Dim(SKColor c, float ambient) => new(
         (byte)Math.Clamp((int)(c.Red * ambient), 0, 255),

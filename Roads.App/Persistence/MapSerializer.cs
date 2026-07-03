@@ -238,7 +238,10 @@ public static class MapSerializer
         float timeOfDay = r.ReadSingle();
         clock.TimeOfDay = timeOfDay;
 
-        // Section 1 — Nodes
+        // Section 1 — Nodes. Flags are masked to the currently defined bits so legacy files
+        // carrying retired flags (bit 8 was Spawn, bit 64 was RegionSpawn) load clean.
+        const byte validNodeFlags = (byte)(NodeFlags.TrafficLight | NodeFlags.StopSign
+            | NodeFlags.Yield | NodeFlags.ManualSignal | NodeFlags.Destination);
         int nodeCount = r.ReadInt32();
         var nodes = new List<RoadNode>(nodeCount);
         for (int i = 0; i < nodeCount; i++)
@@ -246,7 +249,7 @@ public static class MapSerializer
             nodes.Add(new RoadNode
             {
                 Position = new Vector2(r.ReadSingle(), r.ReadSingle()),
-                Flags = (NodeFlags)r.ReadByte(),
+                Flags = (NodeFlags)(r.ReadByte() & validNodeFlags),
                 PointOfInterest = (POIType)r.ReadByte()
             });
         }
