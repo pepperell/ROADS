@@ -17,7 +17,9 @@ namespace Roads.App.Rendering.Ui;
 /// - Uncaptured moves maintain the single hovered panel (Enter/Leave) and return true when
 ///   the pointer is over any interactive panel, so the caller suppresses map hover logic.
 /// - Stale capture (a modal dialog opened inside Click can swallow the matching mouse-up)
-///   self-heals: the next mouse-down clears any leftover capture before dispatching.
+///   self-heals two ways: MainForm releases it on the first mouse-move with no button held
+///   (so hover resumes immediately after the dialog closes), and the next mouse-down
+///   clears any leftover capture before dispatching (backstop).
 ///
 /// <see cref="Draw"/> also runs Measure+Layout for every panel INCLUDING
 /// <see cref="Panel.ExternallyDrawn"/> ones (they are only excluded from painting; the

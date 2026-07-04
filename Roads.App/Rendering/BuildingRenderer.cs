@@ -265,6 +265,10 @@ public sealed class BuildingRenderer
         RoadGraph graph, out Vector2 axis, out Vector2 lat, out Vector2 nodeLocal)
     {
         axis = default; lat = default; nodeLocal = default;
+        // Stale-footprint guards: cached scenery can briefly outlive a graph edit (the
+        // settle-gate), and after a whole-map REPLACEMENT an old footprint's node index can
+        // exceed the new, smaller node list — treat out-of-range like the defunct case.
+        if (b.NodeIndex < 0 || b.NodeIndex >= graph.Nodes.Count) return false;
         var nodePos = graph.Nodes[b.NodeIndex].Position;
         if (float.IsNaN(nodePos.X)) return false; // stale footprint mid-edit; skip this frame
 

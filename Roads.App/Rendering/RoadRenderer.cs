@@ -11,7 +11,7 @@ namespace Roads.App.Rendering;
 /// treatment (dark curbs on residential/arterial, white edge lines on highway), per-type
 /// center-line policy (none on residential, double solid yellow on arterial, median band
 /// plus yellow lines on highway, worn tire tracks on dirt), lane markings, stop lines,
-/// zebra crosswalks at signalized approaches, intersection fills, and node dots.
+/// continental crosswalks at signalized approaches, intersection fills, and node dots.
 /// Traffic-control furniture (signal heads, stop/yield/speed signs) is drawn by
 /// <see cref="SignRenderer"/>. Caches per-edge Bezier offset paths and invalidates when
 /// the graph version changes.
@@ -36,13 +36,18 @@ public class RoadRenderer
     private const float TireTrackWidth = 0.45f;
     /// <summary>Zoom at or above which crosswalks are drawn (needs TrafficSignalSystem supplied to Draw).</summary>
     private const float CrosswalkMinZoom = 0.8f;
-    /// <summary>Width (m) of each zebra crosswalk bar.</summary>
+    /// <summary>Lateral width (m) of each continental crosswalk bar (MUTCD ~24 in).</summary>
     private const float CrosswalkBarWidth = 0.6f;
-    /// <summary>Gap (m) between zebra crosswalk bars.</summary>
+    /// <summary>Lateral gap (m) between continental bars (equal-width gaps; ~1.2 m pitch
+    /// puts about three bars per 3.5 m lane).</summary>
     private const float CrosswalkBarGap = 0.6f;
-    /// <summary>Number of zebra bars per crosswalk.</summary>
-    private const int CrosswalkBarCount = 5;
-    /// <summary>Distance (m) from the stop line to the center of the first zebra bar.</summary>
+    /// <summary>Length (m) of each bar along the travel direction — the crossing depth
+    /// pedestrians walk within (MUTCD typical ~8 ft).</summary>
+    private const float CrosswalkDepth = 2.4f;
+    /// <summary>Distance (m) from the stop line to the near edge of the crosswalk band.
+    /// The whole band (this + <see cref="CrosswalkDepth"/>) must fit inside the strip
+    /// StopLineCache reserves at signalized approaches
+    /// (<see cref="SimConstants.SignalCrosswalkSetback"/>) or the bars extend into the junction.</summary>
     private const float CrosswalkStartOffset = 1.3f;
     /// <summary>Zoom below which editor node dots are hidden (they are an aid, not scenery).</summary>
     private const float NodeDotMinZoom = 0.5f;
@@ -133,7 +138,7 @@ public class RoadRenderer
         PathEffect = SKPathEffect.CreateDash(new[] { 7f, 2f }, 0),
         IsAntialias = true
     };
-    // Zebra crosswalk bars at signalized approaches.
+    // Continental crosswalk bars at signalized approaches.
     private readonly SKPaint _crosswalkPaint = new()
     {
         Color = new SKColor(255, 255, 255, 200),
@@ -189,7 +194,7 @@ public class RoadRenderer
     /// is true, a congestion tint is alpha-blended over each road surface after the base
     /// color is applied, without affecting lane markings or the road type styling.
     /// When <paramref name="trafficSignals"/> is non-null and zoom is at least
-    /// <see cref="CrosswalkMinZoom"/>, zebra crosswalks are drawn at each signalized approach.
+    /// <see cref="CrosswalkMinZoom"/>, continental crosswalks are drawn at each signalized approach.
     ///
     /// Frustum culling: edges whose endpoint AABB does not intersect <paramref name="viewRect"/>
     /// are skipped in all passes. A generous margin is added to the AABB so that Bézier
@@ -782,12 +787,15 @@ public class RoadRenderer
     }
 
     /// <summary>
-    /// Draws zebra crosswalk bars just downstream of the stop line at every paved approach
-    /// whose destination node has a traffic light. Each crosswalk is
-    /// <see cref="CrosswalkBarCount"/> white bars oriented along the stop-line direction,
-    /// spanning the approach's <see cref="GeometryUtil.LaneSpan"/>. Dirt approaches are
-    /// skipped. Caller gates on zoom (drawn at <see cref="CrosswalkMinZoom"/> and above)
-    /// and only calls this when a <see cref="TrafficSignalSystem"/> was supplied to Draw.
+    /// Draws a US continental crosswalk just downstream of the stop line at every paved
+    /// approach whose destination node has a traffic light: white bars ELONGATED ALONG
+    /// THE TRAVEL DIRECTION (<see cref="CrosswalkDepth"/> long, <see cref="CrosswalkBarWidth"/>
+    /// wide — the realistic orientation, perpendicular to the stop line), stacked evenly
+    /// across the full roadway. The bar count is derived from the roadway span at a fixed
+    /// bar+gap pitch and the pattern is centered, so wide arterials get proportionally
+    /// more bars than a narrow residential street (~three per 3.5 m lane). Dirt approaches
+    /// are skipped. Caller gates on zoom (drawn at <see cref="CrosswalkMinZoom"/> and
+    /// above) and only calls this when a <see cref="TrafficSignalSystem"/> was supplied to Draw.
     /// </summary>
     private void DrawCrosswalks(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines,
         TrafficSignalSystem trafficSignals, SKRect cullRect = default)
@@ -815,7 +823,7 @@ public class RoadRenderer
             // Travel direction points toward the node, so "downstream of the stop line"
             // (between the stop line and the intersection) is +tangent.
             float dx = tangent.X / len, dy = tangent.Y / len;
-            float nx = -dy, ny = dx; // right normal (Y-down) = stop-line direction
+            float nx = -dy, ny = dx; // right normal (Y-down) = across the road
 
             // A crosswalk crosses the FULL roadway (unlike stop lines, which span only the
             // approaching lanes): on two-way roads the path is the center divider and
@@ -824,12 +832,22 @@ public class RoadRenderer
             if (GeometryUtil.HasCenterDivider(graph, i))
                 spanMin = -spanMax;
 
-            for (int bar = 0; bar < CrosswalkBarCount; bar++)
+            // Fit as many bars as the roadway width allows at the fixed pitch, centered
+            // laterally so the pattern is symmetric with no partial bar at either curb.
+            float pitch = CrosswalkBarWidth + CrosswalkBarGap;
+            float span = spanMax - spanMin;
+            int bars = Math.Max(2, (int)((span + CrosswalkBarGap) / pitch));
+            float used = bars * pitch - CrosswalkBarGap;
+            float s0 = spanMin + (span - used) * 0.5f + CrosswalkBarWidth * 0.5f;
+
+            float near = CrosswalkStartOffset;
+            float far = CrosswalkStartOffset + CrosswalkDepth;
+            for (int bar = 0; bar < bars; bar++)
             {
-                float d = CrosswalkStartOffset + bar * (CrosswalkBarWidth + CrosswalkBarGap);
-                float cx = center.X + dx * d, cy = center.Y + dy * d;
-                canvas.DrawLine(cx + nx * spanMin, cy + ny * spanMin,
-                    cx + nx * spanMax, cy + ny * spanMax, _crosswalkPaint);
+                float s = s0 + bar * pitch;
+                float bx = center.X + nx * s, by = center.Y + ny * s;
+                canvas.DrawLine(bx + dx * near, by + dy * near,
+                    bx + dx * far, by + dy * far, _crosswalkPaint);
             }
         }
     }

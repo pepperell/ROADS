@@ -104,11 +104,13 @@ public class MainForm : Form
         DoubleBuffered = true;
         StartPosition = FormStartPosition.CenterScreen;
 
-        _editorState.ActiveTool = EditorTool.Road;
+        // The app always opens paused with the Select tool active (New/Load match this).
+        _editorState.ActiveTool = EditorTool.Select;
         _spawner = new VehicleSpawner(_roadGraph, _vehicles, _vehicleGrid);
         _populationManager = new PopulationManager(_roadGraph, _vehicles, _vehicleGrid, _poiRegistry, SimulationLoop.MaxVehicles);
         _graphChangeHandler = new GraphChangeHandler(_roadGraph, _editorState, _vehicles, _edgeSpatialGrid, _spawner);
         _simLoop = new SimulationLoop(_roadGraph, _vehicles, _vehicleGrid, _stopLineCache, _intersectionArcs, _edgeSpatialGrid, _trafficSignals, _stopSigns, _yieldSigns, _spawner, _populationManager, _editorState, _graphChangeHandler);
+        _simLoop.Paused = true;
 
         // Retained-mode UI tree (bottom→top add order = draw order; input hits topmost first).
         _uiRoot.Add(new Ui.MenuBar(_editorState, OnUiAction));
@@ -838,12 +840,13 @@ public class MainForm : Form
         _trafficSignals.SetPhaseRotations(new List<(int, byte)>());
 
         _simLoop.RebuildWorldCaches();
+        _sceneRenderer.OnMapReplaced();
 
         _camera.CenterX = 0;
         _camera.CenterY = 0;
         _camera.Zoom = 5.0f;
         _simLoop.Clock.TimeOfDay = 8.0;
-        _simLoop.Paused = false;
+        _simLoop.Paused = true; // new maps start paused, matching app open and Load
         _simLoop.TimeScaleExponent = 0;
 
         _editorState.ResetToolState();
@@ -941,12 +944,14 @@ public class MainForm : Form
                 _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
                 _populationManager, loadVehicles);
             _simLoop.RebuildWorldCaches();
+            _sceneRenderer.OnMapReplaced();
 
             // Start paused after loading
             _simLoop.Paused = true;
 
             // Reset editor state (selection, drags, lane mode, pending road anchor)
             _editorState.ResetToolState();
+            _editorState.ActiveTool = Editor.EditorTool.Select;
         }
         catch (Exception ex)
         {
@@ -1297,11 +1302,19 @@ public class MainForm : Form
         _editorState.RoadAnchorGhostPos = null;
 
         // A captured UI drag (minimap scrub, slider thumb) owns every move until release,
-        // even with the cursor far outside the panel.
+        // even with the cursor far outside the panel. Capture with NO button held is
+        // stale — a modal dialog opened inside a Click (New/Save/Load) swallowed the
+        // matching mouse-up — so release it here and fall through to normal routing;
+        // hover then works immediately after the dialog closes instead of only
+        // self-healing on the next click.
         if (_uiRoot.HasCapture)
         {
-            _uiRoot.OnMouseMove(e.X, e.Y);
-            return;
+            if (e.Button != MouseButtons.None)
+            {
+                _uiRoot.OnMouseMove(e.X, e.Y);
+                return;
+            }
+            _uiRoot.OnMouseUp(e.X, e.Y);
         }
 
         // Middle-drag pan runs before UI hover so panning never stalls while the cursor
@@ -1544,6 +1557,7 @@ public class MainForm : Form
         _trafficSignals.SetPhaseRotations(new List<(int, byte)>());
 
         _simLoop.RebuildWorldCaches();
+        _sceneRenderer.OnMapReplaced();
 
         int spawned = _spawner.SpawnBulk(vehicleCount);
 

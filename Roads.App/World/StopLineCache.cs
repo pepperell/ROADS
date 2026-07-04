@@ -8,7 +8,13 @@ namespace Roads.App.World;
 /// Stop lines are set back from intersections based on the width and angle of crossing roads,
 /// so vehicles stop before blocking cross-traffic. Computes per-side (left/right of tangent)
 /// trim values so that boundary lines at acute-angle Y-intersections are asymmetric — pushed
-/// back further on the sharp-angle side. Rebuilds automatically when the graph changes.
+/// back further on the sharp-angle side. At signalized (traffic-light) approaches the vehicle
+/// stop-T gets an EXTRA <see cref="SimConstants.SignalCrosswalkSetback"/> so the continental
+/// crosswalk fits between the stop line and the junction; the boundary trims deliberately do
+/// not move (they define the junction fill / boundary-line geometry). Reading the TrafficLight
+/// flag here relies on signal auto-assignment running before this rebuild in
+/// SimulationLoop.RebuildWorldCaches' normalize phase. Rebuilds automatically when the graph
+/// changes (flag edits bump the version).
 /// </summary>
 public class StopLineCache
 {
@@ -195,12 +201,23 @@ public class StopLineCache
         maxRightDist = MathF.Min(maxRightDist, maxAllowed);
         float maxDist = MathF.Max(maxLeftDist, maxRightDist);
 
+        // Signalized approaches reserve room for the continental crosswalk between the
+        // stop line and the junction: the vehicle stop-T is pulled back by
+        // SignalCrosswalkSetback (still under the edge-length cap) while the per-side
+        // boundary trims stay at the geometric clearance, so the junction fill and
+        // boundary lines do not grow — the crosswalk band occupies the reserved strip.
+        // Dirt approaches get no crosswalk (no paint), so no reservation either.
+        float stopDist = maxDist;
+        if (maxDist >= 0.01f && edge.RoadType != RoadType.Dirt
+            && (graph.Nodes[nodeIndex].Flags & NodeFlags.TrafficLight) != 0)
+            stopDist = MathF.Min(maxDist + SimConstants.SignalCrosswalkSetback, maxAllowed);
+
         // Convert distances to t-values using arc-length parameterization
         float clampLo = atToNode ? 0.5f : 0.001f;
         float clampHi = atToNode ? 0.999f : 0.5f;
 
-        stopT = maxDist < 0.01f ? defaultT
-            : MathF.Max(clampLo, MathF.Min(ArcLengthToT(graph, edgeIndex, maxDist, atToNode), clampHi));
+        stopT = stopDist < 0.01f ? defaultT
+            : MathF.Max(clampLo, MathF.Min(ArcLengthToT(graph, edgeIndex, stopDist, atToNode), clampHi));
         leftTrimT = maxLeftDist < 0.01f ? defaultT
             : MathF.Max(clampLo, MathF.Min(ArcLengthToT(graph, edgeIndex, maxLeftDist, atToNode), clampHi));
         rightTrimT = maxRightDist < 0.01f ? defaultT

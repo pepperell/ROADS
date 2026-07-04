@@ -76,6 +76,22 @@ public class SceneRenderer
     }
 
     /// <summary>
+    /// Notifies the scene that the graph was REPLACED wholesale (New / Load / stress scene)
+    /// rather than edited. Cached scenery must NOT survive the settle-gate window here: the
+    /// gate's stale-draw safety argument assumes node indices are stable, which holds for
+    /// edits (nodes go defunct in place) but not for a replaced — possibly smaller — node
+    /// list, where an old footprint's node index can be out of range (and the old city
+    /// would draw over the new map). Resets the gate so the next frame rebuilds scenery
+    /// immediately, like a first build. Call after the new graph is fully loaded.
+    /// </summary>
+    public void OnMapReplaced()
+    {
+        _lastSeenGraphVersion = -1;
+        _graphStableFrames = 0;
+        _buildingBoundsVersion = -1;
+    }
+
+    /// <summary>
     /// Constructs the SceneRenderer and wires all sub-renderers and UI panels.
     /// Call order dependency: <see cref="Render"/> must be called only after all
     /// sub-renderers are fully initialized.

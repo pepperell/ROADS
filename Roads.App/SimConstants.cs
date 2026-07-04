@@ -31,4 +31,15 @@ public static class SimConstants
     /// with large un-splittable / un-marked dead zones at the ends).
     /// </summary>
     public const float MinSplitSetback = 5f;
+
+    /// <summary>
+    /// Extra stop-line setback (meters) reserved at signalized (traffic-light) approaches
+    /// so the continental crosswalk fits BETWEEN the stop line and the junction area.
+    /// RoadRenderer draws the band from CrosswalkStartOffset past the stop line for
+    /// CrosswalkDepth meters, so this must be at least their sum (currently 1.3 + 2.4);
+    /// the remainder is a buffer before the junction boundary. StopLineCache applies it to
+    /// the vehicle stop-T only — the per-side boundary trims (junction fill and boundary
+    /// lines) stay at the geometric clearance, so junction visuals do not grow.
+    /// </summary>
+    public const float SignalCrosswalkSetback = 4.0f;
 }
