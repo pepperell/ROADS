@@ -1125,7 +1125,7 @@ public class MainForm : Form
                         if (nearEdge >= 0)
                         {
                             _destinationTool.PlaceAndConnect(worldVec, nearEdge, nearT,
-                                _roadGraph, _editorState.SelectedPOIType, _stopSigns);
+                                _roadGraph, _editorState.SelectedPOIType);
                         }
                     }
                     break;

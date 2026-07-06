@@ -39,6 +39,12 @@ public class StopSignSystem
     /// <summary>Per-edge: true if this edge is exempt from its node's stop sign (user toggled off).</summary>
     private bool[] _edgeExempt = Array.Empty<bool>();
 
+    /// <summary>Per-edge: true if this edge is class-exempt — at an AUTO stop node whose
+    /// approaches span multiple road classes, the fastest class flows free (minor-road
+    /// stop). Recomputed from road types on every rebuild, never persisted, and never
+    /// applied at ManualSignal nodes (there the user's explicit exemptions are the truth).</summary>
+    private bool[] _classExempt = Array.Empty<bool>();
+
     /// <summary>Accumulated simulation time in seconds.</summary>
     private float _simTime;
     /// <summary>Graph version when the system was last rebuilt.</summary>
@@ -113,12 +119,16 @@ public class StopSignSystem
     }
 
     /// <summary>
-    /// Checks whether an edge is exempt from its node's stop sign.
+    /// Checks whether an edge is EFFECTIVELY exempt from its node's stop sign: either
+    /// user-toggled (<see cref="SetEdgeExempt"/>, persisted with the map) or class-exempt
+    /// (auto-derived major approach at a minor-road stop). Renderers use this, so exempt
+    /// approaches draw neither a stop line nor a sign post.
     /// </summary>
     public bool IsEdgeExempt(int edgeIndex)
     {
-        if (edgeIndex < 0 || edgeIndex >= _edgeExempt.Length) return false;
-        return _edgeExempt[edgeIndex];
+        if (edgeIndex < 0) return false;
+        return (edgeIndex < _edgeExempt.Length && _edgeExempt[edgeIndex])
+            || (edgeIndex < _classExempt.Length && _classExempt[edgeIndex]);
     }
 
     /// <summary>
@@ -169,7 +179,8 @@ public class StopSignSystem
     /// Projects node flags into stop-sign arrays when the graph changes or an exemption
     /// marked the system dirty: sizes arrays (preserving FCFS queue state), derives the
     /// stop-sign set from NodeFlags.StopSign, and marks which edges lead to stop-sign
-    /// nodes (honoring exemptions). Pure read of the graph — performs no mutation.
+    /// nodes (honoring user exemptions and deriving class-based ones — at a mixed AUTO
+    /// junction the fastest road class flows free). Pure read of the graph — performs no mutation.
     /// <see cref="AutoAssign"/> must have normalized flags first whenever the graph
     /// changed (the ordering inside SimulationLoop.RebuildWorldCaches enforces this).
     /// Must be called before <see cref="Update"/> and <see cref="GetSignal"/> each frame.
@@ -229,6 +240,7 @@ public class StopSignSystem
             _edgeLeadVehicle = new int[edgeCount];
             _isStopSignEdge = new bool[edgeCount];
             _edgeExempt = new bool[edgeCount];
+            _classExempt = new bool[edgeCount];
 
             int copyCount = Math.Min(oldArrival.Length, edgeCount);
             Array.Copy(oldArrival, _edgeArrivalTime, copyCount);
@@ -251,13 +263,42 @@ public class StopSignSystem
         // Note: new entries are initialized to -1 during array resize above,
         // so no separate initialization pass is needed.
 
-        // Mark which edges lead to stop-sign nodes
+        // Mark which edges lead to stop-sign nodes. At AUTO stop nodes (not ManualSignal)
+        // whose approaches span multiple road classes, the fastest class present is
+        // class-exempt: the minor road stops, the major road flows free (minor-road
+        // stop). Manual nodes honor only the explicit per-edge exemptions — cycling a
+        // node to a manual stop sign is the escape hatch that forces an all-way stop at
+        // a mixed junction.
         Array.Clear(_isStopSignEdge, 0, _isStopSignEdge.Length);
-        for (int e = 0; e < edgeCount; e++)
+        Array.Clear(_classExempt, 0, _classExempt.Length);
+        for (int n = 0; n < nodeCount; n++)
         {
-            var edge = graph.Edges[e];
-            if (edge.FromNode < 0) continue;
-            _isStopSignEdge[e] = edge.ToNode < nodeCount && _isStopSign[edge.ToNode] && !_edgeExempt[e];
+            if (!_isStopSign[n]) continue;
+            var incoming = graph.GetIncomingEdges(n);
+
+            int minRank = int.MaxValue, maxRank = int.MinValue;
+            if (!graph.Nodes[n].Flags.HasFlag(NodeFlags.ManualSignal))
+            {
+                foreach (int e in incoming)
+                {
+                    var edge = graph.Edges[e];
+                    if (edge.FromNode < 0) continue;
+                    int rank = RoadTypeDefaults.GetRoadClassRank(edge.RoadType, (edge.Flags & EdgeFlags.SharedLane) != 0);
+                    minRank = Math.Min(minRank, rank);
+                    maxRank = Math.Max(maxRank, rank);
+                }
+            }
+            bool mixedClasses = minRank < maxRank;
+
+            foreach (int e in incoming)
+            {
+                if (e >= _isStopSignEdge.Length) continue;
+                var edge = graph.Edges[e];
+                if (edge.FromNode < 0) continue;
+                if (mixedClasses && RoadTypeDefaults.GetRoadClassRank(edge.RoadType, (edge.Flags & EdgeFlags.SharedLane) != 0) == maxRank)
+                    _classExempt[e] = true;
+                _isStopSignEdge[e] = !_edgeExempt[e] && !_classExempt[e];
+            }
         }
     }
 

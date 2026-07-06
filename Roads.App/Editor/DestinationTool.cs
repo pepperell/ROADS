@@ -46,12 +46,12 @@ public class DestinationTool
     /// POI type, and connects the two with a connector road.
     ///
     /// Home POIs get a residential-driveway treatment: the connector is a <b>dirt, single-lane
-    /// two-way</b> road, and placing it adds <b>exactly one stop</b> — on the new driveway approach.
-    /// The node is flagged StopSign|ManualSignal (manual so the normalize phase won't promote it to
-    /// an all-way stop); the through road the driveway joins keeps flowing (the split's two new
-    /// halves are exempted); and no pre-existing approach is touched, so a second home added to an
-    /// existing junction keeps the first driveway's stop and the through road — regardless of road
-    /// type — never gains a spurious stop. Other POI types keep a plain two-way connector.
+    /// two-way</b> road. No signal flags are set here — a dirt shared-lane connector ranks below
+    /// every road it can join (<see cref="RoadTypeDefaults.GetRoadClassRank"/>), so the stop-sign
+    /// auto-assignment derives a minor-road stop at the foot junction on its own: each driveway
+    /// approach stops, the through road (of any type, including dirt) flows free, and additional
+    /// homes joining the same junction just add their own stopping driveway. Other POI types keep
+    /// a plain two-way connector.
     ///
     /// Index-safety: <see cref="RoadGraph.SplitEdge"/> invalidates edge indices and rebuilds
     /// adjacency, so the split is performed FIRST and only its returned (stable) node/edge indices
@@ -64,10 +64,9 @@ public class DestinationTool
     /// <param name="nearT">Unclamped parametric foot position on <paramref name="nearEdge"/>.</param>
     /// <param name="graph">Road graph.</param>
     /// <param name="poiType">POI type to assign to the new destination node.</param>
-    /// <param name="stopSigns">Stop-sign system, for the driveway stop + through-road exemptions (Home only).</param>
     /// <returns>True if a destination was placed.</returns>
     public bool PlaceAndConnect(Vector2 cursorWorld, int nearEdge, float nearT,
-        RoadGraph graph, POIType poiType, StopSignSystem stopSigns)
+        RoadGraph graph, POIType poiType)
     {
         if (nearEdge < 0 || nearEdge >= graph.Edges.Count || graph.Edges[nearEdge].FromNode < 0)
             return false;
@@ -79,9 +78,6 @@ public class DestinationTool
         // (the dirt driveway or the original road) but never extends from another marked node.
         int reuse = ProspectiveFootNode(graph, nearEdge, nearT);
         int footNode;
-        // The through road's two incoming halves at the new node when we split (the road the
-        // driveway joins). -1 when we reuse an existing node (its approaches are already set up).
-        int throughInA = -1, throughInB = -1;
         if (reuse >= 0 && (graph.Nodes[reuse].Flags & NodeFlags.Destination) == 0)
         {
             footNode = reuse;                                // reuse unflagged endpoint, no split
@@ -89,10 +85,8 @@ public class DestinationTool
         else
         {
             float t = ClampedSplitT(graph, nearEdge, nearT);
-            var (midNode, firstHalf, secondHalf) = graph.SplitEdge(nearEdge, t);  // SPLIT FIRST — invalidates edge indices
+            var (midNode, _, _) = graph.SplitEdge(nearEdge, t);  // SPLIT FIRST — invalidates edge indices
             footNode = midNode;
-            throughInA = firstHalf;                          // F -> footNode (incoming)
-            throughInB = graph.FindReverseEdge(secondHalf);  // T -> footNode (incoming; -1 if one-way)
         }
 
         // Add the destination node at the cursor (node index is stable hereafter).
@@ -103,24 +97,17 @@ public class DestinationTool
 
         // Two-way connector between the on-road node and the destination node.
         int connOut = graph.AddEdge(footNode, destNode);   // intersection -> home
-        int connIn = graph.AddEdge(destNode, footNode);    // home -> intersection (the driveway that stops)
+        graph.AddEdge(destNode, footNode);                 // home -> intersection
 
         if (poiType == POIType.Home)
         {
             // Dirt, single-lane two-way driveway (both setters sync the reverse edge).
+            // No explicit stop-sign setup is needed: a dirt shared-lane connector ranks
+            // below every road it can join (see RoadTypeDefaults.GetRoadClassRank), so
+            // the auto-assignment gives the foot junction a minor-road stop — the
+            // driveway(s) stop, the through road flows free.
             graph.SetEdgeRoadType(connOut, RoadType.Dirt);
             graph.SetSharedLane(connOut, true);
-
-            // Add exactly ONE stop — the new driveway — without disturbing any existing approach.
-            // The through road the driveway joins must keep flowing: when we split a road to attach,
-            // its two new halves (throughInA/B) would otherwise stop at the new stop node, so exempt
-            // them. At a reused node there is no split, so existing approaches (a main road, or
-            // another home's driveway) keep their stop/exempt status untouched.
-            var nodeFlags = graph.Nodes[footNode].Flags;
-            graph.SetNodeFlags(footNode, nodeFlags | NodeFlags.StopSign | NodeFlags.ManualSignal);
-            stopSigns.SetEdgeExempt(connIn, false);                       // the new driveway stops
-            if (throughInA >= 0) stopSigns.SetEdgeExempt(throughInA, true);
-            if (throughInB >= 0) stopSigns.SetEdgeExempt(throughInB, true);
         }
 
         return true;

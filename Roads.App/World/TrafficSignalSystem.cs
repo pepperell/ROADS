@@ -22,8 +22,10 @@ public enum SignalState : byte
 
 /// <summary>
 /// Manages traffic light cycling for intersection nodes. <see cref="AutoAssign"/>
-/// normalizes the TrafficLight flag on nodes with 4+ incoming edges (unless manually
-/// overridden); <see cref="RebuildIfNeeded"/> then projects node flags into internal
+/// normalizes the TrafficLight flag on nodes with 4+ incoming edges of a single non-dirt
+/// road class (unless manually overridden; all-dirt and mixed-class junctions get stop
+/// signs instead — see <see cref="ApproachesWarrantLight"/>);
+/// <see cref="RebuildIfNeeded"/> then projects node flags into internal
 /// arrays, groups incoming edges into two opposing phase groups by approach angle, and
 /// derives each node's ITE yellow duration from its fastest approach. <see cref="Update"/>
 /// runs a per-node six-segment state machine (green→yellow→all-red per group). Green
@@ -149,10 +151,15 @@ public class TrafficSignalSystem
 
     /// <summary>
     /// Normalizes auto-assigned traffic-light flags to the current graph topology:
-    /// non-manual nodes get NodeFlags.TrafficLight iff they have 4+ incoming edges.
-    /// Manual nodes (NodeFlags.ManualSignal) are never touched — their flags are the
-    /// truth. Reads and writes only graph node flags (bumping Version on change),
-    /// touches no system state, and is idempotent. Runs in the normalize phase of
+    /// non-manual nodes get NodeFlags.TrafficLight iff they have 4+ incoming edges whose
+    /// approaches all share ONE road class, and that class is not dirt. An all-dirt
+    /// crossing never warrants a signal, and a mixed-class junction (e.g. a residential
+    /// or dirt road meeting an arterial) becomes a minor-road stop instead — both fall
+    /// through to <see cref="StopSignSystem.AutoAssign"/>, which exempts the fastest
+    /// class's approaches so the major road flows free. Manual nodes
+    /// (NodeFlags.ManualSignal) are never touched — their flags are the truth. Reads and
+    /// writes only graph node flags (bumping Version on change), touches no system
+    /// state, and is idempotent. Runs in the normalize phase of
     /// SimulationLoop.RebuildWorldCaches, BEFORE <see cref="StopSignSystem.AutoAssign"/>
     /// (whose policy reads the TrafficLight flag) and before the pure RebuildIfNeeded calls.
     /// </summary>
@@ -166,7 +173,8 @@ public class TrafficSignalSystem
             if (float.IsNaN(node.Position.X)) continue;               // defunct
             if (node.Flags.HasFlag(NodeFlags.ManualSignal)) continue; // manual = truth
 
-            bool shouldBeLight = graph.GetIncomingEdges(n).Count >= 4;
+            var incoming = graph.GetIncomingEdges(n);
+            bool shouldBeLight = incoming.Count >= 4 && ApproachesWarrantLight(graph, incoming);
             if (shouldBeLight && !node.Flags.HasFlag(NodeFlags.TrafficLight))
                 graph.SetNodeFlags(n, node.Flags | NodeFlags.TrafficLight);
             else if (!shouldBeLight && node.Flags.HasFlag(NodeFlags.TrafficLight))
@@ -174,6 +182,26 @@ public class TrafficSignalSystem
                 // at the fixed-time default.
                 graph.SetNodeFlags(n, node.Flags & ~(NodeFlags.TrafficLight | NodeFlags.ActuatedSignal));
         }
+    }
+
+    /// <summary>
+    /// True when the approaches justify a signal: all incoming edges share one
+    /// right-of-way rank (<see cref="RoadTypeDefaults.GetRoadClassRank"/>) and that rank
+    /// is above dirt. Mixed ranks mean a minor road meets a major one — a minor-road
+    /// stop, not a light; all-dirt crossings get all-way stops.
+    /// </summary>
+    private static bool ApproachesWarrantLight(RoadGraph graph, ArraySegment<int> incoming)
+    {
+        int minRank = int.MaxValue, maxRank = int.MinValue;
+        foreach (int e in incoming)
+        {
+            var edge = graph.Edges[e];
+            if (edge.FromNode < 0) continue; // defunct
+            int rank = RoadTypeDefaults.GetRoadClassRank(edge.RoadType, (edge.Flags & EdgeFlags.SharedLane) != 0);
+            minRank = Math.Min(minRank, rank);
+            maxRank = Math.Max(maxRank, rank);
+        }
+        return minRank == maxRank && maxRank > RoadTypeDefaults.GetRoadClassRank(RoadType.Dirt, false);
     }
 
     /// <summary>

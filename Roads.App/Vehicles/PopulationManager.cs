@@ -1308,8 +1308,10 @@ public class PopulationManager
         resident.CurrentPOINode = destNode;
 
         // A completed move-in (entry/exit node → home) consumed no schedule entry. Skip past any
-        // departures whose time already passed during the drive in, so the resident resumes its
-        // normal schedule if a trip is still ahead today, or stays home until the next-day rollover.
+        // departures whose time already passed during the drive in — except a still-in-effect Work
+        // trip, which the advance stops ON so the resident departs for work late (see
+        // AdvanceSchedulePastTime) — so the resident resumes its normal schedule if a trip is still
+        // ahead today, or stays home until the next-day rollover.
         if (wasMovingIn)
             AdvanceSchedulePastTime(resident, timeOfDay);
     }
@@ -1752,14 +1754,28 @@ public class PopulationManager
     }
 
     /// <summary>
-    /// Advances a resident's schedule index past entries whose departure time
-    /// has already passed the current time of day.
+    /// Advances a resident's schedule index past entries whose departure time has already
+    /// passed the current time of day — EXCEPT a missed Work trip that is still in effect
+    /// (its departure has passed but the following entry's has not, i.e. the resident
+    /// would be at work right now). For an employed resident who is not already at their
+    /// workplace, the index stops ON that Work entry so the next departure pass sends
+    /// them to work late, instead of silently skipping the workday: residents who are
+    /// hired mid-morning, load in from a save, or move in after their departure time
+    /// still go to work. Idempotent — re-running at the same time never moves the index
+    /// further, so the move-in arrival re-advance is safe.
     /// </summary>
     private static void AdvanceSchedulePastTime(Resident resident, double timeOfDay)
     {
         while (resident.ScheduleIndex < resident.Schedule.Length
             && resident.Schedule[resident.ScheduleIndex].DepartureTime < timeOfDay)
         {
+            var entry = resident.Schedule[resident.ScheduleIndex];
+            // The stay has ended once the NEXT entry's departure is also due.
+            bool stayEnded = resident.ScheduleIndex + 1 < resident.Schedule.Length
+                && resident.Schedule[resident.ScheduleIndex + 1].DepartureTime < timeOfDay;
+            if (!stayEnded && entry.Destination == POIType.Work
+                && resident.WorkNode >= 0 && resident.CurrentPOINode != resident.WorkNode)
+                return;
             resident.ScheduleIndex++;
         }
     }

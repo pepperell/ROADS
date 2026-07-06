@@ -76,4 +76,26 @@ public static class RoadTypeDefaults
         RoadType.Dirt        => 6.7f,   // ~15 mph
         _                    => 13.4f,  // ~30 mph
     };
+
+    /// <summary>
+    /// Right-of-way class rank of an approach (higher = faster/major road). Used by the
+    /// signal and stop-sign auto-assignment: a junction whose approaches span more than
+    /// one rank never gets a light and becomes a minor-road stop — lower-ranked
+    /// approaches get the stop sign, the highest-ranked class flows free. A shared-lane
+    /// (single-lane two-way) road ranks just below the plain road of the same type, so a
+    /// dirt driveway yields to the dirt road it joins, without outranking anything a
+    /// plain road of its type wouldn't.
+    /// </summary>
+    public static int GetRoadClassRank(RoadType type, bool sharedLane)
+    {
+        int typeRank = type switch
+        {
+            RoadType.Dirt        => 0,
+            RoadType.Residential => 1,
+            RoadType.Arterial    => 2,
+            RoadType.Highway     => 3,
+            _                    => 1,
+        };
+        return typeRank * 2 + (sharedLane ? 0 : 1);
+    }
 }
