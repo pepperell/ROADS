@@ -5,26 +5,39 @@ using Roads.App.World;
 namespace Roads.App.Editor;
 
 /// <summary>
-/// Editor tool that removes the nearest road edge (and its reverse pair) on click.
+/// Editor tool that removes what the cursor targets on click: a node (deleted together
+/// with every attached segment), or otherwise the nearest road edge (and its reverse pair).
 /// </summary>
 public class DeleteTool
 {
     /// <summary>
-    /// Requests deletion of the nearest edge within snap distance. The request is routed through
-    /// the population coordinator, which removes the edge and its reverse — immediately if neither
-    /// endpoint is populated, or via a graceful drain that drives people out first if removing the
-    /// road would orphan a populated endpoint.
+    /// Deletes the click target. A node within <see cref="EditorState.NodePickDistance"/>
+    /// (the same radius the hover highlight uses) wins over edges and is deleted along with
+    /// ALL its attached segments; otherwise the nearest edge within snap distance is deleted
+    /// (with its reverse pair). Both paths route through the population coordinator, which
+    /// deletes immediately when no population depends on the target, or begins a graceful
+    /// drain that drives people out first (holding the roads open until they have left).
     /// </summary>
     /// <param name="worldPos">Click position in world space.</param>
-    /// <param name="graph">Road graph used to locate the nearest edge.</param>
+    /// <param name="graph">Road graph used to locate the click target.</param>
     /// <param name="edgeGrid">Spatial grid used to find the nearest edge.</param>
     /// <param name="population">
-    /// Population coordinator that owns the delete lifecycle (reverse-edge removal and the
-    /// drain-or-immediate decision are handled internally by <see cref="PopulationManager.RequestDeleteEdge"/>).
+    /// Population coordinator that owns the delete lifecycle
+    /// (<see cref="PopulationManager.RequestDeleteNode"/> /
+    /// <see cref="PopulationManager.RequestDeleteEdge"/> decide immediate-vs-drain internally).
     /// </param>
-    /// <returns><c>true</c> if an edge was found and its deletion requested; otherwise <c>false</c>.</returns>
+    /// <returns><c>true</c> if a node or edge was found and its deletion requested.</returns>
     public bool OnClick(Vector2 worldPos, RoadGraph graph, EdgeSpatialGrid edgeGrid, PopulationManager population)
     {
+        int nearNode = graph.FindNearestNode(worldPos, EditorState.NodePickDistance);
+        if (nearNode >= 0)
+        {
+            // The coordinator removes the node and every attached segment — immediately, or
+            // after draining any population living/parked at it.
+            population.RequestDeleteNode(nearNode);
+            return true;
+        }
+
         int nearestEdge = edgeGrid.FindNearestEdge(graph, worldPos, EditorState.SnapDistance);
 
         if (nearestEdge >= 0)

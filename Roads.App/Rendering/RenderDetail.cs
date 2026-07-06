@@ -36,6 +36,15 @@ public static class RenderDetail
     public const float RoadSimpleThreshold = 0.15f;
 
     /// <summary>
+    /// World-space radius of a node dot at the given zoom — the single size used by the
+    /// road renderer's node dots AND every editor node visual derived from them (hover
+    /// and selection highlights, ghost nodes), so a highlighted or previewed node always
+    /// matches the node it represents. Small and roughly screen-constant (1.8 px) with a
+    /// 1.2 m floor so dots never vanish when zoomed far in.
+    /// </summary>
+    public static float NodeDotRadius(float zoom) => MathF.Max(1.2f, 1.8f / zoom);
+
+    /// <summary>
     /// Returns true when <paramref name="worldBounds"/> overlaps (or touches) the
     /// visible <paramref name="viewRect"/>. Uses SKRect's built-in IntersectsWith so
     /// touching edges count as visible — this errs toward drawing, which is the

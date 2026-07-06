@@ -199,6 +199,9 @@ public class SceneRenderer
         // Node tool placement ghost (translucent preview at the exact click-result position)
         DrawNodeGhost(canvas, editorState, camera);
 
+        // Control-type badges (F/A over every traffic light) while the Ctrl Type tool is active
+        DrawSignalControlIcons(canvas, graph, editorState, camera, viewRect);
+
         // Draw control point handles in Select mode
         DrawControlPointHandles(canvas, graph, editorState, camera);
 
@@ -245,6 +248,8 @@ public class SceneRenderer
             EditorTool.Delete     => (new SKColor(220, 60, 60, 50), new SKColor(220, 60, 60, 120)),
             EditorTool.Destination => GetDestinationHoverColors(editorState),
             EditorTool.Signal     => (new SKColor(220, 200, 40, 50), new SKColor(220, 200, 40, 120)),
+            EditorTool.SignalControl => (new SKColor(60, 190, 170, 50), new SKColor(60, 190, 170, 120)),
+            EditorTool.UpdateSegment => (new SKColor(170, 110, 240, 50), new SKColor(170, 110, 240, 120)),
             _                     => (new SKColor(100, 200, 255, 50), new SKColor(100, 200, 255, 120)),
         };
     }
@@ -265,7 +270,9 @@ public class SceneRenderer
 
         var (fillColor, strokeColor) = GetHoverColors(editorState);
         var pos = graph.Nodes[idx].Position;
-        const float radius = 5f;
+        // Junction footprint (widest incident road), floored at the bare node-dot size.
+        float radius = MathF.Max(RenderDetail.NodeDotRadius(camera.Zoom),
+            GeometryUtil.NodeJunctionRadius(graph, idx));
         using var fillPaint = new SKPaint
         {
             Color = fillColor,
@@ -290,11 +297,18 @@ public class SceneRenderer
             || idx == editorState.SelectedEdge)
             return;
 
+        // The Update Segment tool previews the width the click will PRODUCE (from the
+        // sticky road options); every other tool highlights the segment's current width.
+        float surfaceWidth = editorState.ActiveTool == EditorTool.UpdateSegment
+            ? GeometryUtil.RoadSurfaceWidthFor(editorState.SelectedLaneCount,
+                editorState.SelectedOneWay, editorState.SelectedSharedLane)
+            : GeometryUtil.RoadSurfaceWidth(graph, idx);
+
         var (fillColor, _) = GetHoverColors(editorState);
         using var hoverPaint = new SKPaint
         {
             Color = fillColor,
-            StrokeWidth = GeometryUtil.RoadSurfaceWidth(graph, idx) + 2f,
+            StrokeWidth = surfaceWidth + 2f,
             Style = SKPaintStyle.Stroke,
             StrokeCap = SKStrokeCap.Round,
             IsAntialias = true,
@@ -345,7 +359,9 @@ public class SceneRenderer
             return;
 
         var nodePos = graph.Nodes[editorState.SelectedNode].Position;
-        const float nodeRadius = 5f;
+        // Junction footprint (widest incident road), floored at the bare node-dot size.
+        float nodeRadius = MathF.Max(RenderDetail.NodeDotRadius(camera.Zoom),
+            GeometryUtil.NodeJunctionRadius(graph, editorState.SelectedNode));
         using var nodeHighlightFill = new SKPaint
         {
             Color = new SKColor(100, 200, 255, 100),
@@ -562,33 +578,87 @@ public class SceneRenderer
     {
         if (editorState.ActiveTool != EditorTool.Node) return;
         if (editorState.NodeGhostPos is not { } pos) return;
-        DrawGhostNode(canvas, pos, camera);
+        // Splitting a road: the ghost spans that road's half-width; free node: bare dot.
+        float radius = MathF.Max(RenderDetail.NodeDotRadius(camera.Zoom), editorState.NodeGhostRadius);
+        DrawGhostNode(canvas, pos, camera, radius);
     }
 
     /// <summary>
-    /// Shared ghost-node visual (translucent blue fill, dashed white ring, node-highlight
-    /// radius) used by the Node tool's placement ghost and the Road tool's pending start
-    /// anchor — a node that will exist only after the operation commits.
+    /// Shared ghost-node visual (translucent blue fill, dashed white ring) used by the
+    /// Node tool's placement ghost and the Road tool's anchors — a node that will exist
+    /// only after the operation commits. The caller supplies the radius so the ghost
+    /// matches the footprint the commit will produce (the target road's half-width for
+    /// the Road tool / an on-road split, the bare node-dot size for a free node); the
+    /// dash interval scales with the circumference so the ring reads as a dashed circle
+    /// at every size.
     /// </summary>
-    private static void DrawGhostNode(SKCanvas canvas, Vector2 pos, Camera camera)
+    private static void DrawGhostNode(SKCanvas canvas, Vector2 pos, Camera camera, float radius)
     {
-        const float radius = 5f; // matches the node hover/selection highlight radius
         using var fill = new SKPaint
         {
             Color = new SKColor(100, 200, 255, 90),
             Style = SKPaintStyle.Fill,
             IsAntialias = true,
         };
+        float dash = MathF.Max(0.8f, radius * MathF.Tau / 16f); // 8 dashes around the ring
         using var stroke = new SKPaint
         {
             Color = new SKColor(255, 255, 255, 150),
             Style = SKPaintStyle.Stroke,
             StrokeWidth = Math.Max(1f, 1.5f / camera.Zoom),
             IsAntialias = true,
-            PathEffect = SKPathEffect.CreateDash(new[] { 3f, 3f }, 0),
+            PathEffect = SKPathEffect.CreateDash(new[] { dash, dash }, 0),
         };
         canvas.DrawCircle(pos.X, pos.Y, radius, fill);
         canvas.DrawCircle(pos.X, pos.Y, radius, stroke);
+    }
+
+    /// <summary>
+    /// Draws a control-type badge above every traffic-light node while the Signal-Control
+    /// (Ctrl Type) tool is active: a blue "F" disc for fixed-time, an orange "A" disc for
+    /// actuated (<see cref="NodeFlags.ActuatedSignal"/>). Badges are constant screen size
+    /// (scaled by 1/zoom), lifted above the node so the intersection stays visible, and
+    /// culled to the viewport. Reads node flags directly, so a click's flag flip shows on
+    /// the very next frame.
+    /// </summary>
+    private static void DrawSignalControlIcons(SKCanvas canvas, RoadGraph graph,
+        EditorState editorState, Camera camera, SKRect viewRect)
+    {
+        if (editorState.ActiveTool != EditorTool.SignalControl) return;
+
+        float zoom = camera.Zoom;
+        float radius = 9f / zoom;
+        float liftY = 16f / zoom;
+        float pad = radius + liftY;
+
+        using var fill = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = true };
+        using var ring = new SKPaint
+        {
+            Color = new SKColor(255, 255, 255, 230),
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 1.5f / zoom,
+            IsAntialias = true,
+        };
+        using var textPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+        using var font = new SKFont(SKTypeface.Default, 11f / zoom) { Embolden = true };
+
+        for (int n = 0; n < graph.Nodes.Count; n++)
+        {
+            var node = graph.Nodes[n];
+            if (float.IsNaN(node.Position.X)) continue;
+            if (!node.Flags.HasFlag(NodeFlags.TrafficLight)) continue;
+            if (node.Position.X < viewRect.Left - pad || node.Position.X > viewRect.Right + pad
+                || node.Position.Y < viewRect.Top - pad || node.Position.Y > viewRect.Bottom + pad)
+                continue;
+
+            bool actuated = node.Flags.HasFlag(NodeFlags.ActuatedSignal);
+            float bx = node.Position.X;
+            float by = node.Position.Y - liftY;
+            fill.Color = actuated ? new SKColor(215, 130, 30, 235) : new SKColor(45, 110, 190, 235);
+            canvas.DrawCircle(bx, by, radius, fill);
+            canvas.DrawCircle(bx, by, radius, ring);
+            canvas.DrawText(actuated ? "A" : "F", bx, by + 4f / zoom, SKTextAlign.Center, font, textPaint);
+        }
     }
 
     private static void DrawControlPointHandles(SKCanvas canvas, RoadGraph graph,
@@ -671,17 +741,25 @@ public class SceneRenderer
     /// would use (the snapped existing node, the clamped on-road split point, or the raw
     /// cursor in empty space) — the chain start before the first click, the segment end
     /// while drawing (this replaced the old snap-indicator ring). While drawing it adds a
-    /// dashed line from the start anchor to the snapped end anchor, a ghost node when the
-    /// start is still a PENDING anchor (nothing commits until the second click), and a
-    /// ghost node at every crossing where the segment will split an existing road.
+    /// translucent round-capped band at the committed road's width (covering the node
+    /// space at each end) with a thin dashed centerline, from the start anchor to the
+    /// snapped end anchor; a ghost node when the start is still a PENDING anchor (nothing
+    /// commits until the second click); and a ghost node at every crossing where the
+    /// segment will split an existing road.
     /// </summary>
     private static void DrawRoadPreview(SKCanvas canvas, RoadGraph graph, EditorState editorState,
         Camera camera, Point currentMousePos, SKImageInfo info)
     {
         if (editorState.ActiveTool != EditorTool.Road) return;
 
+        // Every ghost node of this tool marks an endpoint/intersection of the road being
+        // drawn, so all of them scale with the selected road's half-width.
+        float ghostRadius = MathF.Max(RenderDetail.NodeDotRadius(camera.Zoom),
+            GeometryUtil.RoadSurfaceWidthFor(editorState.SelectedLaneCount,
+                editorState.SelectedOneWay, editorState.SelectedSharedLane) * 0.5f);
+
         if (editorState.RoadAnchorGhostPos is { } anchorGhost)
-            DrawGhostNode(canvas, anchorGhost, camera);
+            DrawGhostNode(canvas, anchorGhost, camera, ghostRadius);
 
         if (!editorState.IsDrawingRoad) return;
 
@@ -694,7 +772,7 @@ public class SceneRenderer
         else
         {
             startPos = editorState.RoadStartAnchorPos!.Value;
-            DrawGhostNode(canvas, startPos, camera);
+            DrawGhostNode(canvas, startPos, camera, ghostRadius);
         }
 
         // The preview line ends at the SNAPPED anchor (the edge the commit will create);
@@ -710,10 +788,27 @@ public class SceneRenderer
             endX = mouseWorld.X; endY = mouseWorld.Y;
         }
 
+        // Two-layer ghost: a solid translucent band at the width the committed road will
+        // have (from the sticky road options) with ROUND caps, so each end bulges out to
+        // cover the space of the node the commit creates there — plus the classic thin
+        // dashed centerline on top as the drawing guide. (Dashing the wide band itself
+        // would not work: round caps extend each dash by half the road width, fusing the
+        // gaps shut.)
+        using var bandPaint = new SKPaint
+        {
+            Color = new SKColor(100, 180, 255, 60),
+            StrokeWidth = GeometryUtil.RoadSurfaceWidthFor(editorState.SelectedLaneCount,
+                editorState.SelectedOneWay, editorState.SelectedSharedLane),
+            Style = SKPaintStyle.Stroke,
+            StrokeCap = SKStrokeCap.Round,
+            IsAntialias = true,
+        };
+        canvas.DrawLine(startPos.X, startPos.Y, endX, endY, bandPaint);
+
         using var previewPaint = new SKPaint
         {
-            Color = new SKColor(100, 180, 255, 128),
-            StrokeWidth = 3.5f,
+            Color = new SKColor(100, 180, 255, 160),
+            StrokeWidth = 1.5f,
             Style = SKPaintStyle.Stroke,
             IsAntialias = true,
             PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0),
@@ -722,7 +817,7 @@ public class SceneRenderer
 
         // Intersection nodes the commit will create where the segment crosses roads.
         foreach (var crossing in editorState.RoadCrossingPreviews)
-            DrawGhostNode(canvas, crossing, camera);
+            DrawGhostNode(canvas, crossing, camera, ghostRadius);
     }
 
     /// <summary>

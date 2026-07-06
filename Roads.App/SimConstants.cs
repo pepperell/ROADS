@@ -15,8 +15,8 @@ public static class SimConstants
     /// <summary>Vehicle body width in meters.</summary>
     public const float VehicleWidth = 2.0f;
 
-    /// <summary>IDM maximum acceleration in m/s^2.</summary>
-    public const float MaxAccel = 3.5f;
+    // IDM maximum acceleration is per-driver/per-type — see SteeringController.EffectiveMaxAccel
+    // and VehicleTypeDynamics.GetMaxAccel; there is deliberately no global constant.
 
     /// <summary>Maximum brake deceleration in m/s^2.</summary>
     public const float MaxBrakeDecel = 9.0f;

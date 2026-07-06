@@ -241,7 +241,8 @@ public static class MapSerializer
         // Section 1 — Nodes. Flags are masked to the currently defined bits so legacy files
         // carrying retired flags (bit 8 was Spawn, bit 64 was RegionSpawn) load clean.
         const byte validNodeFlags = (byte)(NodeFlags.TrafficLight | NodeFlags.StopSign
-            | NodeFlags.Yield | NodeFlags.ManualSignal | NodeFlags.Destination);
+            | NodeFlags.Yield | NodeFlags.ManualSignal | NodeFlags.Destination
+            | NodeFlags.ActuatedSignal);
         int nodeCount = r.ReadInt32();
         var nodes = new List<RoadNode>(nodeCount);
         for (int i = 0; i < nodeCount; i++)

@@ -32,8 +32,10 @@ public class SignalTool
 
         if (flags.HasFlag(NodeFlags.TrafficLight))
         {
-            // Traffic Light → Stop Sign
-            flags = (flags & ~NodeFlags.TrafficLight) | NodeFlags.StopSign | NodeFlags.ManualSignal;
+            // Traffic Light → Stop Sign (the actuated bit goes with the light, so a
+            // future re-light starts at the fixed-time default)
+            flags = (flags & ~(NodeFlags.TrafficLight | NodeFlags.ActuatedSignal))
+                | NodeFlags.StopSign | NodeFlags.ManualSignal;
         }
         else if (flags.HasFlag(NodeFlags.StopSign))
         {

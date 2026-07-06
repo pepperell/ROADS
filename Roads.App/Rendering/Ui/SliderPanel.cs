@@ -4,9 +4,10 @@ namespace Roads.App.Rendering.Ui;
 
 /// <summary>
 /// Top-right overlay of labeled parameter <see cref="Slider"/> rows (steering tunables),
-/// toggled with the T key. Rows are registered once via <see cref="AddSlider"/> (same
-/// signature as the retired immediate-mode panel) and laid out on a fixed 36 px row grid.
-/// The panel background consumes clicks, so clicking between rows never edits the map.
+/// hidden by default and toggled with the T key. Rows are registered once via
+/// <see cref="AddSlider"/> (same signature as the retired immediate-mode panel) and laid
+/// out on a fixed 36 px row grid. The panel background consumes clicks, so clicking
+/// between rows never edits the map.
 /// </summary>
 public class SliderPanel : Panel
 {
@@ -22,6 +23,7 @@ public class SliderPanel : Panel
 
     public SliderPanel()
     {
+        Visible = false;
         Anchor = UiAnchor.TopRight;
         // Below the clock panel in the top-right column.
         Margin = new SKPoint(Padding, 10f + ClockPanel.PanelHeight + 8f);

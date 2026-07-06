@@ -63,8 +63,10 @@ public static class VehiclePhysics
         else
             store.SmoothedBrake[index] += (store.Brake[index] - store.SmoothedBrake[index]) * alpha;
 
-        // Apply smoothed throttle/brake to speed
-        float maxAccel = SimConstants.MaxAccel;
+        // Apply smoothed throttle/brake to speed. Throttle is normalized by the same
+        // per-driver/per-type EffectiveMaxAccel the IDM controller divided by, so the
+        // round trip reproduces the IDM acceleration.
+        float maxAccel = SteeringController.EffectiveMaxAccel(store, index);
         float maxBrake = SimConstants.MaxBrakeDecel;
         float accel = store.SmoothedThrottle[index] * maxAccel - store.SmoothedBrake[index] * maxBrake;
         speed += accel * dt;

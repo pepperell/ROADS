@@ -11,13 +11,14 @@ public enum UIAction { New, Save, Load, Pause, SpeedDown, SpeedUp }
 
 /// <summary>
 /// The top-left menu bar: three file action <see cref="Button"/>s (New / Save / Load) at
-/// the far left, then six editor-tool toggle buttons (Select / Road / Node / Delete /
-/// Dest Pt / Signal). Tool buttons set <see cref="EditorState.ActiveTool"/> directly (resetting
-/// transient tool state first) and highlight via live IsActive closures; actions are
-/// routed to the owner through the callback given at construction. Sits flush under the
-/// top edge (the row freed by the retired status bar): 70×30 buttons at y=14 from x=10,
-/// 4 px spacing, a 16 px gap between the action and tool groups, on a rounded background
-/// strip that consumes clicks.
+/// the far left, then five editor-tool toggle buttons (Select / Road / Dest Pt / Signal /
+/// Ctrl Type). The Node / Delete / Update Seg tools live on the <see cref="RoadSubmenu"/>
+/// opened by the Road button, not here. Tool buttons set
+/// <see cref="EditorState.ActiveTool"/> directly (resetting transient tool state first)
+/// and highlight via live IsActive closures; actions are routed to the owner through the
+/// callback given at construction. Sits flush under the top edge (the row freed by the
+/// retired status bar): 70×30 buttons at y=14 from x=10, 4 px spacing, a 16 px gap
+/// between the action and tool groups, on a rounded background strip that consumes clicks.
 /// </summary>
 public class MenuBar : Panel
 {
@@ -33,8 +34,9 @@ public class MenuBar : Panel
     private static float ToolStartX
         => ToolbarX + ActionCount * (ButtonWidth + ButtonSpacing) + GroupGap;
 
-    /// <summary>Left edge (canvas px) of the tool button at the given index — the POI
-    /// submenu anchors under the Dest Pt button (index 4). Constant geometry.</summary>
+    /// <summary>Left edge (canvas px) of the tool button at the given index — the road
+    /// submenu anchors under the Road button (index 1), the POI submenu under the Dest Pt
+    /// button (index 2). Constant geometry.</summary>
     public static float ToolButtonLeft(int index) => ToolStartX + index * (ButtonWidth + ButtonSpacing);
 
     /// <summary>Y of the row below the toolbar where submenus anchor.</summary>
@@ -67,10 +69,9 @@ public class MenuBar : Panel
         {
             (label: "Select", tool: EditorTool.Select),
             (label: "Road", tool: EditorTool.Road),
-            (label: "Node", tool: EditorTool.Node),
-            (label: "Delete", tool: EditorTool.Delete),
             (label: "Dest Pt", tool: EditorTool.Destination),
             (label: "Signal", tool: EditorTool.Signal),
+            (label: "Ctrl Type", tool: EditorTool.SignalControl),
         };
 
         for (int i = 0; i < tools.Length; i++)
@@ -100,7 +101,7 @@ public class MenuBar : Panel
 
     protected override void LayoutChildren(float canvasWidth, float canvasHeight)
     {
-        // Children are the 3 action buttons then the 6 tool buttons, in add order.
+        // Children are the 3 action buttons then the 5 tool buttons, in add order.
         // Offsets are panel-relative: the panel's left edge sits at ToolbarX - 6.
         for (int i = 0; i < Children.Count; i++)
         {

@@ -4,13 +4,15 @@ using Roads.App.World;
 namespace Roads.App.Editor;
 
 /// <summary>
-/// Editor tool that builds two-way road segments by clicking to place nodes.
+/// Editor tool that builds road segments by clicking to place nodes, using the road
+/// toolbar's sticky options (type, per-direction width, one-way, shared-lane).
 /// The FIRST click of a chain only RECORDS the start anchor — an existing node, a pending
 /// on-road split point, or a pending free position (the latter two drawn as a ghost node)
 /// — without mutating the graph, so a right-click/ESC cancel leaves nothing behind.
 /// The second click commits: the pending anchor materializes (splitting its edge when
-/// on-road), the end anchor resolves the same way, and a two-way edge pair is created.
-/// The chain then continues from the now-real end node.
+/// on-road), the end anchor resolves the same way, and the edge (pair, unless one-way) is
+/// created with the sticky options applied. The chain then continues from the now-real
+/// end node.
 /// </summary>
 public class RoadTool
 {
@@ -19,8 +21,9 @@ public class RoadTool
     /// records the start anchor via <see cref="BeginChain"/> (no graph mutation); each
     /// later click materializes the pending start if any, resolves the clicked end anchor
     /// (snap to node / split nearby edge / new node, within
-    /// <see cref="EditorState.SnapDistance"/>), creates a two-way edge pair, and splits
-    /// any crossed edges to form intersections.
+    /// <see cref="EditorState.SnapDistance"/>), creates the edge — a two-way pair, or a
+    /// single directed edge (draw direction) when the one-way option is set — applies the
+    /// sticky road options, and splits any crossed edges to form intersections.
     /// </summary>
     /// <param name="worldPos">Click position in world space.</param>
     /// <param name="state">Editor state tracking the in-progress chain anchor.</param>
@@ -42,7 +45,16 @@ public class RoadTool
         if (startNode != endNode)
         {
             int forwardEdge = graph.AddEdge(startNode, endNode);
-            graph.AddEdge(endNode, startNode);
+            if (!state.SelectedOneWay)
+                graph.AddEdge(endNode, startNode);
+
+            // Apply the sticky road options BEFORE splitting: the setters mirror to the
+            // reverse edge, and SplitEdge copies type/lanes/speed/flags onto both halves.
+            graph.SetEdgeRoadType(forwardEdge, state.SelectedRoadType);
+            graph.SetLaneCount(forwardEdge, state.SelectedLaneCount);
+            if (!state.SelectedOneWay && state.SelectedSharedLane)
+                graph.SetSharedLane(forwardEdge, true);
+
             // Only split forward edge; SplitEdge handles reverse automatically
             SplitAtCrossings(graph, forwardEdge);
         }

@@ -72,6 +72,36 @@ public static class GeometryUtil
         => 2f * RoadHalfWidth(graph, edgeIdx);
 
     /// <summary>
+    /// Full asphalt width in meters a road with the given options would have — the same
+    /// policy as <see cref="RoadHalfWidth"/> (shared-lane = one lane total, one-way =
+    /// laneCount centered, two-way = laneCount per direction), but computed from option
+    /// values instead of an existing edge. Used by editor previews (road-draw ghost,
+    /// Update Segment hover) to show the width the operation will produce.
+    /// </summary>
+    public static float RoadSurfaceWidthFor(byte laneCount, bool oneWay, bool sharedLane)
+    {
+        float lw = SimConstants.LaneWidth;
+        if (sharedLane) return lw;
+        return oneWay ? laneCount * lw : 2f * laneCount * lw;
+    }
+
+    /// <summary>
+    /// Visual footprint radius of a node in meters: the widest incident road's
+    /// <see cref="RoadHalfWidth"/> across both incoming and outgoing edges, so a junction
+    /// of wide arterials reads larger than a residential bend. Returns 0 for an isolated
+    /// node (callers floor with their marker size, e.g. the renderer's node-dot radius).
+    /// </summary>
+    public static float NodeJunctionRadius(RoadGraph graph, int nodeIndex)
+    {
+        float radius = 0f;
+        foreach (int e in graph.GetOutgoingEdges(nodeIndex))
+            radius = MathF.Max(radius, RoadHalfWidth(graph, e));
+        foreach (int e in graph.GetIncomingEdges(nodeIndex))
+            radius = MathF.Max(radius, RoadHalfWidth(graph, e));
+        return radius;
+    }
+
+    /// <summary>
     /// Lateral extent (min,max signed rightward offset) covered by THIS edge's own lanes,
     /// used to draw a stop line across exactly the approaching lanes. Two-way returns
     /// <c>(0, LaneCount*LaneWidth)</c> — the right half only; one-way / single-lane return

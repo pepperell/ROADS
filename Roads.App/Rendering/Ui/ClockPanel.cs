@@ -3,16 +3,17 @@ using SkiaSharp;
 namespace Roads.App.Rendering.Ui;
 
 /// <summary>
-/// Top-right time-and-speed panel: a 12-hour analog dial (hour + minute hands, tick
-/// marks) with AM/PM illumination, the digital game time beneath it, the current
-/// simulation speed (or PAUSED), and a transport-button row (&lt;&lt; / Pause / &gt;&gt;)
-/// that raises <see cref="UIAction"/>s through the owner callback — the same actions the
-/// retired menu-bar buttons fired. Purely a view over <see cref="SimulationLoop"/> state —
-/// hands and labels read <see cref="Core.SimulationClock.TimeOfDay"/> live each frame, so
-/// they freeze while paused and sweep visibly at high time scales. Always visible (no
-/// toggle); consumes clicks like every opaque panel. Drawing is allocation-free: the
-/// digital string is cached and rebuilt only when the displayed minute changes, and speed
-/// labels come from a fixed table indexed by the time-scale exponent.
+/// Top-right time-and-speed panel: a 12-hour analog dial (hour, minute, and red second
+/// hands, tick marks) with AM/PM illumination, the digital game time (HH:MM:SS) beneath
+/// it, the current simulation speed (or PAUSED), and a transport-button row
+/// (&lt;&lt; / Pause / &gt;&gt;) that raises <see cref="UIAction"/>s through the owner
+/// callback — the same actions the retired menu-bar buttons fired. Purely a view over
+/// <see cref="SimulationLoop"/> state — hands and labels read
+/// <see cref="Core.SimulationClock.TimeOfDay"/> live each frame, so they freeze while
+/// paused and sweep visibly at high time scales. Always visible (no toggle); consumes
+/// clicks like every opaque panel. Drawing is allocation-free: the digital string is
+/// cached and rebuilt only when the displayed second changes, and speed labels come from
+/// a fixed table indexed by the time-scale exponent.
 /// </summary>
 public class ClockPanel : Panel
 {
@@ -30,9 +31,9 @@ public class ClockPanel : Panel
 
     private readonly SimulationLoop _simLoop;
 
-    // Cached digital readout, rebuilt only when the displayed minute changes.
+    // Cached digital readout, rebuilt only when the displayed second changes.
     private string _timeText = "";
-    private int _cachedMinuteOfDay = -1;
+    private int _cachedSecondOfDay = -1;
 
     /// <summary>Speed label per time-scale exponent (1x..64x); index clamped defensively.</summary>
     private static readonly string[] SpeedLabels = { "1x", "2x", "4x", "8x", "16x", "32x", "64x" };
@@ -41,6 +42,7 @@ public class ClockPanel : Panel
     private readonly SKPaint _ringPaint = new() { Color = UiTheme.Outline, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f, IsAntialias = true };
     private readonly SKPaint _tickPaint = new() { Color = UiTheme.TextDim, Style = SKPaintStyle.Stroke, StrokeWidth = 1f, IsAntialias = true };
     private readonly SKPaint _handPaint = new() { Color = SKColors.White, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+    private readonly SKPaint _secondHandPaint = new() { Color = new SKColor(225, 80, 70), Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
     private readonly SKPaint _hubPaint = new() { Color = SKColors.White, Style = SKPaintStyle.Fill, IsAntialias = true };
 
     public ClockPanel(SimulationLoop simLoop, Action<UIAction> onAction)
@@ -122,10 +124,13 @@ public class ClockPanel : Panel
         }
 
         // ── Hands (clockwise from 12 o'clock; Y-down screen space) ───────
+        double minuteOfHour = timeOfDay * 60.0;
         float hourFrac = (float)(timeOfDay % 12.0) / 12f;
         float minuteFrac = (float)(timeOfDay - Math.Floor(timeOfDay));
-        DrawHand(canvas, cx, cy, hourFrac, DialRadius * 0.55f, 2.5f);
-        DrawHand(canvas, cx, cy, minuteFrac, DialRadius * 0.85f, 1.5f);
+        float secondFrac = (float)(minuteOfHour - Math.Floor(minuteOfHour));
+        DrawHand(canvas, cx, cy, hourFrac, DialRadius * 0.55f, 2.5f, _handPaint);
+        DrawHand(canvas, cx, cy, minuteFrac, DialRadius * 0.85f, 1.5f, _handPaint);
+        DrawHand(canvas, cx, cy, secondFrac, DialRadius * 0.92f, 1f, _secondHandPaint);
         canvas.DrawCircle(cx, cy, 2.2f, _hubPaint);
 
         // ── AM/PM illumination (inside the lower half of the dial) ───────
@@ -137,11 +142,11 @@ public class ClockPanel : Panel
         UiTheme.TextScratch.Color = isAm ? unlit : lit;
         canvas.DrawText("PM", cx + 14f, cy + DialRadius * 0.55f, SKTextAlign.Center, UiTheme.Font11, UiTheme.TextScratch);
 
-        // ── Digital time (cached per displayed minute) ───────────────────
-        int minuteOfDay = (int)(timeOfDay * 60.0);
-        if (minuteOfDay != _cachedMinuteOfDay)
+        // ── Digital time (cached per displayed second) ───────────────────
+        int secondOfDay = (int)(timeOfDay * 3600.0);
+        if (secondOfDay != _cachedSecondOfDay)
         {
-            _cachedMinuteOfDay = minuteOfDay;
+            _cachedSecondOfDay = secondOfDay;
             _timeText = _simLoop.Clock.GetDisplayTime();
         }
         float textY = Bounds.Top + Pad + DialRadius * 2f + 16f;
@@ -164,10 +169,10 @@ public class ClockPanel : Panel
     }
 
     /// <summary>Draws a hand at the given fraction of a full clockwise turn from 12 o'clock.</summary>
-    private void DrawHand(SKCanvas canvas, float cx, float cy, float turnFraction, float length, float width)
+    private static void DrawHand(SKCanvas canvas, float cx, float cy, float turnFraction, float length, float width, SKPaint paint)
     {
         float angle = turnFraction * MathF.Tau - MathF.PI / 2f;
-        _handPaint.StrokeWidth = width;
-        canvas.DrawLine(cx, cy, cx + MathF.Cos(angle) * length, cy + MathF.Sin(angle) * length, _handPaint);
+        paint.StrokeWidth = width;
+        canvas.DrawLine(cx, cy, cx + MathF.Cos(angle) * length, cy + MathF.Sin(angle) * length, paint);
     }
 }

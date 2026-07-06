@@ -4,12 +4,12 @@ namespace Roads.App.Core;
 
 /// <summary>
 /// Tracks in-game time of day (0.0–24.0 hours). Each sim tick advances game time
-/// at a configurable ratio (default: 1 real second = 1 game minute at 1x speed).
+/// at a configurable ratio (default: game time runs at realtime at 1x speed).
 /// </summary>
 public class SimulationClock
 {
-    /// <summary>Game-minutes that pass per real second at 1x speed.</summary>
-    private const double GameMinutesPerRealSecond = 1.0;
+    /// <summary>Game-seconds that pass per real second at 1x speed (1.0 = realtime).</summary>
+    private const double GameSecondsPerRealSecond = 1.0;
 
     /// <summary>Current time of day in fractional hours (0.0 = midnight, 12.0 = noon).</summary>
     public double TimeOfDay { get; set; } = 8.0;
@@ -21,8 +21,8 @@ public class SimulationClock
     public bool Advance(float simDt)
     {
         // Each tick advances by simDt real-seconds worth of game time.
-        // GameMinutesPerRealSecond / 60 converts to hours.
-        TimeOfDay += simDt * GameMinutesPerRealSecond / 60.0;
+        // GameSecondsPerRealSecond / 3600 converts to hours.
+        TimeOfDay += simDt * GameSecondsPerRealSecond / 3600.0;
         bool rolledOver = false;
         if (TimeOfDay >= 24.0)
         {
@@ -34,12 +34,14 @@ public class SimulationClock
         return rolledOver;
     }
 
-    /// <summary>Returns "HH:MM" formatted game time.</summary>
+    /// <summary>Returns "HH:MM:SS" formatted game time.</summary>
     public string GetDisplayTime()
     {
-        int hours = (int)TimeOfDay;
-        int minutes = (int)((TimeOfDay - hours) * 60.0);
-        return $"{hours:D2}:{minutes:D2}";
+        int totalSeconds = (int)(TimeOfDay * 3600.0);
+        int hours = totalSeconds / 3600;
+        int minutes = totalSeconds / 60 % 60;
+        int seconds = totalSeconds % 60;
+        return $"{hours:D2}:{minutes:D2}:{seconds:D2}";
     }
 
     /// <summary>

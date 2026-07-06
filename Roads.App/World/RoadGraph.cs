@@ -1292,7 +1292,8 @@ public class RoadGraph
     /// </summary>
     public void StripMarkerFlagsFromIntersections()
     {
-        const NodeFlags signalMask = NodeFlags.TrafficLight | NodeFlags.StopSign | NodeFlags.Yield | NodeFlags.ManualSignal;
+        const NodeFlags signalMask = NodeFlags.TrafficLight | NodeFlags.StopSign | NodeFlags.Yield
+            | NodeFlags.ManualSignal | NodeFlags.ActuatedSignal;
 
         bool stripped = false;
         for (int i = 0; i < _nodes.Count; i++)

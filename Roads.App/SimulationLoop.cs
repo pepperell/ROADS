@@ -172,7 +172,7 @@ public class SimulationLoop
             RebuildWorldCaches();
             long t2 = Stopwatch.GetTimestamp(); cacheT += t2 - t1;
 
-            _trafficSignals.Update(_graph, SimDt);
+            _trafficSignals.Update(_graph, _vehicles, SimDt);
             _stopSigns.Update(_graph, _vehicles, _stopLineCache, SimDt);
             _yieldSigns.Update(_graph, _vehicles, _stopLineCache, _intersectionArcs, SimDt);
             long t3 = Stopwatch.GetTimestamp(); sigT += t3 - t2;
@@ -244,7 +244,7 @@ public class SimulationLoop
             _vehicleGrid.Rebuild(_vehicles.PosX, _vehicles.PosY, _vehicles.Count);
             RebuildWorldCaches();
 
-            _trafficSignals.Update(_graph, SimDt);
+            _trafficSignals.Update(_graph, _vehicles, SimDt);
             _stopSigns.Update(_graph, _vehicles, _stopLineCache, SimDt);
             _yieldSigns.Update(_graph, _vehicles, _stopLineCache, _intersectionArcs, SimDt);
 

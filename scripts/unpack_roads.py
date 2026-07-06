@@ -19,6 +19,7 @@ NODE_FLAGS = {
     8: "Spawn(legacy)",  # retired; the app masks this bit out on load
     16: "ManualSignal",
     32: "Destination",
+    128: "ActuatedSignal",  # traffic light runs actuated (demand-responsive) control
 }
 
 POI_TYPES = ["None", "Home", "Work", "Shop", "Leisure", "School", "Parking", "EntryExit"]

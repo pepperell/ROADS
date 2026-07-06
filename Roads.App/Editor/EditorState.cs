@@ -13,6 +13,12 @@ public enum EditorTool
     Delete,
     Destination,
     Signal,
+    /// <summary>Toggles a traffic light between fixed-time and actuated control
+    /// (badges over every light show the current type while this tool is active).</summary>
+    SignalControl,
+    /// <summary>Applies the road-toolbar options (type, width, one-way, shared-lane)
+    /// to a clicked segment.</summary>
+    UpdateSegment,
 }
 
 /// <summary>
@@ -24,11 +30,65 @@ public class EditorState
     /// <summary>World-space distance threshold for snapping to nodes and selecting edges.</summary>
     public const float SnapDistance = 15f;
 
+    /// <summary>
+    /// World-space distance threshold for picking a node under the cursor (hover highlight
+    /// and node-targeted clicks). Tighter than <see cref="SnapDistance"/> so nearby edges
+    /// stay clickable right up close to a node.
+    /// </summary>
+    public const float NodePickDistance = 5f;
+
     /// <summary>Currently active editor tool.</summary>
     public EditorTool ActiveTool { get; set; } = EditorTool.Select;
 
     /// <summary>POI type to assign when placing destination nodes (sticky across tool switches).</summary>
     public POIType SelectedPOIType { get; set; } = POIType.Home;
+
+    // ── Road-toolbar options (sticky across tool switches, like SelectedPOIType) ──
+    // Applied to newly drawn roads by RoadTool and to clicked segments by UpdateSegmentTool.
+    // Mutual exclusion is enforced in the setters so the invariants hold for every caller:
+    // one-way and shared-lane are exclusive, and shared-lane forces a 1-lane width.
+
+    /// <summary>Road type for new roads and the Update Segment tool.</summary>
+    public RoadType SelectedRoadType { get; set; } = RoadType.Arterial;
+
+    private byte _selectedLaneCount = 1;
+    /// <summary>Per-direction lane count (1–3) for new roads and the Update Segment tool.
+    /// Pinned to 1 while <see cref="SelectedSharedLane"/> is set.</summary>
+    public byte SelectedLaneCount
+    {
+        get => _selectedLaneCount;
+        set => _selectedLaneCount = _selectedSharedLane ? (byte)1 : Math.Clamp(value, (byte)1, (byte)3);
+    }
+
+    private bool _selectedOneWay;
+    /// <summary>One-way option for new roads and the Update Segment tool; mutually
+    /// exclusive with <see cref="SelectedSharedLane"/>.</summary>
+    public bool SelectedOneWay
+    {
+        get => _selectedOneWay;
+        set
+        {
+            _selectedOneWay = value;
+            if (value) _selectedSharedLane = false;
+        }
+    }
+
+    private bool _selectedSharedLane;
+    /// <summary>Single-lane two-way (shared-lane) option for new roads and the Update
+    /// Segment tool; forces a 1-lane width and excludes <see cref="SelectedOneWay"/>.</summary>
+    public bool SelectedSharedLane
+    {
+        get => _selectedSharedLane;
+        set
+        {
+            _selectedSharedLane = value;
+            if (value)
+            {
+                _selectedOneWay = false;
+                _selectedLaneCount = 1;
+            }
+        }
+    }
 
     /// <summary>Index of the EXISTING node the current road segment starts from, or <c>null</c>
     /// when the start is a pending ghost anchor (<see cref="RoadStartAnchorPos"/>) or no
@@ -128,6 +188,11 @@ public class EditorState
     /// </summary>
     public System.Numerics.Vector2? NodeGhostPos { get; set; }
 
+    /// <summary>Ghost radius accompanying <see cref="NodeGhostPos"/>: the half-width of
+    /// the road the click would split, or 0 for a free node (the renderer floors it at
+    /// the node-dot size).</summary>
+    public float NodeGhostRadius { get; set; }
+
     /// <summary>
     /// Edge whose one-way cycle (the <c>O</c> key) is mid-progress, or -1. Tracks where the
     /// three-state cycle (two-way → one-way → one-way reversed → two-way) is, since the two
@@ -174,5 +239,6 @@ public class EditorState
         GhostEdge = -1;
         GhostT = 0f;
         NodeGhostPos = null;
+        NodeGhostRadius = 0f;
     }
 }

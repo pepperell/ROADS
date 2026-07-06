@@ -35,19 +35,21 @@ public class NodeTool
     }
 
     /// <summary>
-    /// Ghost position for the hover preview: the clamped on-road split position when a
-    /// road is within snap distance, the raw cursor position in empty space, or null over
-    /// an existing node (where a click adds nothing).
+    /// Ghost for the hover preview: the clamped on-road split position (with that road's
+    /// half-width as the ghost radius) when a road is within snap distance, the raw
+    /// cursor position (radius 0 — the renderer floors it at the node-dot size) in empty
+    /// space, or null over an existing node (where a click adds nothing).
     /// </summary>
-    public static Vector2? ComputeGhost(Vector2 worldPos, RoadGraph graph, EdgeSpatialGrid edgeSpatialGrid)
+    public static (Vector2 Pos, float Radius)? ComputeGhost(Vector2 worldPos, RoadGraph graph, EdgeSpatialGrid edgeSpatialGrid)
     {
         if (graph.FindNearestNode(worldPos, EditorState.SnapDistance) >= 0) return null;
 
         edgeSpatialGrid.RebuildIfNeeded(graph);
         var (nearEdge, nearT) = edgeSpatialGrid.FindNearestEdgeWithT(graph, worldPos, EditorState.SnapDistance);
         if (nearEdge >= 0)
-            return graph.EvaluateBezier(nearEdge, ClampSplitT(graph, nearEdge, nearT));
-        return worldPos;
+            return (graph.EvaluateBezier(nearEdge, ClampSplitT(graph, nearEdge, nearT)),
+                GeometryUtil.RoadHalfWidth(graph, nearEdge));
+        return (worldPos, 0f);
     }
 
     /// <summary>

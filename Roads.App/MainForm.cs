@@ -28,6 +28,7 @@ public class MainForm : Form
     private readonly RoadTool _roadTool = new();
     private readonly NodeTool _nodeTool = new();
     private readonly DeleteTool _deleteTool = new();
+    private readonly UpdateSegmentTool _updateSegmentTool = new();
     private readonly Ui.SliderPanel _sliderPanel = new();
     private readonly DestinationTool _destinationTool = new();
     private readonly SignalTool _signalTool = new();
@@ -115,6 +116,7 @@ public class MainForm : Form
         // Retained-mode UI tree (bottom→top add order = draw order; input hits topmost first).
         _uiRoot.Add(new Ui.MenuBar(_editorState, OnUiAction));
         _uiRoot.Add(new Ui.PoiSubmenu(_editorState));
+        _uiRoot.Add(new Ui.RoadSubmenu(_editorState));
         _uiRoot.Add(new Ui.LegendPanel());
         _uiRoot.Add(new Ui.ClockPanel(_simLoop, OnUiAction));
         _uiRoot.Add(_sliderPanel);
@@ -1080,8 +1082,9 @@ public class MainForm : Form
 
                     _editorState.SelectedVehicle = -1;
 
-                    // Find nearest node (hit radius matches the visual highlight)
-                    int nearNode = _roadGraph.FindNearestNode(worldVec, 5f);
+                    // Find nearest node (generous fixed pick radius; the highlight itself
+                    // draws at the zoom-scaled node-dot size)
+                    int nearNode = _roadGraph.FindNearestNode(worldVec, EditorState.NodePickDistance);
                     if (nearNode >= 0)
                     {
                         _editorState.SelectedNode = nearNode;
@@ -1135,6 +1138,19 @@ public class MainForm : Form
                             _trafficSignals, _stopSigns, _yieldSigns);
                     else
                         _signalTool.OnClick(worldVec, _roadGraph);
+                    break;
+                case EditorTool.SignalControl:
+                {
+                    // Toggle the clicked traffic light between fixed-time (default) and
+                    // actuated control. Only light nodes respond; the flag flip bumps the
+                    // graph version, so the signal system re-projects it on the next tick.
+                    int ctrlNode = _roadGraph.FindNearestNode(worldVec, EditorState.SnapDistance);
+                    if (ctrlNode >= 0 && _roadGraph.Nodes[ctrlNode].Flags.HasFlag(NodeFlags.TrafficLight))
+                        _roadGraph.SetNodeFlags(ctrlNode, _roadGraph.Nodes[ctrlNode].Flags ^ NodeFlags.ActuatedSignal);
+                    break;
+                }
+                case EditorTool.UpdateSegment:
+                    _updateSegmentTool.OnClick(worldVec, _roadGraph, _editorState, _edgeSpatialGrid);
                     break;
             }
         }
@@ -1402,7 +1418,7 @@ public class MainForm : Form
                     else
                     {
                         _editorState.HoveredVehicle = -1;
-                        int nearNode = _roadGraph.FindNearestNode(worldVec, 5f);
+                        int nearNode = _roadGraph.FindNearestNode(worldVec, EditorState.NodePickDistance);
                         if (nearNode >= 0)
                         {
                             _editorState.HoveredNode = nearNode;
@@ -1418,7 +1434,10 @@ public class MainForm : Form
                 }
                 case EditorTool.Delete:
                 {
-                    int nearNode = _roadGraph.FindNearestNode(worldVec, 5f);
+                    // Highlight exactly what a click will delete: the node under the cursor
+                    // (which goes together with all its attached segments), otherwise the
+                    // nearest edge.
+                    int nearNode = _roadGraph.FindNearestNode(worldVec, EditorState.NodePickDistance);
                     if (nearNode >= 0)
                     {
                         _editorState.HoveredNode = nearNode;
@@ -1437,6 +1456,22 @@ public class MainForm : Form
                     _editorState.HoveredNode = _roadGraph.FindNearestNode(worldVec, EditorState.SnapDistance);
                     break;
                 }
+                case EditorTool.SignalControl:
+                {
+                    // Only traffic-light nodes are valid targets, so only they highlight.
+                    _editorState.HoveredEdge = -1;
+                    int nearNode = _roadGraph.FindNearestNode(worldVec, EditorState.SnapDistance);
+                    _editorState.HoveredNode = nearNode >= 0
+                        && _roadGraph.Nodes[nearNode].Flags.HasFlag(NodeFlags.TrafficLight) ? nearNode : -1;
+                    break;
+                }
+                case EditorTool.UpdateSegment:
+                {
+                    // Edges only: the tool retypes segments, nodes are not targets.
+                    _editorState.HoveredNode = -1;
+                    _editorState.HoveredEdge = _edgeSpatialGrid.FindNearestEdge(_roadGraph, worldVec, EditorState.SnapDistance);
+                    break;
+                }
                 case EditorTool.Node:
                 {
                     // Over an existing node: highlight it, no ghost (a click adds nothing).
@@ -1445,7 +1480,11 @@ public class MainForm : Form
                     _editorState.HoveredEdge = -1;
                     _editorState.HoveredNode = _roadGraph.FindNearestNode(worldVec, EditorState.SnapDistance);
                     if (_editorState.HoveredNode < 0)
-                        _editorState.NodeGhostPos = NodeTool.ComputeGhost(worldVec, _roadGraph, _edgeSpatialGrid);
+                    {
+                        var nodeGhost = NodeTool.ComputeGhost(worldVec, _roadGraph, _edgeSpatialGrid);
+                        _editorState.NodeGhostPos = nodeGhost?.Pos;
+                        _editorState.NodeGhostRadius = nodeGhost?.Radius ?? 0f;
+                    }
                     break;
                 }
                 case EditorTool.Road:

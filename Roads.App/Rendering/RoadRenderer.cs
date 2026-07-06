@@ -220,7 +220,9 @@ public class RoadRenderer
         SKRect viewRect = default, IReadOnlyList<int>? visibleEdges = null,
         StopSignSystem? stopSigns = null, TrafficSignalSystem? trafficSignals = null)
     {
-        if (graph.Edges.Count == 0) return;
+        // An edge-less graph still flows through every pass: each pass iterates the (empty)
+        // edge list and skips naturally, while DrawNodes at the end still renders any
+        // stand-alone nodes placed on an otherwise empty map.
 
         // When the caller supplies a pre-culled visible-edge list (from the edge spatial grid),
         // the surface/marking passes iterate only those instead of the whole edge list. The
@@ -860,7 +862,7 @@ public class RoadRenderer
     private void DrawNodes(SKCanvas canvas, RoadGraph graph, float zoom, SKRect cullRect = default)
     {
         if (zoom < NodeDotMinZoom) return;
-        float nodeRadius = Math.Max(1.2f, 1.8f / zoom);
+        float nodeRadius = RenderDetail.NodeDotRadius(zoom);
 
         for (int i = 0; i < graph.Nodes.Count; i++)
         {

@@ -101,7 +101,8 @@ public class VehicleStore
 
     // ── Driver personality (cold, set at spawn) ──
 
-    /// <summary>Aggressiveness (0–1): affects following distance, lane change gaps.</summary>
+    /// <summary>Aggressiveness (0–1): affects following distance, lane change gaps, and
+    /// desired launch acceleration (see <c>SteeringController.EffectiveMaxAccel</c>).</summary>
     public float[] Aggressiveness = Array.Empty<float>();
     /// <summary>Speed bias (0.8–1.3): multiplier on speed limit for desired speed.</summary>
     public float[] SpeedBias = Array.Empty<float>();

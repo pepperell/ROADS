@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Numerics;
 
 using Roads.App.Core;
+using Roads.App.Vehicles;
 
 namespace Roads.App.World;
 
@@ -23,8 +24,13 @@ public enum SignalState : byte
 /// Manages traffic light cycling for intersection nodes. <see cref="AutoAssign"/>
 /// normalizes the TrafficLight flag on nodes with 4+ incoming edges (unless manually
 /// overridden); <see cref="RebuildIfNeeded"/> then projects node flags into internal
-/// arrays, groups incoming edges into two opposing phase groups by approach angle,
-/// and cycles Green/Yellow/Red on a fixed timer.
+/// arrays, groups incoming edges into two opposing phase groups by approach angle, and
+/// derives each node's ITE yellow duration from its fastest approach. <see cref="Update"/>
+/// runs a per-node six-segment state machine (green→yellow→all-red per group). Green
+/// termination depends on the node's control type: fixed-time (default) greens run a
+/// fixed duration; actuated greens (<see cref="NodeFlags.ActuatedSignal"/>) gap-out early
+/// when their street is empty, extend while it has detected vehicles, max-out against
+/// waiting cross demand, and rest in green when the cross street is empty.
 /// </summary>
 public class TrafficSignalSystem
 {
@@ -32,27 +38,46 @@ public class TrafficSignalSystem
     private SignalState[] _edgeSignal = Array.Empty<SignalState>();
     /// <summary>Per-edge phase group assignment (0 or 1).</summary>
     private byte[] _edgePhaseGroup = Array.Empty<byte>();
+    /// <summary>Per-edge vehicle-detection flag for actuated control; rebuilt each <see cref="Update"/>
+    /// tick when at least one actuated light exists (see <see cref="RebuildEdgeDemand"/>).</summary>
+    private bool[] _edgeDemand = Array.Empty<bool>();
 
-    /// <summary>Per-node cycle timer in seconds.</summary>
-    private float[] _nodeTimer = Array.Empty<float>();
+    /// <summary>Per-node cycle segment: 0=G0, 1=Y0, 2=all-red, 3=G1, 4=Y1, 5=all-red
+    /// (phase group 0's green/yellow, clearance, then group 1's, clearance).</summary>
+    private byte[] _nodePhase = Array.Empty<byte>();
+    /// <summary>Per-node time (seconds) spent in the current cycle segment.</summary>
+    private float[] _nodeTimeInPhase = Array.Empty<float>();
+    /// <summary>Per-node ITE yellow duration in seconds (see <see cref="ComputeYellowDuration"/>).</summary>
+    private float[] _nodeYellow = Array.Empty<float>();
     /// <summary>Per-node flag indicating whether this node has a traffic light.</summary>
     private bool[] _isTrafficLight = Array.Empty<bool>();
+    /// <summary>Per-node actuated-control flag (projected from <see cref="NodeFlags.ActuatedSignal"/>).</summary>
+    private bool[] _isActuated = Array.Empty<bool>();
     /// <summary>Per-node phase rotation offset (shifts the split point in phase group computation).</summary>
     private byte[] _nodePhaseRotation = Array.Empty<byte>();
+    /// <summary>Count of actuated lights after the last rebuild — gates the per-tick demand pass.</summary>
+    private int _actuatedCount;
 
     /// <summary>Graph version when signal data was last rebuilt.</summary>
     private int _cachedVersion = -1;
     /// <summary>Set when phase rotation changes, forcing a rebuild even if graph version hasn't changed.</summary>
     private bool _dirty;
 
-    /// <summary>Duration of the green phase in seconds.</summary>
+    /// <summary>Green duration in seconds for fixed-time nodes (typical urban two-phase split).</summary>
     private const float GreenDuration = 30f;
-    /// <summary>Duration of the yellow phase in seconds.</summary>
-    private const float YellowDuration = 5f;
-    /// <summary>Duration of one phase (green + yellow) in seconds.</summary>
-    private const float PhaseDuration = GreenDuration + YellowDuration;
-    /// <summary>Duration of a full two-phase cycle in seconds.</summary>
-    private const float CycleDuration = PhaseDuration * 2;
+    /// <summary>All-red clearance between phases in seconds (standard practice 1–2 s).</summary>
+    private const float AllRedDuration = 2f;
+    /// <summary>Actuated control: minimum green before a phase may gap out.</summary>
+    private const float MinGreen = 8f;
+    /// <summary>Actuated control: maximum green while cross demand is waiting.</summary>
+    private const float MaxGreen = 40f;
+    /// <summary>Actuated control: detection-zone length upstream of the node in meters
+    /// (emulates stop-line detector loops).</summary>
+    private const float DetectionDistance = 45f;
+    /// <summary>ITE yellow formula: driver perception-reaction time in seconds.</summary>
+    private const float YellowReactionTime = 1.0f;
+    /// <summary>ITE yellow formula: design deceleration in m/s² (the standard 10 ft/s²).</summary>
+    private const float YellowDecel = 3.05f;
 
     /// <summary>
     /// Gets the signal state for an edge approaching its ToNode.
@@ -145,15 +170,18 @@ public class TrafficSignalSystem
             if (shouldBeLight && !node.Flags.HasFlag(NodeFlags.TrafficLight))
                 graph.SetNodeFlags(n, node.Flags | NodeFlags.TrafficLight);
             else if (!shouldBeLight && node.Flags.HasFlag(NodeFlags.TrafficLight))
-                graph.SetNodeFlags(n, node.Flags & ~NodeFlags.TrafficLight);
+                // The actuated bit goes with the light, so a future re-light starts
+                // at the fixed-time default.
+                graph.SetNodeFlags(n, node.Flags & ~(NodeFlags.TrafficLight | NodeFlags.ActuatedSignal));
         }
     }
 
     /// <summary>
     /// Projects node flags into signal arrays when the graph changes or a phase
-    /// rotation marked the system dirty: sizes arrays, derives the traffic-light set
-    /// from NodeFlags.TrafficLight, preserves timers for existing lights (randomizing
-    /// new ones), recomputes phase groups, and initializes per-edge signal states.
+    /// rotation marked the system dirty: sizes arrays, derives the traffic-light and
+    /// actuated sets from node flags, preserves phase state for existing lights
+    /// (randomizing new ones), recomputes phase groups and per-node ITE yellow durations,
+    /// and initializes per-edge signal states.
     /// Pure read of the graph — performs no mutation. <see cref="AutoAssign"/> must
     /// have normalized flags first whenever the graph changed (the ordering inside
     /// SimulationLoop.RebuildWorldCaches enforces this).
@@ -174,16 +202,21 @@ public class TrafficSignalSystem
         {
             _edgeSignal = new SignalState[edgeCount];
             _edgePhaseGroup = new byte[edgeCount];
+            _edgeDemand = new bool[edgeCount];
         }
 
         bool[] oldIsTrafficLight = _isTrafficLight;
-        float[] oldTimer = _nodeTimer;
+        byte[] oldPhase = _nodePhase;
+        float[] oldTimeInPhase = _nodeTimeInPhase;
         byte[] oldRotation = _nodePhaseRotation;
 
         if (_isTrafficLight.Length < nodeCount)
         {
             _isTrafficLight = new bool[nodeCount];
-            _nodeTimer = new float[nodeCount];
+            _isActuated = new bool[nodeCount];
+            _nodePhase = new byte[nodeCount];
+            _nodeTimeInPhase = new float[nodeCount];
+            _nodeYellow = new float[nodeCount];
             _nodePhaseRotation = new byte[nodeCount];
 
             Array.Copy(oldRotation, _nodePhaseRotation, Math.Min(oldRotation.Length, nodeCount));
@@ -193,6 +226,7 @@ public class TrafficSignalSystem
         Array.Clear(_edgeSignal, 0, Math.Min(edgeCount, _edgeSignal.Length));
 
         // Derive the traffic-light set from node flags (normalized by AutoAssign)
+        _actuatedCount = 0;
         for (int n = 0; n < nodeCount; n++)
         {
             var node = graph.Nodes[n];
@@ -201,16 +235,28 @@ public class TrafficSignalSystem
             _isTrafficLight[n] = isLight;
             if (!isLight) continue;
 
-            // Preserve existing timer, or randomize for new lights
-            if (n < oldIsTrafficLight.Length && oldIsTrafficLight[n])
-                _nodeTimer[n] = oldTimer[n];
-            else if (_nodeTimer[n] == 0f)
-                _nodeTimer[n] = SimRandom.NextSingle() * CycleDuration;
+            _isActuated[n] = node.Flags.HasFlag(NodeFlags.ActuatedSignal);
+            if (_isActuated[n]) _actuatedCount++;
 
-            ComputePhaseGroups(graph, n, graph.GetIncomingEdges(n));
+            // Preserve phase state for existing lights; start new lights at a random point
+            // within a random green so neighboring signals don't run in lockstep.
+            if (n < oldIsTrafficLight.Length && oldIsTrafficLight[n])
+            {
+                _nodePhase[n] = oldPhase[n];
+                _nodeTimeInPhase[n] = oldTimeInPhase[n];
+            }
+            else
+            {
+                _nodePhase[n] = SimRandom.Next(2) == 0 ? (byte)0 : (byte)3;
+                _nodeTimeInPhase[n] = SimRandom.NextSingle() * GreenDuration;
+            }
+
+            var incoming = graph.GetIncomingEdges(n);
+            _nodeYellow[n] = ComputeYellowDuration(graph, incoming);
+            ComputePhaseGroups(graph, n, incoming);
         }
 
-        // Initialize signal states from current timers
+        // Initialize signal states from current phase state
         for (int n = 0; n < nodeCount; n++)
         {
             if (!_isTrafficLight[n]) continue;
@@ -219,70 +265,163 @@ public class TrafficSignalSystem
     }
 
     /// <summary>
-    /// Advances signal timers and updates per-edge signal states.
+    /// ITE yellow change interval for a node: y = t + v/(2a) (flat-grade kinematic form)
+    /// with the fastest incoming approach's speed limit as v, clamped to the 3.0–6.5 s
+    /// band used in practice — ~3 s on 25 mph residential streets, ~4.3 s on 45 mph
+    /// arterials, ~6 s at highway speeds. Recomputed on rebuild, so speed-limit and
+    /// road-type edits retime the yellow.
+    /// </summary>
+    private static float ComputeYellowDuration(RoadGraph graph, ArraySegment<int> incoming)
+    {
+        float vMax = 0f;
+        foreach (int e in incoming)
+        {
+            var edge = graph.Edges[e];
+            if (edge.FromNode < 0) continue;
+            float v = edge.SpeedLimit > 0f ? edge.SpeedLimit : RoadTypeDefaults.GetDefaultSpeedLimit(edge.RoadType);
+            vMax = MathF.Max(vMax, v);
+        }
+        return Math.Clamp(YellowReactionTime + vMax / (2f * YellowDecel), 3f, 6.5f);
+    }
+
+    /// <summary>
+    /// Advances every light's phase state machine and updates per-edge signal states.
+    /// When any actuated light exists, first refreshes per-edge vehicle detection from
+    /// <paramref name="vehicles"/> (skipped entirely on all-fixed-time maps).
     /// <see cref="RebuildIfNeeded"/> must be called before this method each frame
     /// (debug-asserted).
     /// </summary>
     /// <param name="graph">Road graph for incoming-edge lookups.</param>
+    /// <param name="vehicles">Vehicle store scanned for detection-zone demand at actuated lights.</param>
     /// <param name="dt">Delta time in seconds since last update.</param>
-    public void Update(RoadGraph graph, float dt)
+    public void Update(RoadGraph graph, VehicleStore vehicles, float dt)
     {
         Debug.Assert(_cachedVersion == graph.Version && !_dirty,
             "TrafficSignalSystem.Update: RebuildIfNeeded must run first — signal data is stale relative to the graph.");
+
+        if (_actuatedCount > 0)
+            RebuildEdgeDemand(graph, vehicles);
 
         int nodeCount = Math.Min(graph.Nodes.Count, _isTrafficLight.Length);
         for (int n = 0; n < nodeCount; n++)
         {
             if (!_isTrafficLight[n]) continue;
 
-            _nodeTimer[n] += dt;
-            if (_nodeTimer[n] >= CycleDuration)
-                _nodeTimer[n] -= CycleDuration;
-
+            AdvancePhaseMachine(graph, n, dt);
             UpdateNodeSignals(graph, n);
         }
     }
 
     /// <summary>
-    /// Maps the current timer value to signal states for all incoming edges of a node.
-    /// Called by <see cref="Update"/> and <see cref="RebuildIfNeeded"/>.
+    /// Single pass over driving vehicles marking approaches that have a vehicle inside the
+    /// detection zone (the last <see cref="DetectionDistance"/> meters before the node) —
+    /// the sim's stand-in for the stop-line detector loops actuated controllers use.
+    /// Vehicles already on intersection arcs are ignored (they have left the approach).
+    /// </summary>
+    private void RebuildEdgeDemand(RoadGraph graph, VehicleStore vehicles)
+    {
+        int edgeCount = Math.Min(graph.Edges.Count, _edgeDemand.Length);
+        Array.Clear(_edgeDemand, 0, edgeCount);
+
+        for (int v = 0; v < vehicles.Count; v++)
+        {
+            if (vehicles.State[v] != VehicleState.Driving) continue;
+            if (vehicles.CurrentArc[v] >= 0) continue;
+            int edge = vehicles.CurrentEdge[v];
+            if (edge < 0 || edge >= edgeCount || _edgeDemand[edge]) continue;
+            var e = graph.Edges[edge];
+            if (e.FromNode < 0) continue;
+
+            float remaining = (1f - vehicles.EdgeProgress[v]) * e.Length;
+            if (remaining <= DetectionDistance)
+                _edgeDemand[edge] = true;
+        }
+    }
+
+    /// <summary>Whether any incoming approach of the node in the given phase group has a detected vehicle.</summary>
+    private bool GroupDemand(RoadGraph graph, int nodeIndex, byte group)
+    {
+        foreach (int edgeIdx in graph.GetIncomingEdges(nodeIndex))
+        {
+            if (edgeIdx < 0 || edgeIdx >= _edgeDemand.Length) continue;
+            if (_edgePhaseGroup[edgeIdx] == group && _edgeDemand[edgeIdx]) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Advances a node's six-segment phase machine by one timestep. Greens end on the fixed
+    /// timer (fixed-time nodes) or by gap-out/max-out against detected demand (actuated
+    /// nodes, which rest in green while the cross street is empty); yellows run the node's
+    /// ITE duration; the all-red clearance is fixed. One sim substep is far smaller than any
+    /// segment duration, so at most one transition occurs per call.
+    /// </summary>
+    private void AdvancePhaseMachine(RoadGraph graph, int nodeIndex, float dt)
+    {
+        byte phase = _nodePhase[nodeIndex];
+        float t = _nodeTimeInPhase[nodeIndex] + dt;
+
+        bool advance;
+        switch (phase)
+        {
+            case 0: // group 0 green
+            case 3: // group 1 green
+                if (_isActuated[nodeIndex])
+                {
+                    byte greenGroup = phase == 0 ? (byte)0 : (byte)1;
+                    bool ownDemand = GroupDemand(graph, nodeIndex, greenGroup);
+                    bool crossDemand = GroupDemand(graph, nodeIndex, (byte)(1 - greenGroup));
+                    // Gap-out once the green street is empty (after MinGreen), max-out at
+                    // MaxGreen — both only when cross demand is actually waiting; with an
+                    // empty cross street, rest in green indefinitely.
+                    advance = crossDemand && t >= MinGreen && (!ownDemand || t >= MaxGreen);
+                    if (!advance) t = MathF.Min(t, MaxGreen); // keep the timer bounded while resting
+                }
+                else
+                {
+                    advance = t >= GreenDuration;
+                }
+                break;
+            case 1: // yellows
+            case 4:
+                advance = t >= _nodeYellow[nodeIndex];
+                break;
+            default: // 2, 5: all-red clearance
+                advance = t >= AllRedDuration;
+                break;
+        }
+
+        if (advance)
+        {
+            _nodePhase[nodeIndex] = (byte)((phase + 1) % 6);
+            _nodeTimeInPhase[nodeIndex] = 0f;
+        }
+        else
+        {
+            _nodeTimeInPhase[nodeIndex] = t;
+        }
+    }
+
+    /// <summary>
+    /// Maps the current cycle segment to signal states for all incoming edges of a node.
+    /// Called by <see cref="Update"/> and <see cref="RebuildIfNeeded"/>. During the all-red
+    /// clearance segments both groups read Red.
     /// </summary>
     /// <param name="graph">Road graph for incoming-edge lookups.</param>
     /// <param name="nodeIndex">Index of the traffic-light node.</param>
     private void UpdateNodeSignals(RoadGraph graph, int nodeIndex)
     {
-        float timer = _nodeTimer[nodeIndex];
-        var incoming = graph.GetIncomingEdges(nodeIndex);
-
-        // Determine state for each phase group
-        // [0, Green)                        -> group 0 = Green,  group 1 = Red
-        // [Green, Phase)                    -> group 0 = Yellow, group 1 = Red
-        // [Phase, Phase+Green)              -> group 0 = Red,    group 1 = Green
-        // [Phase+Green, Cycle)              -> group 0 = Red,    group 1 = Yellow
-        SignalState group0State, group1State;
-
-        if (timer < GreenDuration)
+        SignalState group0State = SignalState.Red, group1State = SignalState.Red;
+        switch (_nodePhase[nodeIndex])
         {
-            group0State = SignalState.Green;
-            group1State = SignalState.Red;
-        }
-        else if (timer < PhaseDuration)
-        {
-            group0State = SignalState.Yellow;
-            group1State = SignalState.Red;
-        }
-        else if (timer < PhaseDuration + GreenDuration)
-        {
-            group0State = SignalState.Red;
-            group1State = SignalState.Green;
-        }
-        else
-        {
-            group0State = SignalState.Red;
-            group1State = SignalState.Yellow;
+            case 0: group0State = SignalState.Green; break;
+            case 1: group0State = SignalState.Yellow; break;
+            case 3: group1State = SignalState.Green; break;
+            case 4: group1State = SignalState.Yellow; break;
+            // 2, 5: all-red clearance — both groups stay Red
         }
 
-        foreach (int edgeIdx in incoming)
+        foreach (int edgeIdx in graph.GetIncomingEdges(nodeIndex))
         {
             if (edgeIdx < 0 || edgeIdx >= _edgePhaseGroup.Length) continue;
             _edgeSignal[edgeIdx] = _edgePhaseGroup[edgeIdx] == 0 ? group0State : group1State;

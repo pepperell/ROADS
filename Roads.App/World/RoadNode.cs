@@ -23,6 +23,10 @@ public enum NodeFlags : byte
     /// <summary>Node is a vehicle destination (only valid on nodes with ≤ 2 outgoing edges).</summary>
     Destination = 32,
     // 64 reserved (was RegionSpawn, removed in entry/exit merge)
+    /// <summary>Traffic light uses actuated control (demand-responsive green) instead of
+    /// fixed-time. Only meaningful alongside <see cref="TrafficLight"/>; cleared whenever
+    /// the light is removed.</summary>
+    ActuatedSignal = 128,
 }
 
 /// <summary>

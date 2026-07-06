@@ -39,12 +39,15 @@ public static class SteeringController
     private const float IdmMinGap = 1.0f;
     /// <summary>IDM desired time headway in seconds (T).</summary>
     private const float IdmTimeHeadway = 1.5f;
-    /// <summary>IDM maximum acceleration in m/s^2 (a).</summary>
-    private const float IdmMaxAccel = SimConstants.MaxAccel;
     /// <summary>IDM comfortable deceleration in m/s^2 (b).</summary>
     private const float IdmComfortDecel = 2.5f;
     /// <summary>Maximum brake deceleration in m/s^2.</summary>
     private const float MaxBrakeDecel = SimConstants.MaxBrakeDecel;
+
+    /// <summary>Launch acceleration (m/s^2) a driver with Aggressiveness 0 is willing to use.</summary>
+    private const float DriverAccelBase = 1.4f;
+    /// <summary>Additional launch acceleration (m/s^2) at Aggressiveness 1, on top of the base.</summary>
+    private const float DriverAccelAggrRange = 1.8f;
 
     /// <summary>Thread-local buffer for spatial grid query results.</summary>
     [ThreadStatic] private static List<int>? _nearbyBuffer;
@@ -985,8 +988,9 @@ public static class SteeringController
 
         if (ApplyHardOverlapBrake(store, index, gap)) return;
 
-        float idmAccel = ComputeIdmAcceleration(speed, targetSpeed, gap, deltaV, timeHeadway, comfortDecel);
-        var (idmThrottle, idmBrake) = MapIdmToControls(idmAccel);
+        float maxAccel = EffectiveMaxAccel(store, index);
+        float idmAccel = ComputeIdmAcceleration(speed, targetSpeed, gap, deltaV, timeHeadway, comfortDecel, maxAccel);
+        var (idmThrottle, idmBrake) = MapIdmToControls(idmAccel, maxAccel);
 
         store.Brake[index] = idmBrake;
         store.Throttle[index] = MathF.Max(0f, idmThrottle);
@@ -1232,8 +1236,9 @@ public static class SteeringController
 
         float arcTimeHeadway = MapAggressivenessToTimeHeadway(store.Aggressiveness[index]);
         float arcComfortDecel = store.BrakingComfort[index];
-        float idmAccel = ComputeIdmAcceleration(speed, targetSpeed, gap, deltaV, arcTimeHeadway, arcComfortDecel);
-        var (idmThrottle, idmBrake) = MapIdmToControls(idmAccel);
+        float arcMaxAccel = EffectiveMaxAccel(store, index);
+        float idmAccel = ComputeIdmAcceleration(speed, targetSpeed, gap, deltaV, arcTimeHeadway, arcComfortDecel, arcMaxAccel);
+        var (idmThrottle, idmBrake) = MapIdmToControls(idmAccel, arcMaxAccel);
 
         store.Brake[index] = idmBrake;
         store.Throttle[index] = MathF.Max(0f, idmThrottle);
@@ -1262,14 +1267,32 @@ public static class SteeringController
     private static float MapAggressivenessToTimeHeadway(float aggressiveness)
         => 2.0f - aggressiveness * 1.2f;
 
+    /// <summary>
+    /// Effective IDM maximum acceleration (the 'a' parameter, m/s^2) for a vehicle: the
+    /// driver's desired launch rate — mapped from Aggressiveness onto 1.4–3.2 m/s^2, matching
+    /// field studies of drivers pulling away from stops (typical 1.5–2.5, aggressive ~3) —
+    /// capped by the vehicle type's full-throttle capability (e.g. a loaded truck cannot
+    /// launch like a sedan no matter who drives it). Used both by the IDM controller and by
+    /// <see cref="VehiclePhysics"/> to convert the throttle input back to acceleration, so
+    /// the two must never diverge.
+    /// </summary>
+    public static float EffectiveMaxAccel(VehicleStore store, int index)
+    {
+        float desired = DriverAccelBase + store.Aggressiveness[index] * DriverAccelAggrRange;
+        float capability = VehicleTypeDynamics.GetMaxAccel((VehicleType)store.PreferredVehicle[index]);
+        return MathF.Min(desired, capability);
+    }
+
     /// <param name="desiredSpeed">Target speed in m/s.</param>
     /// <param name="gap">Bumper-to-bumper gap to leader in meters.</param>
     /// <param name="deltaV">Speed difference (positive = closing on leader).</param>
     /// <param name="timeHeadway">Desired time headway in seconds (IDM T parameter).</param>
     /// <param name="comfortDecel">Comfortable deceleration in m/s^2 (IDM b parameter).</param>
+    /// <param name="maxAccel">Maximum acceleration in m/s^2 (IDM a parameter) — the vehicle's
+    /// <see cref="EffectiveMaxAccel"/>, per-driver and per-type.</param>
     /// <returns>Acceleration in m/s^2 (positive = accelerate, negative = brake).</returns>
     private static float ComputeIdmAcceleration(float speed, float desiredSpeed, float gap, float deltaV,
-        float timeHeadway, float comfortDecel)
+        float timeHeadway, float comfortDecel, float maxAccel)
     {
         // Free-road term: (v/v0)^4
         float vRatio = desiredSpeed > 0.01f ? speed / desiredSpeed : 0f;
@@ -1277,13 +1300,13 @@ public static class SteeringController
         float freeRoadTerm = vRatio2 * vRatio2;
 
         // Desired dynamic gap: s* = s0 + max(0, v*T + v*Δv / (2*sqrt(a*b)))
-        float interaction = speed * deltaV / (2f * MathF.Sqrt(IdmMaxAccel * comfortDecel));
+        float interaction = speed * deltaV / (2f * MathF.Sqrt(maxAccel * comfortDecel));
         float sStar = IdmMinGap + MathF.Max(0f, speed * timeHeadway + interaction);
 
         // Gap term: (s*/gap)^2
         float gapTerm = gap > 0.01f ? (sStar / gap) * (sStar / gap) : 100f;
 
-        return Math.Clamp(IdmMaxAccel * (1f - freeRoadTerm - gapTerm), -MaxBrakeDecel, IdmMaxAccel);
+        return Math.Clamp(maxAccel * (1f - freeRoadTerm - gapTerm), -MaxBrakeDecel, maxAccel);
     }
 
     /// <summary>
@@ -1365,12 +1388,14 @@ public static class SteeringController
     }
 
     /// <summary>
-    /// Maps IDM acceleration to throttle/brake control inputs.
+    /// Maps IDM acceleration to throttle/brake control inputs. Throttle is normalized by the
+    /// vehicle's <paramref name="maxAccel"/> — the same value <see cref="VehiclePhysics"/>
+    /// multiplies back in — so the round trip preserves the IDM acceleration exactly.
     /// </summary>
-    private static (float throttle, float brake) MapIdmToControls(float idmAccel)
+    private static (float throttle, float brake) MapIdmToControls(float idmAccel, float maxAccel)
     {
         if (idmAccel >= 0f)
-            return (MathF.Min(1f, idmAccel / IdmMaxAccel), 0f);
+            return (MathF.Min(1f, idmAccel / maxAccel), 0f);
         return (0f, MathF.Min(1f, -idmAccel / MaxBrakeDecel));
     }
 
