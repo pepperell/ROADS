@@ -11,9 +11,10 @@ public enum UIAction { New, Save, Load, Pause, SpeedDown, SpeedUp }
 
 /// <summary>
 /// The top-left menu bar: three file action <see cref="Button"/>s (New / Save / Load) at
-/// the far left, then five editor-tool toggle buttons (Select / Road / Dest Pt / Signal /
-/// Ctrl Type). The Node / Delete / Update Seg tools live on the <see cref="RoadSubmenu"/>
-/// opened by the Road button, not here. Tool buttons set
+/// the far left, then four editor-tool toggle buttons (Select / Road / Dest Pt / Signal).
+/// The Node / Delete / Update Seg tools live on the <see cref="RoadSubmenu"/> opened by
+/// the Road button, and the Change Type / Control Type / Rotate tools on the
+/// <see cref="SignalSubmenu"/> opened by the Signal button — not here. Tool buttons set
 /// <see cref="EditorState.ActiveTool"/> directly (resetting transient tool state first)
 /// and highlight via live IsActive closures; actions are routed to the owner through the
 /// callback given at construction. Sits flush under the top edge (the row freed by the
@@ -36,7 +37,8 @@ public class MenuBar : Panel
 
     /// <summary>Left edge (canvas px) of the tool button at the given index — the road
     /// submenu anchors under the Road button (index 1), the POI submenu under the Dest Pt
-    /// button (index 2). Constant geometry.</summary>
+    /// button (index 2), the signals submenu under the Signal button (index 3). Constant
+    /// geometry.</summary>
     public static float ToolButtonLeft(int index) => ToolStartX + index * (ButtonWidth + ButtonSpacing);
 
     /// <summary>Y of the row below the toolbar where submenus anchor.</summary>
@@ -71,7 +73,6 @@ public class MenuBar : Panel
             (label: "Road", tool: EditorTool.Road),
             (label: "Dest Pt", tool: EditorTool.Destination),
             (label: "Signal", tool: EditorTool.Signal),
-            (label: "Ctrl Type", tool: EditorTool.SignalControl),
         };
 
         for (int i = 0; i < tools.Length; i++)
@@ -101,7 +102,7 @@ public class MenuBar : Panel
 
     protected override void LayoutChildren(float canvasWidth, float canvasHeight)
     {
-        // Children are the 3 action buttons then the 5 tool buttons, in add order.
+        // Children are the 3 action buttons then the 4 tool buttons, in add order.
         // Offsets are panel-relative: the panel's left edge sits at ToolbarX - 6.
         for (int i = 0; i < Children.Count; i++)
         {

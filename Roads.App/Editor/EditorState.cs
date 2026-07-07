@@ -19,6 +19,13 @@ public enum EditorTool
     /// <summary>Applies the road-toolbar options (type, width, one-way, shared-lane)
     /// to a clicked segment.</summary>
     UpdateSegment,
+    /// <summary>Rotates a traffic light's phase grouping on click (the signals-toolbar
+    /// "Rotate" tool).</summary>
+    SignalRotate,
+    /// <summary>Toggles the exemption of the clicked stop/yield approach (the
+    /// signals-toolbar "Exempt" tool; an exempt approach does not stop at its
+    /// node's sign).</summary>
+    SignalExempt,
 }
 
 /// <summary>

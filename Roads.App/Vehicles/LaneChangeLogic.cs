@@ -124,10 +124,13 @@ public static class LaneChangeLogic
 
             if (desiredLane != store.CurrentLane[i])
             {
-                // Don't attempt lane changes when nearly stopped (queued at a light).
-                // Vehicles creeping in a queue can't safely merge without overlap.
+                // Don't attempt lane changes when nearly stopped (queued at a light) —
+                // EXCEPT at critical merge urgency (a binding turn right ahead, e.g. held
+                // at the end of a terminating lane), where a zipper merge from standstill
+                // is the only way forward. IsLaneChangeSafe still gates on a real gap, and
+                // at low speed effectiveUrgency is 0 so the FULL gap thresholds apply.
                 float speed = store.Speed[i];
-                if (speed < 1.5f)
+                if (speed < 1.5f && store.MergeUrgency[i] < 0.8f)
                 {
                     store.LaneChangeCooldown[i] = 0.5f;
                     continue;

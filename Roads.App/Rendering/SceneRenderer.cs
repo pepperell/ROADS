@@ -249,6 +249,8 @@ public class SceneRenderer
             EditorTool.Destination => GetDestinationHoverColors(editorState),
             EditorTool.Signal     => (new SKColor(220, 200, 40, 50), new SKColor(220, 200, 40, 120)),
             EditorTool.SignalControl => (new SKColor(60, 190, 170, 50), new SKColor(60, 190, 170, 120)),
+            EditorTool.SignalRotate => (new SKColor(235, 140, 50, 50), new SKColor(235, 140, 50, 120)),
+            EditorTool.SignalExempt => (new SKColor(200, 90, 210, 50), new SKColor(200, 90, 210, 120)),
             EditorTool.UpdateSegment => (new SKColor(170, 110, 240, 50), new SKColor(170, 110, 240, 120)),
             _                     => (new SKColor(100, 200, 255, 50), new SKColor(100, 200, 255, 120)),
         };

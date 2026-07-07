@@ -700,6 +700,23 @@ public static class SteeringController
                 LogDiag(store, index, $"ARC_SKIP arcIdx={arcIdx} arcLen={arc.Length:F2} (too short)");
             }
 
+            // Wrong-lane hold: the planned turn exists — but only from another lane of this
+            // edge (e.g. a 2-lane one-way necking into 1 lane generates its merge arc from
+            // the outer lane only). Direct-transferring here would teleport the vehicle's
+            // logical position onto the outgoing edge while its body stays at the end of the
+            // terminating lane — an off-lane ghost that wedges the whole merge (the Bug-B
+            // overlap deadlock). Hold at the line instead; LaneChangeLogic's turn preparation
+            // (which allows standstill merges at critical urgency) moves the vehicle into the
+            // arc-bearing lane when a gap opens.
+            if (arcIdx < 0 && TurnServedByOtherLane(arcCache, graph, edgeIdx, nextEdge, inLane))
+            {
+                store.EdgeProgress[index] = stopAtT;
+                store.Throttle[index] = 0f;
+                store.Brake[index] = 1.0f;
+                store.Speed[index] = 0f;
+                return TransitionResult.Returned;
+            }
+
             // Direct edge-to-edge transition (no arc or arc too short)
             TransferToNextEdge(store, index, graph, stopLines,
                 ref edgeIdx, ref edge, ref edgeLength, ref progress, ref rawProgress,
@@ -724,8 +741,32 @@ public static class SteeringController
     }
 
     /// <summary>
-    /// Resolves the intersection arc for a lane transition, with reroute fallbacks.
-    /// May update path, pathIdx, nextEdge, and nextEdgeData if a reroute occurs.
+    /// True when the planned turn (edgeIdx → nextEdge) is drivable from SOME lane of the
+    /// current edge other than <paramref name="inLane"/> — i.e. the vehicle is merely in
+    /// the wrong lane for its turn (e.g. the through lane of a 2-lane road whose merge
+    /// arc exists only from the outer lane) and must merge over rather than transfer.
+    /// </summary>
+    private static bool TurnServedByOtherLane(IntersectionArcCache arcCache, RoadGraph graph,
+        int edgeIdx, int nextEdge, byte inLane)
+    {
+        byte laneCount = graph.Edges[edgeIdx].LaneCount;
+        for (byte lane = 0; lane < laneCount; lane++)
+        {
+            if (lane == inLane) continue;
+            var reachable = arcCache.GetReachableFromLane(edgeIdx, lane);
+            if (reachable == null) continue;
+            foreach (var (outEdge, _, _) in reachable)
+                if (outEdge == nextEdge) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Resolves the intersection arc for a lane transition: tries the lane-preserving
+    /// guesses first, then ANY arc from the current lane to the planned next edge (the
+    /// arc's own exit lane is authoritative — turn arcs may exit onto a different lane
+    /// index than they enter from), and only reroutes when no arc reaches the planned
+    /// edge at all. May update path, pathIdx, nextEdge, and nextEdgeData if a reroute occurs.
     /// </summary>
     private static int ResolveArc(VehicleStore store, int index, RoadGraph graph,
         IntersectionArcCache arcCache, int edgeIdx,
@@ -737,6 +778,28 @@ public static class SteeringController
 
         if (arcIdx < 0 && inLane != outLane)
             arcIdx = arcCache.GetArcIndex(edgeIdx, nextEdge, inLane, inLane);
+
+        // The generated arc's exit lane follows the geometry/restriction pairing (e.g. a
+        // right turn exits onto the OUTERMOST lane of the target road), which the guesses
+        // above cannot always predict — a right turn from a 1-lane road onto a 2-lane road
+        // is keyed (0 -> 1), not (0 -> 0). Before discarding the planned path and
+        // rerouting, accept ANY arc from this lane to the planned next edge; the arc
+        // carries the correct exit lane itself.
+        if (arcIdx < 0)
+        {
+            var toNext = arcCache.GetReachableFromLane(edgeIdx, inLane);
+            if (toNext != null)
+            {
+                foreach (var (outEdge, _, aIdx) in toNext)
+                {
+                    if (outEdge == nextEdge)
+                    {
+                        arcIdx = aIdx;
+                        break;
+                    }
+                }
+            }
+        }
 
         if (arcIdx < 0)
         {

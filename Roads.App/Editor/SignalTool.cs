@@ -4,10 +4,10 @@ using Roads.App.World;
 namespace Roads.App.Editor;
 
 /// <summary>
-/// Editor tool that cycles intersection signal types on click.
-/// A plain click cycles the node-level signal type; Shift+click tunes it — toggling
-/// per-edge stop/yield exemptions or rotating traffic light phase groupings (right-click
-/// is the universal tool-cancel, so tuning lives on the modifier).
+/// Editor tool backing the signals submenu: <see cref="OnClick"/> (the Change Type tool)
+/// cycles a node's signal type; <see cref="RotatePhase"/> (the Rotate tool) rotates a
+/// traffic light's phase grouping; <see cref="ToggleExemption"/> (the Exempt tool)
+/// toggles a stop/yield approach's exemption.
 /// </summary>
 public class SignalTool
 {
@@ -58,34 +58,39 @@ public class SignalTool
     }
 
     /// <summary>
-    /// Shift+click handler: toggles per-edge stop/yield exemptions, or rotates traffic light
-    /// phase groupings. For stop/yield nodes, finds the nearest incoming edge at the node and
-    /// toggles its exempt status. For traffic light nodes, rotates the phase pairing.
+    /// The Rotate tool's click handler: rotates the phase grouping of the nearest
+    /// traffic-light node (no-op on any other node).
+    /// </summary>
+    /// <param name="worldPos">Click position in world space.</param>
+    /// <param name="graph">Road graph containing the nodes.</param>
+    /// <param name="signals">Traffic signal system (owns the phase rotation).</param>
+    /// <returns><c>true</c> if a light's phases were rotated; otherwise <c>false</c>.</returns>
+    public bool RotatePhase(Vector2 worldPos, RoadGraph graph, TrafficSignalSystem signals)
+    {
+        int node = graph.FindNearestNode(worldPos, EditorState.SnapDistance);
+        if (node < 0 || !graph.Nodes[node].Flags.HasFlag(NodeFlags.TrafficLight)) return false;
+
+        signals.RotatePhase(node);
+        return true;
+    }
+
+    /// <summary>
+    /// The Exempt tool's click handler: at the nearest stop/yield node, toggles the
+    /// exemption of the incoming approach closest to the click (an exempt approach does
+    /// not stop/yield at the node's sign). No-op on nodes without a stop or yield sign.
     /// </summary>
     /// <param name="worldPos">Click position in world space.</param>
     /// <param name="graph">Road graph containing the nodes and edges.</param>
-    /// <param name="edgeGrid">Spatial grid for nearest-edge lookups.</param>
-    /// <param name="signals">Traffic signal system (for phase rotation).</param>
     /// <param name="stopSigns">Stop sign system (for edge exemptions).</param>
     /// <param name="yieldSigns">Yield sign system (for edge exemptions).</param>
-    /// <returns><c>true</c> if a signal property was changed; otherwise <c>false</c>.</returns>
-    public bool TuneSignal(Vector2 worldPos, RoadGraph graph, EdgeSpatialGrid edgeGrid,
-        TrafficSignalSystem signals, StopSignSystem stopSigns, YieldSignSystem yieldSigns)
+    /// <returns><c>true</c> if an approach's exemption was toggled; otherwise <c>false</c>.</returns>
+    public bool ToggleExemption(Vector2 worldPos, RoadGraph graph,
+        StopSignSystem stopSigns, YieldSignSystem yieldSigns)
     {
-        // First, try to find a signal node near the click
         int node = graph.FindNearestNode(worldPos, EditorState.SnapDistance);
         if (node < 0) return false;
 
         var flags = graph.Nodes[node].Flags;
-
-        // Traffic light node: rotate phase grouping
-        if (flags.HasFlag(NodeFlags.TrafficLight))
-        {
-            signals.RotatePhase(node);
-            return true;
-        }
-
-        // Stop sign or yield node: toggle the nearest incoming edge's exemption
         bool isStop = flags.HasFlag(NodeFlags.StopSign);
         bool isYield = flags.HasFlag(NodeFlags.Yield);
         if (!isStop && !isYield) return false;
@@ -109,8 +114,9 @@ public class SignalTool
     /// <summary>
     /// Finds the incoming edge at a node whose approach end is closest to the click position.
     /// Evaluates each incoming edge at t=0.9 (near the node) and picks the nearest.
+    /// Public so the Exempt tool's hover highlight can target the same approach a click would.
     /// </summary>
-    private static int FindNearestIncomingEdge(Vector2 worldPos, RoadGraph graph, int nodeIndex)
+    public static int FindNearestIncomingEdge(Vector2 worldPos, RoadGraph graph, int nodeIndex)
     {
         var incoming = graph.GetIncomingEdges(nodeIndex);
         int bestEdge = -1;

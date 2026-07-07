@@ -30,9 +30,10 @@ namespace Roads.App.Diagnostics;
 /// Paused dependency); the seeded RNG is what upgrades that to full run-to-run reproducibility.
 ///
 /// Wiring is replicated EXACTLY from MainForm so swap-pop removal index fixup and edge-split
-/// exemption migration behave identically. Vehicles are intentionally NOT loaded — fresh
+/// exemption migration behave identically. Vehicles are NOT loaded by default — fresh
 /// schedule/region-driven traffic is what produces the jams over time, and autosaves don't store
-/// vehicles anyway.
+/// vehicles anyway; pass loadVehicles=true (CLI --simvehicles) to replay a live jam captured
+/// with an in-app save instead.
 ///
 /// ANOMALIES / Debug.Assert: unlike the GUI (where a failed Debug.Assert fail-fasts the process),
 /// the headless harness installs an <see cref="AnomalyTraceListener"/> that records the assertion
@@ -54,8 +55,13 @@ public static class SimTestHarness
     /// found, 1 if any. Writes the report to <paramref name="outPath"/>. <paramref name="seed"/>
     /// seeds <see cref="SimRandom"/> so the run is reproducible — two calls with the same map,
     /// hours and seed produce identical results.
+    /// <paramref name="loadVehicles"/> loads the map's saved vehicles instead of starting from
+    /// fresh traffic — use it to replay a live jam captured with an in-app save.
+    /// <paramref name="diagVehicle"/> (&gt;= 0) streams that vehicle's per-tick steering/physics
+    /// diagnostics to diag.log for the whole run.
     /// </summary>
-    public static int Run(string mapFile, float hours, string outPath, int seed = 12345)
+    public static int Run(string mapFile, float hours, string outPath, int seed = 12345,
+        bool loadVehicles = false, int diagVehicle = -1)
     {
         // Make the run REPRODUCIBLE: seed the simulation RNG before ANY load/spawn/step so every
         // spawn/destination/reroute/personality/schedule/lane/region/signal draw is identical
@@ -122,9 +128,15 @@ public static class SimTestHarness
         }
 
         MapSerializer.Load(path, graph, vehicles, camera, sim.Clock, stopSigns, yieldSigns,
-            trafficSignals, population, loadVehicles: false);
+            trafficSignals, population, loadVehicles: loadVehicles);
         sim.RebuildWorldCaches();
         sim.Paused = false;
+
+        if (diagVehicle >= 0)
+        {
+            vehicles.DiagVehicle = diagVehicle;
+            SteeringController.DebugLoggingEnabled = true;
+        }
 
         double clockStart = sim.Clock.TimeOfDay;
         int dayStart = sim.Clock.DayNumber;

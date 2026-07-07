@@ -117,6 +117,7 @@ public class MainForm : Form
         _uiRoot.Add(new Ui.MenuBar(_editorState, OnUiAction));
         _uiRoot.Add(new Ui.PoiSubmenu(_editorState));
         _uiRoot.Add(new Ui.RoadSubmenu(_editorState));
+        _uiRoot.Add(new Ui.SignalSubmenu(_editorState));
         _uiRoot.Add(new Ui.LegendPanel());
         _uiRoot.Add(new Ui.ClockPanel(_simLoop, OnUiAction));
         _uiRoot.Add(_sliderPanel);
@@ -1010,8 +1011,8 @@ public class MainForm : Form
 
     /// <summary>
     /// Handles mouse-down: middle button starts panning, left button dispatches to the
-    /// retained-mode UI first, then the active editor tool (Select, Road, Node, Delete,
-    /// Destination, Signal). Right button is the universal cancel (see
+    /// retained-mode UI first, then the active editor tool (one case per
+    /// <see cref="EditorTool"/> value). Right button is the universal cancel (see
     /// <see cref="CancelActiveTool"/>).
     /// </summary>
     private void OnCanvasMouseDown(object? sender, MouseEventArgs e)
@@ -1130,14 +1131,15 @@ public class MainForm : Form
                     }
                     break;
                 case EditorTool.Signal:
-                    // Shift+click tunes the signal (per-edge stop/yield exemption or
-                    // light-phase rotation — formerly on right-click, which is now the
-                    // universal cancel); a plain click cycles the node's signal type.
-                    if ((ModifierKeys & Keys.Shift) != 0)
-                        _signalTool.TuneSignal(worldVec, _roadGraph, _edgeSpatialGrid,
-                            _trafficSignals, _stopSigns, _yieldSigns);
-                    else
-                        _signalTool.OnClick(worldVec, _roadGraph);
+                    // Change Type: a click cycles the node's signal type. Tuning lives on
+                    // the signals submenu's dedicated Rotate tool.
+                    _signalTool.OnClick(worldVec, _roadGraph);
+                    break;
+                case EditorTool.SignalRotate:
+                    _signalTool.RotatePhase(worldVec, _roadGraph, _trafficSignals);
+                    break;
+                case EditorTool.SignalExempt:
+                    _signalTool.ToggleExemption(worldVec, _roadGraph, _stopSigns, _yieldSigns);
                     break;
                 case EditorTool.SignalControl:
                 {
@@ -1454,6 +1456,27 @@ public class MainForm : Form
                 {
                     _editorState.HoveredEdge = -1;
                     _editorState.HoveredNode = _roadGraph.FindNearestNode(worldVec, EditorState.SnapDistance);
+                    break;
+                }
+                case EditorTool.SignalRotate:
+                {
+                    // Only traffic-light nodes are valid rotate targets.
+                    _editorState.HoveredEdge = -1;
+                    int rotNode = _roadGraph.FindNearestNode(worldVec, EditorState.SnapDistance);
+                    _editorState.HoveredNode = rotNode >= 0
+                        && _roadGraph.Nodes[rotNode].Flags.HasFlag(NodeFlags.TrafficLight) ? rotNode : -1;
+                    break;
+                }
+                case EditorTool.SignalExempt:
+                {
+                    // Highlight the exact approach edge a click would toggle: the incoming
+                    // edge nearest the cursor at the nearest stop/yield node.
+                    _editorState.HoveredNode = -1;
+                    _editorState.HoveredEdge = -1;
+                    int exNode = _roadGraph.FindNearestNode(worldVec, EditorState.SnapDistance);
+                    if (exNode >= 0 && (_roadGraph.Nodes[exNode].Flags
+                            & (NodeFlags.StopSign | NodeFlags.Yield)) != 0)
+                        _editorState.HoveredEdge = SignalTool.FindNearestIncomingEdge(worldVec, _roadGraph, exNode);
                     break;
                 }
                 case EditorTool.SignalControl:
