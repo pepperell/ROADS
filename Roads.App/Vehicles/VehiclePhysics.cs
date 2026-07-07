@@ -6,11 +6,12 @@ namespace Roads.App.Vehicles;
 /// Bicycle-model kinematic physics for vehicles. Simulates front-wheel steering
 /// by independently moving front and rear wheel positions, then deriving the
 /// new heading and center position. Applies throttle/brake to update speed.
+/// The wheelbase scales with the vehicle type's body length
+/// (<see cref="VehicleTypeDimensions.GetWheelbase"/>), so long vehicles turn on a
+/// wider radius and change heading more slowly than sedans or motorcycles.
 /// </summary>
 public static class VehiclePhysics
 {
-    /// <summary>Distance in meters between front and rear axle.</summary>
-    private const float Wheelbase = 2.5f;
 
     /// <summary>
     /// Performs a bicycle-model kinematic update for a single vehicle.
@@ -32,7 +33,7 @@ public static class VehiclePhysics
         float sinH = MathF.Sin(heading);
 
         // Front and rear wheel positions
-        float halfWb = Wheelbase * 0.5f;
+        float halfWb = VehicleTypeDimensions.GetWheelbase(store.PreferredVehicle[index]) * 0.5f;
         float fx = store.PosX[index] + halfWb * cosH;
         float fy = store.PosY[index] + halfWb * sinH;
         float rx = store.PosX[index] - halfWb * cosH;

@@ -9,10 +9,12 @@ public static class SimConstants
     /// <summary>Lane width in meters.</summary>
     public const float LaneWidth = 3.5f;
 
-    /// <summary>Vehicle body length in meters.</summary>
+    /// <summary>Sedan-baseline vehicle body length in meters. Physics and rendering use the
+    /// PER-TYPE dimensions in <c>VehicleTypeDimensions</c> (whose Sedan entry equals this);
+    /// this constant remains for sedan-calibrated safety margins and fixed-size visuals.</summary>
     public const float VehicleLength = 4.5f;
 
-    /// <summary>Vehicle body width in meters.</summary>
+    /// <summary>Sedan-baseline vehicle body width in meters (see <see cref="VehicleLength"/>).</summary>
     public const float VehicleWidth = 2.0f;
 
     // IDM maximum acceleration is per-driver/per-type — see SteeringController.EffectiveMaxAccel

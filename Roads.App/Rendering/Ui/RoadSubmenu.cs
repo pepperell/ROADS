@@ -10,11 +10,13 @@ namespace Roads.App.Rendering.Ui;
 /// (Add Road / Add Node / Delete / Update Seg — the latter three live ONLY here, not on
 /// the main toolbar). Row 2 holds the sticky road options applied by the Road and Update
 /// Segment tools: road-type group, per-direction width group (1x–3x; disabled beyond 1x
-/// while shared-lane is checked, since a shared lane is single-lane by definition), and
+/// while shared-lane is checked, since a shared lane is single-lane by definition),
 /// <see cref="Checkbox"/>es for one-way and single-lane two-way (mutually exclusive —
 /// the <see cref="EditorState"/> setters enforce it; the live accessors make the visuals
-/// follow). Visibility is a live <see cref="Panel.VisibleWhen"/> gate on the active tool,
-/// covering both drawing and hit-testing. The background pad consumes clicks.
+/// follow), and the Straight/Curved drawing-mode group (curved = each new segment leaves
+/// its start tangent to the previous one; Road tool only). Visibility is a live
+/// <see cref="Panel.VisibleWhen"/> gate on the active tool, covering both drawing and
+/// hit-testing. The background pad consumes clicks.
 /// </summary>
 public class RoadSubmenu : Panel
 {
@@ -138,7 +140,30 @@ public class RoadSubmenu : Panel
             Size = new SKSize(SharedCheckboxWidth, ButtonHeight),
             Offset = new SKPoint(x, rowY),
         });
-        float row2Width = x + SharedCheckboxWidth - Pad;
+        x += SharedCheckboxWidth + GroupGap;
+
+        // Drawing-mode group: straight segments vs. tangent-continuous curves.
+        var modes = new[] { (label: "Straight", curved: false), (label: "Curved", curved: true) };
+        foreach (var (label, curved) in modes)
+        {
+            bool isCurved = curved;
+            var button = new Button
+            {
+                Text = label,
+                Font = UiTheme.Font11,
+                TextOffset = new SKPoint(0f, 4f),
+                Size = new SKSize(SizeButtonWidth, ButtonHeight),
+                Offset = new SKPoint(x, rowY),
+                Idle = new ButtonColors(new SKColor(55, 58, 65), new SKColor(180, 180, 180)),
+                Hover = new ButtonColors(new SKColor(75, 80, 90), SKColors.White),
+                Active = new ButtonColors(new SKColor(60, 130, 200), SKColors.White),
+                IsActive = () => editorState.SelectedCurved == isCurved,
+            };
+            button.Click += () => editorState.SelectedCurved = isCurved;
+            Add(button);
+            x += SizeButtonWidth + ButtonSpacing;
+        }
+        float row2Width = x - ButtonSpacing - Pad;
 
         // Anchored under the Road tool button (index 1), padded like the POI submenu.
         Margin = new SKPoint(MenuBar.ToolButtonLeft(1) - Pad, MenuBar.SubmenuY - Pad);

@@ -506,7 +506,9 @@ public class MainForm : Form
             if (MathF.Abs(la) > 5f) continue;
             if (fwd < bestFwd) { bestFwd = fwd; best = o; lateral = la; }
         }
-        if (best >= 0) gap = bestFwd - SimConstants.VehicleLength;
+        if (best >= 0)
+            gap = bestFwd - Vehicles.VehicleTypeDimensions.GetHalfLength(_vehicles.PreferredVehicle[v])
+                - Vehicles.VehicleTypeDimensions.GetHalfLength(_vehicles.PreferredVehicle[best]);
         return best;
     }
 
@@ -1318,6 +1320,8 @@ public class MainForm : Form
         _editorState.NodeGhostPos = null;
         _editorState.RoadCrossingPreviews.Clear();
         _editorState.RoadAnchorGhostPos = null;
+        _editorState.RoadPreviewCp1 = null;
+        _editorState.RoadPreviewCp2 = null;
 
         // A captured UI drag (minimap scrub, slider thumb) owns every move until release,
         // even with the cursor far outside the panel. Capture with NO button held is
@@ -1521,7 +1525,7 @@ public class MainForm : Form
                     _editorState.RoadAnchorGhostPos = anchorGhost;
 
                     // Ghost the intersection nodes the in-progress segment will create
-                    // where the preview line crosses existing roads (the commit runs the
+                    // where the preview crosses existing roads (the commit runs the
                     // same crossing detection on the real edge). The segment ends at the
                     // SNAPPED anchor, matching the edge the commit creates. Cleared at
                     // the top of this handler, so the list is stale-free on every path.
@@ -1541,8 +1545,23 @@ public class MainForm : Form
                         {
                             startPos = _editorState.RoadStartAnchorPos!.Value;
                         }
-                        _roadGraph.FindSegmentCrossings(startPos, anchorGhost, ignoreNode,
-                            _editorState.RoadStartEdge, _editorState.RoadCrossingPreviews);
+
+                        // Curved mode: preview the same tangent-continuous Bezier the
+                        // commit will create, and probe crossings along it.
+                        if (_editorState.SelectedCurved
+                            && RoadTool.TryGetChainTangent(_roadGraph, _editorState) is { } tangent)
+                        {
+                            var (cp1, cp2) = RoadTool.ComputeCurveControls(startPos, anchorGhost, tangent);
+                            _editorState.RoadPreviewCp1 = cp1;
+                            _editorState.RoadPreviewCp2 = cp2;
+                            _roadGraph.FindCurveCrossings(startPos, cp1, cp2, anchorGhost,
+                                ignoreNode, _editorState.RoadStartEdge, _editorState.RoadCrossingPreviews);
+                        }
+                        else
+                        {
+                            _roadGraph.FindSegmentCrossings(startPos, anchorGhost, ignoreNode,
+                                _editorState.RoadStartEdge, _editorState.RoadCrossingPreviews);
+                        }
                     }
                     break;
                 }

@@ -31,8 +31,17 @@ public static class SteeringController
 
     /// <summary>Search radius in meters for nearby vehicle queries.</summary>
     private const float CollisionSearchRadius = 30f;
-    /// <summary>Vehicle body length in meters.</summary>
-    private const float VehicleLength = SimConstants.VehicleLength;
+
+    /// <summary>Body length in meters of vehicle <paramref name="i"/> (per-type, from
+    /// <see cref="VehicleTypeDimensions"/>).</summary>
+    private static float Len(VehicleStore store, int i)
+        => VehicleTypeDimensions.GetLength(store.PreferredVehicle[i]);
+
+    /// <summary>Half body length in meters of vehicle <paramref name="i"/> — its
+    /// bumper-to-center distance. Center-to-center distances convert to bumper-to-bumper
+    /// gaps by subtracting BOTH vehicles' half-lengths.</summary>
+    private static float HalfLen(VehicleStore store, int i)
+        => VehicleTypeDimensions.GetHalfLength(store.PreferredVehicle[i]);
 
 
     /// <summary>IDM minimum bumper-to-bumper gap in meters (s0).</summary>
@@ -241,7 +250,11 @@ public static class SteeringController
         buf.Clear();
         float vx = store.PosX[i], vy = store.PosY[i];
         float cosH = MathF.Cos(store.Heading[i]), sinH = MathF.Sin(store.Heading[i]);
-        grid.QueryFiltered(vx, vy, VehicleLength * 1.2f, store.PosX, store.PosY, buf);
+        float myHalf = HalfLen(store, i);
+        // Radius must cover the pair test below for ANY other vehicle type, so it is bounded
+        // by the longest type's half-length rather than this vehicle's own.
+        grid.QueryFiltered(vx, vy, (myHalf + VehicleTypeDimensions.MaxHalfLength) * 1.1f,
+            store.PosX, store.PosY, buf);
         foreach (int j in buf)
         {
             if (j == i || store.State[j] != VehicleState.Driving) continue;
@@ -249,7 +262,15 @@ public static class SteeringController
             float dx = store.PosX[j] - vx, dy = store.PosY[j] - vy;
             float forward = MathF.Abs(dx * cosH + dy * sinH);
             float lateral = MathF.Abs(-dx * sinH + dy * cosH);
-            if (forward < VehicleLength * 0.9f && lateral < VehicleLength * 0.6f) return true;
+            // Bodies overlap when the center distance drops under the pair's summed
+            // half-lengths; the 0.9/0.6 factors keep the deliberate tightness described
+            // above. The lateral bound is additionally capped below the lane width so two
+            // LONG vehicles legitimately sitting side-by-side in adjacent lanes (3.5 m
+            // apart) can never read as a wedge — an uncapped pair bound would exceed the
+            // lane spacing and let the breaker creep a queued bus through a red light.
+            float pairHalf = myHalf + HalfLen(store, j);
+            float lateralBound = MathF.Min(pairHalf * 0.6f, SimConstants.LaneWidth * 0.8f);
+            if (forward < pairHalf * 0.9f && lateral < lateralBound) return true;
         }
         return false;
     }
@@ -263,7 +284,7 @@ public static class SteeringController
     {
         var buf = _overlapBuffer ??= new List<int>();
         buf.Clear();
-        grid.QueryFiltered(store.PosX[i], store.PosY[i], VehicleLength * 3f, store.PosX, store.PosY, buf);
+        grid.QueryFiltered(store.PosX[i], store.PosY[i], Len(store, i) * 3f, store.PosX, store.PosY, buf);
         foreach (int j in buf)
         {
             if (j == i || store.State[j] != VehicleState.Driving) continue;
@@ -386,10 +407,16 @@ public static class SteeringController
         // Evaluate signals, stop signs, and yield signs
         var (signal, yieldSignal) = EvaluateSignals(store, index, edgeIdx, graph, signals, stopSigns, yieldSigns);
 
-        // Compute stop-line position in t-space
+        // Compute stop-line position in t-space (center stops a half body-length short of
+        // the line, so the FRONT bumper — not the center — lands on it, per vehicle type).
+        // Clamped to the edge's ENTRY stop line: on an edge shorter than the vehicle's
+        // half-length the raw target would be negative — an unrepresentable position that
+        // holds could write into EdgeProgress, making the vehicle invisible to the
+        // stop-sign FCFS (which requires progress > 0) and deadlocking the node. A long
+        // vehicle instead waits at the edge start with its nose protruding past the line.
         float stopT = stopLines.GetStopTAtToNode(edgeIdx);
-        float halfVehT = (VehicleLength * 0.5f) / edgeLength;
-        float stopAtT = stopT - halfVehT;
+        float halfVehT = HalfLen(store, index) / edgeLength;
+        float stopAtT = MathF.Max(stopT - halfVehT, minProgressT);
 
         // Block crossing on red
         if (CheckRedLightBlocking(store, index, signal, speed, progress, stopAtT, edgeLength, store.BrakingComfort[index]))
@@ -576,15 +603,17 @@ public static class SteeringController
                         {
                             float outLength = MathF.Max(outEdgeData.Length, 0.01f);
                             float outStartT = stopLines.GetStopTAtFromNode(outEdge);
-                            // Candidates lie within VehicleLength*2 of the exit point (arc.P3 = the
-                            // out-lane start), so query the grid around P3 instead of scanning every
-                            // vehicle. The exact edgeDist cutoff is re-applied below, so this is an
-                            // exact superset of the original full scan (no false negatives).
+                            // Candidates lie within the pair-length cutoff of the exit point (arc.P3
+                            // = the out-lane start), so query the grid around P3 instead of scanning
+                            // every vehicle. The radius uses the longest type's half-length so it is
+                            // a superset of the per-pair cutoff re-applied below (no false negatives).
+                            float myHalf = HalfLen(store, index);
                             var exitPoint = arc.P3;
                             var scan2 = _scan2Buffer ??= new List<int>();
                             scan2.Clear();
                             grid.QueryFiltered(exitPoint.X, exitPoint.Y,
-                                VehicleLength * 2f + SpatialGrid.CellSize,
+                                myHalf + VehicleTypeDimensions.MaxHalfLength
+                                    + SimConstants.VehicleLength + SpatialGrid.CellSize,
                                 store.PosX, store.PosY, scan2);
                             for (int bi = 0; bi < scan2.Count; bi++)
                             {
@@ -596,8 +625,10 @@ public static class SteeringController
                                 // Only block if this vehicle is actively lane-changing into our exit lane
                                 if (store.TargetLane[j] != outLane) continue;
 
+                                // Blocked while the merger's body plus a sedan-length safety margin
+                                // still covers the exit throat (pair half-lengths, per vehicle type).
                                 float edgeDist = (store.EdgeProgress[j] - outStartT) * outLength;
-                                if (edgeDist < VehicleLength * 2f)
+                                if (edgeDist < myHalf + HalfLen(store, j) + SimConstants.VehicleLength)
                                 {
                                     store.EdgeProgress[index] = stopAtT;
                                     store.Throttle[index] = 0f;
@@ -904,8 +935,10 @@ public static class SteeringController
         float biasedSpeedN = baseSpeedLimit * store.SpeedBias[index];
         targetSpeed = Math.Clamp(biasedSpeedN + store.MergeSpeedBias[index], 0f, biasedSpeedN * 1.15f);
         stopT = stopLines.GetStopTAtToNode(edgeIdx);
-        halfVehT = (VehicleLength * 0.5f) / edgeLength;
-        stopAtT = stopT - halfVehT;
+        halfVehT = HalfLen(store, index) / edgeLength;
+        // Same entry-stop-line clamp as Update(): a long vehicle on a short edge must not
+        // get a stop target before the edge start (see the stopAtT comment there).
+        stopAtT = MathF.Max(stopT - halfVehT, nextStartT);
 
         rawProgress = FindNearestT(graph, edgeIdx, vx, vy, progress);
 
@@ -945,7 +978,7 @@ public static class SteeringController
         // Signed lateral error from lane center (suppressed near intersection entry)
         float distFromEntry = (progress - minProgressT) * edgeLength;
         float lateralError = 0f;
-        if (distFromEntry > VehicleLength * 2f)
+        if (distFromEntry > Len(store, index) * 2f)
         {
             var laneCenter = OffsetRight(graph, edgeIdx, progress, laneOffset);
             var curveTangent = graph.EvaluateBezierTangent(edgeIdx, progress);
@@ -990,9 +1023,13 @@ public static class SteeringController
         float timeHeadway = MapAggressivenessToTimeHeadway(store.Aggressiveness[index]);
         bool breakerFront = BreakerFront(index);
 
-        var (aheadDist, leaderSpeed) = FindNearbyThreats(store, index, grid, graph);
+        var (aheadDist, leaderSpeed, leaderIdx) = FindNearbyThreats(store, index, grid, graph);
 
-        float gap = aheadDist - VehicleLength;
+        // Center-to-center leader distance → bumper-to-bumper gap: subtract BOTH
+        // half-lengths (mine and the leader's actual type — a bus body reaches 6 m
+        // back from its center, a motorcycle barely 1 m).
+        float gap = aheadDist - HalfLen(store, index)
+            - (leaderIdx >= 0 ? HalfLen(store, leaderIdx) : 0f);
         float deltaV = speed - leaderSpeed;
 
         // Signal compliance: treat red/yellow as virtual stopped leader at stop line
@@ -1087,13 +1124,14 @@ public static class SteeringController
         var projPos = arcCache.EvaluateArc(arcIdx, arcProgress);
         float distToProj = MathF.Sqrt((vx - projPos.X) * (vx - projPos.X) + (vy - projPos.Y) * (vy - projPos.Y));
         float remainingDist = (1f - arcProgress) * arcLength;
-        if (distToEnd < distToProj || distToEnd < VehicleLength * 0.5f)
+        float myHalfLen = HalfLen(store, index);
+        if (distToEnd < distToProj || distToEnd < myHalfLen)
             remainingDist = 0f; // force arc completion
 
         LogDiag(store, index, $"TICK_ARC proj={arcProgress:F4} distEnd={distToEnd:F2} distProj={distToProj:F2}");
 
-        // Check for arc completion (distance-based)
-        if (remainingDist < VehicleLength * 0.5f)
+        // Check for arc completion (distance-based, at half the vehicle's own body length)
+        if (remainingDist < myHalfLen)
         {
             // Exit arc, enter next edge
             var path = store.Path[index];
@@ -1165,7 +1203,7 @@ public static class SteeringController
                         if (store.CurrentEdge[j] != nextEdge || store.CurrentArc[j] >= 0) continue;
                         float otherProg = store.EdgeProgress[j];
                         float progDist = MathF.Abs(otherProg - nextStartT) * nextLength;
-                        if (progDist < VehicleLength * 2f)
+                        if (progDist < (myHalfLen + HalfLen(store, j)) * 2f)
                         {
                             LogArcConflict(store, index,
                                 $"ARC_EXIT_OVERLAP edge={nextEdge} myStartT={nextStartT:F4} " +
@@ -1222,8 +1260,7 @@ public static class SteeringController
         // IDM car-following (world-space, works regardless of edge/arc)
         float arcBaseSpeed = arc.SpeedLimit > 0f ? arc.SpeedLimit : TargetSpeed;
         float targetSpeed = arcBaseSpeed * store.SpeedBias[index];
-        var (aheadDist, leaderSpeed) = FindVehicleAhead(store, index, grid, graph);
-        int leaderIndex = -1; // track leader for conflict logging
+        var (aheadDist, leaderSpeed, leaderIndex) = FindVehicleAhead(store, index, grid, graph);
 
         // Same-arc look-ahead: if another vehicle is ahead on this arc, use path distance.
         // The occupancy index holds exactly the vehicles whose CurrentArc == arcIdx, so this is
@@ -1284,7 +1321,9 @@ public static class SteeringController
             }
         }
 
-        float gap = aheadDist - VehicleLength;
+        // Bumper-to-bumper gap from center-to-center distance (both half-lengths, per type)
+        float gap = aheadDist - myHalfLen
+            - (leaderIndex >= 0 ? HalfLen(store, leaderIndex) : 0f);
         float deltaV = speed - leaderSpeed;
 
         if (ApplyHardOverlapBrake(store, index, gap))
@@ -1463,11 +1502,12 @@ public static class SteeringController
     }
 
     /// <summary>
-    /// Combined nearby vehicle scan: performs a single spatial query and computes both the
-    /// lane-aware leader (ahead distance + speed) and the omnidirectional proximity distance.
-    /// Replaces the previous two separate queries (FindVehicleAhead + FindNearestVehicleDistance).
+    /// Combined nearby vehicle scan: performs a single spatial query and computes the
+    /// lane-aware leader — its center-to-center ahead distance, speed, and vehicle index
+    /// (-1 when nothing is ahead). Callers convert the distance to a bumper-to-bumper gap
+    /// by subtracting both vehicles' half-lengths, using the index for the leader's type.
     /// </summary>
-    private static (float aheadDist, float leaderSpeed) FindNearbyThreats(
+    private static (float aheadDist, float leaderSpeed, int leaderIdx) FindNearbyThreats(
         VehicleStore store, int index, SpatialGrid grid, RoadGraph graph)
     {
         float vx = store.PosX[index];
@@ -1493,7 +1533,7 @@ public static class SteeringController
                 // If heading diverges significantly from road (> 60° off), skip threats
                 float alignDot = cosH * fwdCos + sinH * fwdSin;
                 if (alignDot < 0.5f)
-                    return (float.MaxValue, 0f);
+                    return (float.MaxValue, 0f, -1);
             }
         }
 
@@ -1503,6 +1543,7 @@ public static class SteeringController
 
         float minAheadDist = float.MaxValue;
         float leaderSpeed = 0f;
+        int leaderIdx = -1;
 
         foreach (int other in nearby)
         {
@@ -1553,6 +1594,7 @@ public static class SteeringController
                     {
                         minAheadDist = pathDist;
                         leaderSpeed = store.Speed[other];
+                        leaderIdx = other;
                     }
                 }
             }
@@ -1567,20 +1609,21 @@ public static class SteeringController
                     {
                         minAheadDist = forward;
                         leaderSpeed = store.Speed[other];
+                        leaderIdx = other;
                     }
                 }
             }
 
         }
 
-        return (minAheadDist, leaderSpeed);
+        return (minAheadDist, leaderSpeed, leaderIdx);
     }
 
     /// <summary>
-    /// Finds the distance and speed of the nearest vehicle ahead in the forward cone.
-    /// Delegates to <see cref="FindNearbyThreats"/> (returns only the ahead component).
+    /// Finds the center distance, speed, and index of the nearest vehicle ahead in the
+    /// forward cone. Delegates to <see cref="FindNearbyThreats"/>.
     /// </summary>
-    private static (float distance, float leaderSpeed) FindVehicleAhead(VehicleStore store, int index, SpatialGrid grid, RoadGraph graph)
+    private static (float distance, float leaderSpeed, int leaderIdx) FindVehicleAhead(VehicleStore store, int index, SpatialGrid grid, RoadGraph graph)
         => FindNearbyThreats(store, index, grid, graph);
 
     /// <summary>

@@ -34,10 +34,14 @@ public static class LaneChangeLogic
     private const float SafeGapMinDistance = 2.0f;
     /// <summary>Time-based component of the safe-gap threshold for lane changes (seconds).</summary>
     private const float SafeGapTimeBuffer = 1.0f;
-    /// <summary>Vehicle body length in meters (for gap calculations).</summary>
-    private const float VehicleLength = SimConstants.VehicleLength;
     /// <summary>Search radius in meters for nearby vehicle queries during gap checks.</summary>
     private const float CollisionSearchRadius = 40f;
+
+    /// <summary>Half body length in meters of vehicle <paramref name="i"/> (per-type, from
+    /// <see cref="VehicleTypeDimensions"/>). Center-to-center distances convert to
+    /// bumper-to-bumper gaps by subtracting BOTH vehicles' half-lengths.</summary>
+    private static float HalfLen(VehicleStore store, int i)
+        => VehicleTypeDimensions.GetHalfLength(store.PreferredVehicle[i]);
     /// <summary>If speed drops below this fraction of the speed limit, consider a passing lane change.</summary>
     private const float CongestionSpeedRatio = 0.6f;
 
@@ -389,9 +393,11 @@ public static class LaneChangeLogic
 
     /// <summary>
     /// Scans nearby vehicles to find the nearest ahead and behind in a target lane.
+    /// Distances are center-to-center; the accompanying vehicle indices (-1 when that side
+    /// is clear) let callers subtract the actual half-lengths of the vehicles involved.
     /// Shared by IsLaneChangeSafe and ApplyMergeSpeedBias.
     /// </summary>
-    private static (float nearestAhead, float nearestBehind) ScanTargetLaneGaps(
+    private static (float nearestAhead, int aheadIdx, float nearestBehind, int behindIdx) ScanTargetLaneGaps(
         VehicleStore store, int index, byte targetLane, RoadGraph graph, SpatialGrid grid,
         IntersectionArcCache? arcCache = null, StopLineCache? stopLines = null)
     {
@@ -427,6 +433,8 @@ public static class LaneChangeLogic
 
         float nearestAhead = float.MaxValue;
         float nearestBehind = float.MaxValue;
+        int aheadIdx = -1;
+        int behindIdx = -1;
 
         foreach (int other in nearby)
         {
@@ -461,9 +469,15 @@ public static class LaneChangeLogic
             if (!inTargetLane) continue;
 
             if (dist > 0f && dist < nearestAhead)
+            {
                 nearestAhead = dist;
+                aheadIdx = other;
+            }
             else if (dist <= 0f && -dist < nearestBehind)
+            {
                 nearestBehind = -dist;
+                behindIdx = other;
+            }
         }
 
         // Check vehicles on arcs that will exit onto our edge in the target lane.
@@ -493,13 +507,16 @@ public static class LaneChangeLogic
                         float otherRemaining = (1f - store.ArcProgress[j]) * otherArcData.Length;
                         float behindDist = distFromStart + otherRemaining;
                         if (behindDist < nearestBehind)
+                        {
                             nearestBehind = behindDist;
+                            behindIdx = j;
+                        }
                     }
                 }
             }
         }
 
-        return (nearestAhead, nearestBehind);
+        return (nearestAhead, aheadIdx, nearestBehind, behindIdx);
     }
 
     /// <summary>
@@ -508,7 +525,7 @@ public static class LaneChangeLogic
     /// </summary>
     private static bool IsLaneChangeSafe(VehicleStore store, int index, byte targetLane, RoadGraph graph, SpatialGrid grid, IntersectionArcCache arcCache, StopLineCache stopLines, float urgency = 0f)
     {
-        var (nearestAhead, nearestBehind) = ScanTargetLaneGaps(store, index, targetLane, graph, grid, arcCache, stopLines);
+        var (nearestAhead, aheadIdx, nearestBehind, behindIdx) = ScanTargetLaneGaps(store, index, targetLane, graph, grid, arcCache, stopLines);
 
         float speed = store.Speed[index];
         float maxReduction = MaxUrgencyGapReduction + store.Aggressiveness[index] * 0.2f;
@@ -519,8 +536,11 @@ public static class LaneChangeLogic
         safeGapAhead = MathF.Max(safeGapAhead, AbsoluteMinGapAhead);
         safeGapBehind = MathF.Max(safeGapBehind, AbsoluteMinGapBehind);
 
-        return (nearestAhead - VehicleLength) >= safeGapAhead
-            && (nearestBehind - VehicleLength) >= safeGapBehind;
+        // Center distances → bumper gaps using the actual half-lengths of both vehicles
+        float myHalf = HalfLen(store, index);
+        float gapAhead = nearestAhead - myHalf - (aheadIdx >= 0 ? HalfLen(store, aheadIdx) : 0f);
+        float gapBehind = nearestBehind - myHalf - (behindIdx >= 0 ? HalfLen(store, behindIdx) : 0f);
+        return gapAhead >= safeGapAhead && gapBehind >= safeGapBehind;
     }
 
     /// <summary>
@@ -555,7 +575,7 @@ public static class LaneChangeLogic
             byte desiredLane = store.MergeUrgency[i] > 0f ? FindDesiredAdjacentLane(store, i) : store.CurrentLane[i];
             if (desiredLane == store.CurrentLane[i]) { store.MergeSpeedBias[i] = 0f; continue; }
 
-            var (nearestAhead, nearestBehind) = ScanTargetLaneGaps(store, i, desiredLane, graph, grid, arcCache, stopLines);
+            var (nearestAhead, aheadIdx, nearestBehind, behindIdx) = ScanTargetLaneGaps(store, i, desiredLane, graph, grid, arcCache, stopLines);
 
             // Find the gap center and compute bias
             float urgency = store.MergeUrgency[i];
@@ -563,9 +583,13 @@ public static class LaneChangeLogic
 
             if (nearestAhead < float.MaxValue && nearestBehind < float.MaxValue)
             {
-                // Only bias toward gap if it's large enough for the vehicle to fit
-                float totalGap = nearestAhead + nearestBehind - VehicleLength;
-                if (totalGap < VehicleLength * 0.5f)
+                // Only bias toward gap if it's large enough for the vehicle to fit:
+                // physical space between the two neighbors' bumpers (their half-lengths
+                // subtracted from the center-to-center span) vs. this vehicle's own length.
+                float totalGap = nearestAhead + nearestBehind
+                    - (aheadIdx >= 0 ? HalfLen(store, aheadIdx) : 0f)
+                    - (behindIdx >= 0 ? HalfLen(store, behindIdx) : 0f);
+                if (totalGap < VehicleTypeDimensions.GetLength(store.PreferredVehicle[i]) * 0.5f)
                 {
                     // Gap too small — don't waste effort centering in it
                     store.MergeSpeedBias[i] = 0f;

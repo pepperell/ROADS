@@ -74,7 +74,9 @@ public static class DeadlockReport
             if (MathF.Abs(la) > 5f) continue;
             if (fwd < bestFwd) { bestFwd = fwd; best = o; lateral = la; }
         }
-        if (best >= 0) gap = bestFwd - SimConstants.VehicleLength;
+        if (best >= 0)
+            gap = bestFwd - VehicleTypeDimensions.GetHalfLength(veh.PreferredVehicle[v])
+                - VehicleTypeDimensions.GetHalfLength(veh.PreferredVehicle[best]);
         return best;
     }
 

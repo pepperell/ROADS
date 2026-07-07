@@ -63,8 +63,11 @@ public class StopSignSystem
     private const float StopSpeedThreshold = 0.1f;
     /// <summary>Seconds to wait after a vehicle departs before granting the next vehicle.</summary>
     private const float IntersectionClearanceTime = 1.5f;
-    /// <summary>Distance in meters from stop line within which a vehicle counts as "at the stop".</summary>
-    private const float StopDistanceThreshold = 6f;
+    /// <summary>Distance in meters from the stop line within which a vehicle's FRONT BUMPER
+    /// counts as "at the stop". Measured bumper-to-line (center distance minus the vehicle's
+    /// per-type half-length) — a center-based window would never admit long vehicles, whose
+    /// centers rest a full half body-length short of the line (6 m for a bus).</summary>
+    private const float StopDistanceThreshold = 3.75f;
 
     /// <summary>
     /// Checks whether a node has a stop sign.
@@ -370,8 +373,15 @@ public class StopSignSystem
             float edgeLength = graph.Edges[e].Length;
             float distToStop = (stopT - leadProgress) * edgeLength;
 
+            // Front-bumper distance: the vehicle stops with its center a half body-length
+            // short of the line, so subtract the lead vehicle's per-type half-length.
+            int leadVeh = _edgeLeadVehicle[e];
+            float frontDist = distToStop - (leadVeh >= 0
+                ? VehicleTypeDimensions.GetHalfLength(vehicles.PreferredVehicle[leadVeh])
+                : 0f);
+
             bool isStopped = leadProgress > 0f
-                && distToStop >= 0f && distToStop < StopDistanceThreshold
+                && distToStop >= 0f && frontDist < StopDistanceThreshold
                 && leadSpeed < StopSpeedThreshold;
 
             if (isStopped && !_edgeHasStoppedVeh[e])
@@ -419,6 +429,15 @@ public class StopSignSystem
 
                 if (departed || expired)
                 {
+                    // An EXPIRED (not departed) grantee is blocked in place — e.g. its exit
+                    // is a shared-lane segment occupied by an OPPOSING vehicle waiting at
+                    // this same node, a circular wait only this resolver can break. Send the
+                    // blocked approach to the back of the FCFS queue so the other approaches
+                    // get a turn (real stop-sign etiquette when the granted car won't go);
+                    // re-granting the oldest arrival would pick the same blocked edge forever.
+                    if (!departed && serving < _edgeArrivalTime.Length)
+                        _edgeArrivalTime[serving] = _simTime;
+
                     _currentlyServingEdge[n] = -1;
                     _servedVehicle[n] = -1;
                     _clearanceEndTime[n] = _simTime + IntersectionClearanceTime;

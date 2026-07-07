@@ -1624,29 +1624,53 @@ public class RoadGraph
 
     /// <summary>
     /// Finds the world positions where a hypothetical STRAIGHT segment (the Road tool's
-    /// in-progress preview line) would cross existing roads — the intersection nodes the
-    /// commit will create. Mirrors <see cref="FindEdgeCrossings"/>'s rules (primary edges
-    /// only, the endpoint setback on both curves) without mutating anything, so the ghost
-    /// preview and the committed intersections agree. <paramref name="ignoreNode"/>
-    /// excludes edges sharing the segment's start node (they connect, not cross);
-    /// <paramref name="ignoreEdge"/> excludes the pending start anchor's edge and its
-    /// reverse twin (the segment starts ON that road).
+    /// in-progress preview line) would cross existing roads. Thin wrapper over
+    /// <see cref="FindCurveCrossings"/> with collinear control points at the thirds —
+    /// which parameterize the cubic exactly linearly, so results match a true line test.
     /// </summary>
     public void FindSegmentCrossings(Vector2 segStart, Vector2 segEnd,
         int ignoreNode, int ignoreEdge, List<Vector2> result)
     {
-        result.Clear();
-        float segLen = Vector2.Distance(segStart, segEnd);
-        if (segLen < 0.01f) return;
+        var third = (segEnd - segStart) * (1f / 3f);
+        FindCurveCrossings(segStart, segStart + third, segStart + third * 2f, segEnd,
+            ignoreNode, ignoreEdge, result);
+    }
 
-        // Segment bounding box, expanded for control-point bulge on other edges.
-        const float margin = 20f;
-        float minX = MathF.Min(segStart.X, segEnd.X) - margin;
-        float maxX = MathF.Max(segStart.X, segEnd.X) + margin;
-        float minY = MathF.Min(segStart.Y, segEnd.Y) - margin;
-        float maxY = MathF.Max(segStart.Y, segEnd.Y) + margin;
+    /// <summary>
+    /// Finds the world positions where a hypothetical cubic Bezier (the Road tool's
+    /// in-progress preview — straight or curved mode) would cross existing roads — the
+    /// intersection nodes the commit will create. Mirrors <see cref="FindEdgeCrossings"/>'s
+    /// rules (20-segment sampling, primary edges only, the endpoint setback on both curves)
+    /// without mutating anything, so the ghost preview and the committed intersections
+    /// agree. <paramref name="ignoreNode"/> excludes edges sharing the segment's start node
+    /// (they connect, not cross); <paramref name="ignoreEdge"/> excludes the pending start
+    /// anchor's edge and its reverse twin (the segment starts ON that road).
+    /// </summary>
+    public void FindCurveCrossings(Vector2 p0, Vector2 c1, Vector2 c2, Vector2 p3,
+        int ignoreNode, int ignoreEdge, List<Vector2> result)
+    {
+        result.Clear();
+        float selfLen = MathF.Max(EstimateBezierLength(p0, c1, c2, p3), 0.01f);
+        if (selfLen < 0.02f) return;
 
         const int segments = 20;
+        var selfPoints = new Vector2[segments + 1];
+        for (int i = 0; i <= segments; i++)
+        {
+            float t = (float)i / segments;
+            float u1 = 1f - t;
+            selfPoints[i] = p0 * (u1 * u1 * u1) + c1 * (3f * u1 * u1 * t)
+                + c2 * (3f * u1 * t * t) + p3 * (t * t * t);
+        }
+
+        // Curve bounding box (control points bound the hull), expanded for the bulge on
+        // other edges' control points.
+        const float margin = 20f;
+        float minX = MathF.Min(MathF.Min(p0.X, p3.X), MathF.Min(c1.X, c2.X)) - margin;
+        float maxX = MathF.Max(MathF.Max(p0.X, p3.X), MathF.Max(c1.X, c2.X)) + margin;
+        float minY = MathF.Min(MathF.Min(p0.Y, p3.Y), MathF.Min(c1.Y, c2.Y)) - margin;
+        float maxY = MathF.Max(MathF.Max(p0.Y, p3.Y), MathF.Max(c1.Y, c2.Y)) + margin;
+
         float setback = SimConstants.MinSplitSetback;
 
         for (int other = 0; other < _edges.Count; other++)
@@ -1678,20 +1702,24 @@ public class RoadGraph
             var otherPoints = SampleBezier(other, segments);
             float otherLen = MathF.Max(otherEdge.Length, 0.01f);
 
-            for (int j = 0; j < segments; j++)
+            for (int i = 0; i < segments; i++)
             {
-                if (TryLineLineIntersection(segStart, segEnd,
-                        otherPoints[j], otherPoints[j + 1], out float u, out float v))
+                for (int j = 0; j < segments; j++)
                 {
-                    float tOther = (j + v) / segments;
+                    if (TryLineLineIntersection(selfPoints[i], selfPoints[i + 1],
+                            otherPoints[j], otherPoints[j + 1], out float u, out float v))
+                    {
+                        float tSelf = (i + u) / segments;
+                        float tOther = (j + v) / segments;
 
-                    // Same endpoint setback the commit applies: crossings within a fixed
-                    // distance of either curve's end would coincide with an existing node.
-                    if (u * segLen < setback || (1f - u) * segLen < setback ||
-                        tOther * otherLen < setback || (1f - tOther) * otherLen < setback)
-                        continue;
+                        // Same endpoint setback the commit applies: crossings within a fixed
+                        // distance of either curve's end would coincide with an existing node.
+                        if (tSelf * selfLen < setback || (1f - tSelf) * selfLen < setback ||
+                            tOther * otherLen < setback || (1f - tOther) * otherLen < setback)
+                            continue;
 
-                    result.Add(segStart + (segEnd - segStart) * u);
+                        result.Add(selfPoints[i] + (selfPoints[i + 1] - selfPoints[i]) * u);
+                    }
                 }
             }
         }

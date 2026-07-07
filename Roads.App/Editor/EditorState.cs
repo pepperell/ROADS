@@ -97,6 +97,13 @@ public class EditorState
         }
     }
 
+    /// <summary>Curved drawing mode for the Road tool (sticky). When set, each new segment
+    /// leaves its start node TANGENT to the previous segment (or to the road being
+    /// continued at a dead-end start node), forming a smooth arc toward the clicked end;
+    /// when clear, segments are straight lines (the classic behavior). Segments with no
+    /// tangent reference (first segment of a chain in open space) are straight either way.</summary>
+    public bool SelectedCurved { get; set; }
+
     /// <summary>Index of the EXISTING node the current road segment starts from, or <c>null</c>
     /// when the start is a pending ghost anchor (<see cref="RoadStartAnchorPos"/>) or no
     /// road is being drawn.</summary>
@@ -117,6 +124,19 @@ public class EditorState
 
     /// <summary>Whether a road segment is being drawn (from an existing node or a pending ghost anchor).</summary>
     public bool IsDrawingRoad => RoadStartNode.HasValue || RoadStartAnchorPos.HasValue;
+
+    /// <summary>The last segment committed by the CURRENT road chain (the trailing half
+    /// after crossing splits, so its ToNode is the chain's start node), or -1. Curved mode
+    /// reads its end tangent so the next segment continues smoothly.</summary>
+    public int RoadPrevEdge { get; set; } = -1;
+
+    /// <summary>First control point of the curved-mode preview Bezier for the in-progress
+    /// segment, or <c>null</c> when the preview is a straight line (straight mode, or no
+    /// tangent reference). Recomputed each mouse-move alongside <see cref="RoadAnchorGhostPos"/>.</summary>
+    public System.Numerics.Vector2? RoadPreviewCp1 { get; set; }
+
+    /// <summary>Second control point of the curved-mode preview Bezier (see <see cref="RoadPreviewCp1"/>).</summary>
+    public System.Numerics.Vector2? RoadPreviewCp2 { get; set; }
 
     /// <summary>Ghost positions of the intersection nodes the in-progress road segment
     /// will create where its preview line crosses existing roads. Recomputed each
@@ -228,6 +248,9 @@ public class EditorState
         RoadStartAnchorPos = null;
         RoadCrossingPreviews.Clear();
         RoadAnchorGhostPos = null;
+        RoadPrevEdge = -1;
+        RoadPreviewCp1 = null;
+        RoadPreviewCp2 = null;
         SelectedEdge = -1;
         HoveredEdge = -1;
         HoveredNode = -1;

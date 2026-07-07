@@ -745,9 +745,10 @@ public class SceneRenderer
     /// while drawing (this replaced the old snap-indicator ring). While drawing it adds a
     /// translucent round-capped band at the committed road's width (covering the node
     /// space at each end) with a thin dashed centerline, from the start anchor to the
-    /// snapped end anchor; a ghost node when the start is still a PENDING anchor (nothing
-    /// commits until the second click); and a ghost node at every crossing where the
-    /// segment will split an existing road.
+    /// snapped end anchor — following the planned tangent-continuous Bezier when curved
+    /// mode has published preview control points; a ghost node when the start is still a
+    /// PENDING anchor (nothing commits until the second click); and a ghost node at every
+    /// crossing where the segment will split an existing road.
     /// </summary>
     private static void DrawRoadPreview(SKCanvas canvas, RoadGraph graph, EditorState editorState,
         Camera camera, Point currentMousePos, SKImageInfo info)
@@ -795,7 +796,15 @@ public class SceneRenderer
         // cover the space of the node the commit creates there — plus the classic thin
         // dashed centerline on top as the drawing guide. (Dashing the wide band itself
         // would not work: round caps extend each dash by half the road width, fusing the
-        // gaps shut.)
+        // gaps shut.) In curved mode the hover handler publishes the planned Bezier's
+        // control points, and both layers follow that curve instead of a straight line.
+        using var previewPath = new SKPath();
+        previewPath.MoveTo(startPos.X, startPos.Y);
+        if (editorState.RoadPreviewCp1 is { } cp1 && editorState.RoadPreviewCp2 is { } cp2)
+            previewPath.CubicTo(cp1.X, cp1.Y, cp2.X, cp2.Y, endX, endY);
+        else
+            previewPath.LineTo(endX, endY);
+
         using var bandPaint = new SKPaint
         {
             Color = new SKColor(100, 180, 255, 60),
@@ -805,7 +814,7 @@ public class SceneRenderer
             StrokeCap = SKStrokeCap.Round,
             IsAntialias = true,
         };
-        canvas.DrawLine(startPos.X, startPos.Y, endX, endY, bandPaint);
+        canvas.DrawPath(previewPath, bandPaint);
 
         using var previewPaint = new SKPaint
         {
@@ -815,7 +824,7 @@ public class SceneRenderer
             IsAntialias = true,
             PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0),
         };
-        canvas.DrawLine(startPos.X, startPos.Y, endX, endY, previewPaint);
+        canvas.DrawPath(previewPath, previewPaint);
 
         // Intersection nodes the commit will create where the segment crosses roads.
         foreach (var crossing in editorState.RoadCrossingPreviews)

@@ -10,7 +10,8 @@ namespace Roads.App.Rendering;
 /// Renders all active vehicles as colored rounded rectangles with a translucent windshield.
 /// Each vehicle is drawn at its world position rotated to its heading angle.
 /// Vehicle body dimensions are looked up per-vehicle from <see cref="VehicleTypeDimensions"/>
-/// via <c>store.PreferredVehicle[i]</c>; physics remain constant-sized (rendering-only difference).
+/// via <c>store.PreferredVehicle[i]</c> — the same dimensions the simulation uses for gaps
+/// and stop-line offsets, so bodies on screen match the physics footprint.
 /// </summary>
 public class VehicleRenderer
 {

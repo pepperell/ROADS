@@ -16,13 +16,14 @@ public enum VehicleType : byte
 }
 
 /// <summary>
-/// Provides per-type visual dimensions used exclusively by the renderer.
-/// Collision and headway calculations continue to use
-/// <see cref="SimConstants.VehicleLength"/> / <see cref="SimConstants.VehicleWidth"/>
-/// for all vehicle types (rendering-only limitation, addressed in a later milestone);
-/// acceleration DOES vary by type — see <see cref="VehicleTypeDynamics"/>.
-/// Sedan dimensions exactly match the SimConstants defaults so existing saves
-/// look unchanged when all vehicles are Sedan (byte 0).
+/// Provides per-type vehicle dimensions, used by BOTH the renderer (body rectangles) and
+/// the simulation: car-following gaps, stop-line offsets, overlap detection, lane-change
+/// fit checks, and the kinematic wheelbase all consume these via the byte-indexed helpers
+/// (<see cref="GetLength"/>, <see cref="GetHalfLength"/>, <see cref="GetWheelbase"/>).
+/// <see cref="SimConstants.VehicleLength"/> / <see cref="SimConstants.VehicleWidth"/> are
+/// the Sedan baseline only; Sedan dimensions exactly match them so uniform-sedan traffic
+/// behaves identically to the former constant-size model.
+/// Acceleration also varies by type — see <see cref="VehicleTypeDynamics"/>.
 /// </summary>
 public static class VehicleTypeDimensions
 {
@@ -37,7 +38,19 @@ public static class VehicleTypeDimensions
     };
 
     /// <summary>
-    /// Returns the render (length, width) for the given <paramref name="type"/>.
+    /// Wheelbase as a fraction of body length (Sedan: 4.5 m × 0.556 = 2.5 m, the former
+    /// global constant, so sedan handling is unchanged). Real vehicles cluster near this
+    /// ratio; a single fraction keeps the kinematics simple and monotonic in length.
+    /// </summary>
+    private const float WheelbaseFraction = 0.556f;
+
+    /// <summary>Half-length of the longest vehicle type (metres). Upper bound for spatial
+    /// query radii that must not miss any potential body overlap regardless of the other
+    /// vehicle's type.</summary>
+    public static readonly float MaxHalfLength = _dims.Max(d => d.Length) * 0.5f;
+
+    /// <summary>
+    /// Returns the (length, width) for the given <paramref name="type"/>.
     /// Out-of-range values are clamped to <see cref="VehicleType.Sedan"/>.
     /// </summary>
     public static (float Length, float Width) GetDimensions(VehicleType type)
@@ -46,6 +59,25 @@ public static class VehicleTypeDimensions
         if ((uint)idx >= (uint)_dims.Length) idx = 0;
         return _dims[idx];
     }
+
+    /// <summary>Body length in metres for a raw <see cref="VehicleStore.PreferredVehicle"/>
+    /// byte. Out-of-range values are clamped to Sedan.</summary>
+    public static float GetLength(byte type)
+    {
+        int idx = type;
+        if ((uint)idx >= (uint)_dims.Length) idx = 0;
+        return _dims[idx].Length;
+    }
+
+    /// <summary>Half the body length in metres (bumper-to-center distance) for a raw
+    /// <see cref="VehicleStore.PreferredVehicle"/> byte. The building block for
+    /// center-to-center → bumper-to-bumper gap conversion.</summary>
+    public static float GetHalfLength(byte type) => GetLength(type) * 0.5f;
+
+    /// <summary>Front-to-rear axle distance in metres for a raw
+    /// <see cref="VehicleStore.PreferredVehicle"/> byte, used by the bicycle-model
+    /// kinematics (<see cref="VehiclePhysics"/>).</summary>
+    public static float GetWheelbase(byte type) => GetLength(type) * WheelbaseFraction;
 }
 
 /// <summary>

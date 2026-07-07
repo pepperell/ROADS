@@ -5,14 +5,17 @@ namespace Roads.App.Editor;
 
 /// <summary>
 /// Editor tool that builds road segments by clicking to place nodes, using the road
-/// toolbar's sticky options (type, per-direction width, one-way, shared-lane).
+/// toolbar's sticky options (type, per-direction width, one-way, shared-lane, and the
+/// straight/curved drawing mode).
 /// The FIRST click of a chain only RECORDS the start anchor — an existing node, a pending
 /// on-road split point, or a pending free position (the latter two drawn as a ghost node)
 /// — without mutating the graph, so a right-click/ESC cancel leaves nothing behind.
 /// The second click commits: the pending anchor materializes (splitting its edge when
 /// on-road), the end anchor resolves the same way, and the edge (pair, unless one-way) is
 /// created with the sticky options applied. The chain then continues from the now-real
-/// end node.
+/// end node. In CURVED mode each committed segment leaves its start node tangent to the
+/// chain's previous segment (see <see cref="TryGetChainTangent"/>), bending as an
+/// arc-like Bezier toward the clicked end.
 /// </summary>
 public class RoadTool
 {
@@ -36,6 +39,10 @@ public class RoadTool
             return;
         }
 
+        // Capture the curved-mode tangent BEFORE the anchors mutate the graph: the end
+        // anchor's split could make the previous-segment edge defunct mid-commit.
+        Vector2? tangent = state.SelectedCurved ? TryGetChainTangent(graph, state) : null;
+
         // Commit order matters: the start anchor's deferred split runs first, then the
         // end anchor resolves against the CURRENT graph (fresh lookups, grid rebuilt), so
         // an end click on the same edge as the pending start lands on the correct half.
@@ -55,14 +62,107 @@ public class RoadTool
             if (!state.SelectedOneWay && state.SelectedSharedLane)
                 graph.SetSharedLane(forwardEdge, true);
 
-            // Only split forward edge; SplitEdge handles reverse automatically
-            SplitAtCrossings(graph, forwardEdge);
+            // Curved mode: bend the new segment so it leaves the start node along the
+            // captured tangent, BEFORE splitting — crossing detection samples the edge's
+            // actual Bezier, and SplitEdge subdivides it, so the curve shape survives.
+            // SetControlPoint mirrors onto the reverse edge and recomputes lengths.
+            if (tangent is { } tanDir)
+            {
+                var (cp1, cp2) = ComputeCurveControls(
+                    graph.Nodes[startNode].Position, graph.Nodes[endNode].Position, tanDir);
+                graph.SetControlPoint(forwardEdge, 1, cp1);
+                graph.SetControlPoint(forwardEdge, 2, cp2);
+            }
+
+            // Only split forward edge; SplitEdge handles reverse automatically.
+            // The trailing half (ending at endNode) is the next segment's tangent source.
+            state.RoadPrevEdge = SplitAtCrossings(graph, forwardEdge);
         }
 
         // The (real, committed) end node becomes the start of the next segment.
         state.RoadStartNode = endNode;
         state.RoadStartEdge = -1;
         state.RoadStartAnchorPos = null;
+    }
+
+    /// <summary>
+    /// The tangent direction (unit vector, pointing the way the new segment should leave
+    /// its start) that curved mode must honor, or <c>null</c> when there is no reference:
+    /// the end tangent of the chain's previous segment when one exists, otherwise — for a
+    /// chain STARTED on an existing dead-end node — the outward continuation of that
+    /// node's single road. Chains started in open space or on a pending on-road anchor
+    /// have no reference (a branch tangent to the road it starts on would be degenerate).
+    /// </summary>
+    public static Vector2? TryGetChainTangent(RoadGraph graph, EditorState state)
+    {
+        if (state.RoadStartNode is not { } startNode) return null;
+
+        // Previous segment of this chain (kept as the trailing half after splits).
+        int prev = state.RoadPrevEdge;
+        if (prev >= 0 && prev < graph.Edges.Count
+            && graph.Edges[prev].FromNode >= 0 && graph.Edges[prev].ToNode == startNode)
+        {
+            var tan = graph.EvaluateBezierTangent(prev, 1f);
+            if (tan.LengthSquared() > 1e-6f) return Vector2.Normalize(tan);
+        }
+
+        return NodeContinuationTangent(graph, startNode);
+    }
+
+    /// <summary>
+    /// Outward continuation tangent at a DEAD-END node (all incident edges connect to one
+    /// neighbor): the direction the existing road is heading when it arrives, so a curved
+    /// chain started there extends the road smoothly. <c>null</c> at junctions and
+    /// mid-road nodes, where the continuation is ambiguous.
+    /// </summary>
+    private static Vector2? NodeContinuationTangent(RoadGraph graph, int node)
+    {
+        int neighbor = -1, inEdge = -1, outEdge = -1;
+        foreach (int e in graph.GetIncomingEdges(node))
+        {
+            int n = graph.Edges[e].FromNode;
+            if (neighbor >= 0 && n != neighbor) return null;
+            neighbor = n;
+            inEdge = e;
+        }
+        foreach (int e in graph.GetOutgoingEdges(node))
+        {
+            int n = graph.Edges[e].ToNode;
+            if (neighbor >= 0 && n != neighbor) return null;
+            neighbor = n;
+            outEdge = e;
+        }
+        if (neighbor < 0) return null; // isolated node — nothing to continue
+
+        // Tangent pointing AWAY from the neighbor: an incoming edge already points into
+        // the node (take its end tangent); an outgoing-only edge (one-way starting here)
+        // points at the neighbor, so negate its start tangent.
+        var tan = inEdge >= 0
+            ? graph.EvaluateBezierTangent(inEdge, 1f)
+            : -graph.EvaluateBezierTangent(outEdge, 0f);
+        return tan.LengthSquared() > 1e-6f ? Vector2.Normalize(tan) : null;
+    }
+
+    /// <summary>
+    /// Control points for a curved segment from <paramref name="a"/> to <paramref name="b"/>
+    /// that leaves <paramref name="a"/> along <paramref name="tangentDir"/> (unit). The end
+    /// tangent is the start tangent MIRRORED across the chord — the circular-arc property —
+    /// so consecutive curved segments chain into a smooth, constant-feeling bend rather
+    /// than straightening out at each node. Handle length d/3 approximates the arc.
+    /// </summary>
+    public static (Vector2 cp1, Vector2 cp2) ComputeCurveControls(Vector2 a, Vector2 b, Vector2 tangentDir)
+    {
+        var chord = b - a;
+        float d = chord.Length();
+        if (d < 0.01f)
+            return (a + chord * (1f / 3f), a + chord * (2f / 3f));
+
+        var chordDir = chord / d;
+        // Mirror of the start tangent across the chord direction (arc end tangent).
+        float dot = Vector2.Dot(tangentDir, chordDir);
+        var endDir = chordDir * (2f * dot) - tangentDir;
+
+        return (a + tangentDir * (d / 3f), b - endDir * (d / 3f));
     }
 
     /// <summary>
@@ -113,6 +213,7 @@ public class RoadTool
     private static void BeginChain(Vector2 worldPos, RoadGraph graph, EditorState state,
         EdgeSpatialGrid? edgeSpatialGrid)
     {
+        state.RoadPrevEdge = -1; // fresh chain: no previous segment yet
         var anchor = ProbeAnchor(worldPos, graph, edgeSpatialGrid);
         if (anchor.Node >= 0)
         {
@@ -170,10 +271,13 @@ public class RoadTool
     /// </summary>
     /// <param name="graph">Road graph containing the edges.</param>
     /// <param name="newEdgeIndex">Index of the newly created forward edge to check for crossings.</param>
-    private static void SplitAtCrossings(RoadGraph graph, int newEdgeIndex)
+    /// <returns>The trailing piece of the new edge — the half ending at the segment's end
+    /// node after all splits (the new edge itself when nothing crossed). Curved mode uses
+    /// its end tangent to continue the chain.</returns>
+    private static int SplitAtCrossings(RoadGraph graph, int newEdgeIndex)
     {
         var crossings = graph.FindEdgeCrossings(newEdgeIndex);
-        if (crossings.Count == 0) return;
+        if (crossings.Count == 0) return newEdgeIndex;
 
         // Sort by tSelf ascending so we can split the new edge from start to end
         crossings.Sort((a, b) => a.tSelf.CompareTo(b.tSelf));
@@ -216,6 +320,8 @@ public class RoadTool
             currentEdge = secondHalf;
             consumedT = tSelf;
         }
+
+        return currentEdge;
     }
 
     /// <summary>
