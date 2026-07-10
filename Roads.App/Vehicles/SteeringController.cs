@@ -98,6 +98,16 @@ public static class SteeringController
     /// <summary>Per-vehicle count of consecutive sim ticks spent overlap-stalled (fully stopped with a
     /// stopped vehicle overlapping it). Drives the merge deadlock-breaker; reset the moment it clears.</summary>
     private static int[] _overlapStall = Array.Empty<int>();
+
+    /// <summary>Per-vehicle: the leader index the threat scan braked this vehicle for on the current
+    /// tick, or -1. Written by ApplySpeedControl / UpdateOnArc, consumed by the deadlock breaker to
+    /// detect MUTUAL-LEADER STANDOFFS: two stopped cars at a junction each classifying the other as
+    /// its leader through angle-dependent projections (mid-arc vs edge-entry poses) at small POSITIVE
+    /// gaps (0.4–1 m) — no physical overlap, so <see cref="HasStoppedOverlap"/> alone never ages the
+    /// stall counter and the pair freezes forever. A stopped car braking for a stopped leader that is
+    /// NOT path-ahead of it (see <see cref="IsAheadAlongPath"/>) is such a standoff; a normal queue
+    /// never qualifies because its leader IS path-ahead.</summary>
+    private static int[] _lastLeader = Array.Empty<int>();
     /// <summary>Per-vehicle breaker flag: when set, this vehicle is the "front" of a stuck overlap tangle
     /// and is allowed to creep forward through the overlap (it ignores overlapping cars in its threat /
     /// hard-overlap checks). Set by the breaker pass at the end of <see cref="UpdateAll"/>, consumed by
@@ -258,10 +268,11 @@ public static class SteeringController
     private static bool BreakerFront(int index) => index < _breakerProceed.Length && _breakerProceed[index];
 
     /// <summary>True if another stopped Driving vehicle physically OVERLAPS <paramref name="i"/> — its
-    /// body is past <paramref name="i"/>'s in both axes of <paramref name="i"/>'s frame. The tight lateral
-    /// bound (≈ car width, well under a lane) is deliberate: it must NOT fire for cars legitimately queued
-    /// behind/ahead (forward gap ≥ a car length) or sitting side-by-side in adjacent lanes at a light,
-    /// only for a genuine bumper-overlap wedge.</summary>
+    /// body is past <paramref name="i"/>'s in both axes of <paramref name="i"/>'s frame. The lateral bound
+    /// spans [LaneWidth·0.7, LaneWidth·0.8]: wide enough to cover everything the threat scan's leader
+    /// corridor can mutually hard-brake (the breaker must see every wedge the scan can create), yet under
+    /// the lane spacing so it never fires for cars legitimately queued behind/ahead (forward gap ≥ a car
+    /// length) or sitting side-by-side in adjacent lanes at a light.</summary>
     private static bool HasStoppedOverlap(VehicleStore store, int i, SpatialGrid grid)
     {
         var buf = _overlapBuffer ??= new List<int>();
@@ -282,12 +293,19 @@ public static class SteeringController
             float lateral = MathF.Abs(-dx * sinH + dy * cosH);
             // Bodies overlap when the center distance drops under the pair's summed
             // half-lengths; the 0.9/0.6 factors keep the deliberate tightness described
-            // above. The lateral bound is additionally capped below the lane width so two
-            // LONG vehicles legitimately sitting side-by-side in adjacent lanes (3.5 m
-            // apart) can never read as a wedge — an uncapped pair bound would exceed the
-            // lane spacing and let the breaker creep a queued bus through a red light.
+            // above. The lateral bound is clamped to [LaneWidth*0.7, LaneWidth*0.8]:
+            //  - FLOOR at the threat scan's leader corridor (LaneWidth*0.7): any pair the
+            //    scan can mutually hard-brake must be inside breaker coverage, or the pair
+            //    deadlocks forever in the gap. Unclamped, a small pair (e.g. SUV +
+            //    motorcycle, pairHalf*0.6 ≈ 2.1 m) wedged at a junction corner (~2.3 m
+            //    lateral) braked for each other but never aged the stall counter.
+            //  - CAP below the lane spacing (3.5 m) so two LONG vehicles legitimately
+            //    sitting side-by-side in adjacent lanes can never read as a wedge — an
+            //    uncapped pair bound would exceed the lane spacing and let the breaker
+            //    creep a queued bus through a red light.
             float pairHalf = myHalf + HalfLen(store, j);
-            float lateralBound = MathF.Min(pairHalf * 0.6f, SimConstants.LaneWidth * 0.8f);
+            float lateralBound = Math.Clamp(pairHalf * 0.6f,
+                SimConstants.LaneWidth * 0.7f, SimConstants.LaneWidth * 0.8f);
             if (forward < pairHalf * 0.9f && lateral < lateralBound) return true;
         }
         return false;
@@ -359,7 +377,19 @@ public static class SteeringController
                 continue;
             }
 
+            // A wedge is EITHER a physical body overlap OR a mutual-leader standoff: this
+            // stopped car is braking for a stopped "leader" that is not actually ahead of it
+            // along its path (angle-dependent projection at a junction — see _lastLeader).
+            // Normal queues never age here: their leader is path-ahead.
             bool stalled = HasStoppedOverlap(store, i, grid);
+            if (!stalled && i < _lastLeader.Length)
+            {
+                int ldr = _lastLeader[i];
+                stalled = ldr >= 0 && ldr < store.Count
+                    && store.State[ldr] == VehicleState.Driving
+                    && store.Speed[ldr] < BreakerStoppedSpeed
+                    && !IsAheadAlongPath(store, graph, arcCache, i, ldr);
+            }
             _overlapStall[i] = stalled ? _overlapStall[i] + 1 : 0;
 
             bool front = _overlapStall[i] >= OverlapStallTicks && IsTangleFront(store, i, grid, graph, arcCache);
@@ -385,6 +415,10 @@ public static class SteeringController
     public static void Update(VehicleStore store, int index, RoadGraph graph, SpatialGrid grid, StopLineCache stopLines, IntersectionArcCache arcCache, TrafficSignalSystem signals, StopSignSystem stopSigns, YieldSignSystem yieldSigns, float dt)
     {
         if (store.State[index] != VehicleState.Driving) return;
+
+        // Cleared up front so hold paths that return before the threat scan can't leave a
+        // stale (possibly swap-reused) leader index for the breaker's standoff detection.
+        SetLastLeader(index, -1);
 
         // If vehicle is on an intersection arc, use arc-mode steering
         if (store.CurrentArc[index] >= 0)
@@ -641,8 +675,31 @@ public static class SteeringController
                                 int j = scan2[bi];
                                 if (j == index || store.State[j] != VehicleState.Driving) continue;
                                 if (store.CurrentEdge[j] != outEdge || store.CurrentArc[j] >= 0) continue;
-                                // Skip vehicles already in our lane — they're handled by arc IDM look-ahead
-                                if (store.CurrentLane[j] == outLane) continue;
+                                // Don't-block-the-box: refuse to COMMIT into the intersection while a
+                                // stopped vehicle in the exit lane plugs the throat — my body would not
+                                // clear the arc and would freeze ON it, blocking every crossing movement
+                                // (the anchor of observed spillback-ring gridlocks). Moving exit-lane
+                                // traffic is fine (arc IDM look-ahead paces behind it); a breaker front
+                                // is exempt so it can still be creeped out of an existing tangle.
+                                if (store.CurrentLane[j] == outLane)
+                                {
+                                    float exitSpan = (store.EdgeProgress[j] - outStartT) * outLength
+                                        - HalfLen(store, j);
+                                    if (!BreakerFront(index) && store.Speed[j] < 0.5f
+                                        && exitSpan < Len(store, index) + 1f)
+                                    {
+                                        store.EdgeProgress[index] = stopAtT;
+                                        store.Throttle[index] = 0f;
+                                        store.Brake[index] = 1.0f;
+                                        store.Speed[index] = 0f;
+                                        LogArcConflict(store, index,
+                                            $"ARC_BLOCKED_EXIT_FULL arcIdx={arcIdx} outEdge={outEdge} " +
+                                            $"outLane={outLane} blockedByV={j} exitSpan={exitSpan:F2}",
+                                            blockerIndex: j);
+                                        return TransitionResult.Returned;
+                                    }
+                                    continue; // moving / far enough — arc IDM look-ahead handles pacing
+                                }
                                 // Only block if this vehicle is actively lane-changing into our exit lane
                                 if (store.TargetLane[j] != outLane) continue;
 
@@ -1111,6 +1168,7 @@ public static class SteeringController
             }
         }
 
+        SetLastLeader(index, leaderIdx);
         if (ApplyHardOverlapBrake(store, index, gap)) return;
 
         float maxAccel = EffectiveMaxAccel(store, index);
@@ -1119,6 +1177,13 @@ public static class SteeringController
 
         store.Brake[index] = idmBrake;
         store.Throttle[index] = MathF.Max(0f, idmThrottle);
+    }
+
+    /// <summary>Records the threat-scan leader for this tick (see <see cref="_lastLeader"/>).</summary>
+    private static void SetLastLeader(int index, int leaderIdx)
+    {
+        if (_lastLeader.Length <= index) Array.Resize(ref _lastLeader, index + 64);
+        _lastLeader[index] = leaderIdx;
     }
 
     /// <summary>
@@ -1351,6 +1416,7 @@ public static class SteeringController
             - (leaderIndex >= 0 ? HalfLen(store, leaderIndex) : 0f);
         float deltaV = speed - leaderSpeed;
 
+        SetLastLeader(index, leaderIndex);
         if (ApplyHardOverlapBrake(store, index, gap))
         {
             LogArcConflict(store, index,
@@ -1623,13 +1689,22 @@ public static class SteeringController
                     }
                 }
             }
-            // Cross-edge / arc vehicles: use road-tangent-based projection
+            // Cross-edge / arc vehicles: use road-tangent-based projection. A leader must be
+            // within a ~45° cone of the nose in the near field (forward >= |lateral|), not just
+            // inside the lateral corridor: where two roads/arcs meet at an angle, a car BEHIND
+            // in path order (waiting at the feeding edge's line, or on a parallel same-turn arc)
+            // projects marginally "ahead" (forward < 1 m) at lateral ~2.3 m — accepting it as a
+            // leader hard-brakes both cars against each other in a permanent mutual wedge that
+            // seeded map-wide gridlocks. Beyond ~2.45 m forward the cone is wider than the
+            // corridor, so far-field behavior is unchanged; genuine leaders (dead ahead on the
+            // next edge) and crossed post-merge pairs (lateral < forward) still match.
             else if (forward > 0f)
             {
                 bool diverging = headingDot < 0.85f;
                 if (!diverging)
                 {
-                    bool inLane = MathF.Abs(lateral) <= LaneWidth * 0.7f;
+                    bool inLane = MathF.Abs(lateral) <= LaneWidth * 0.7f
+                        && forward >= MathF.Abs(lateral);
                     if (inLane && forward < minAheadDist)
                     {
                         minAheadDist = forward;

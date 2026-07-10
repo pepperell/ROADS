@@ -60,9 +60,21 @@ public static class VehiclePhysics
         store.SmoothedThrottle[index] += (store.Throttle[index] - store.SmoothedThrottle[index]) * alpha;
         // Emergency brake bypass: don't lag hard stops
         if (store.Brake[index] >= 0.99f)
+        {
             store.SmoothedBrake[index] = 1.0f;
+        }
         else
-            store.SmoothedBrake[index] += (store.Brake[index] - store.SmoothedBrake[index]) * alpha;
+        {
+            // Brake RELEASE at standstill uses a fast fixed constant (~0.1 s) instead of the
+            // reaction-time decay. A stationary vehicle's brake force has nothing to decelerate,
+            // but a lingering SmoothedBrake vetoes the LAUNCH: MaxBrakeDecel is an order of
+            // magnitude above a heavy vehicle's launch accel, so the slow decay left after each
+            // transient hard-brake (e.g. cross traffic tripping the overlap brake at a junction
+            // mouth every second or two) sums to a permanent standstill under busy cross flow —
+            // the seed of observed map-wide gridlocks. A stopped driver simply lifts the pedal.
+            float brakeAlpha = speed < 0.1f ? 1f - MathF.Exp(-dt / 0.1f) : alpha;
+            store.SmoothedBrake[index] += (store.Brake[index] - store.SmoothedBrake[index]) * brakeAlpha;
+        }
 
         // Apply smoothed throttle/brake to speed. Throttle is normalized by the same
         // per-driver/per-type EffectiveMaxAccel the IDM controller divided by, so the

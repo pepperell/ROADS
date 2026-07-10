@@ -325,10 +325,14 @@ public class StopSignSystem
         int edgeCount = Math.Min(graph.Edges.Count, _edgeLeadProgress.Length);
         int nodeCount = Math.Min(graph.Nodes.Count, _isStopSign.Length);
 
-        // Reset lead vehicle tracking
-        Array.Clear(_edgeLeadProgress, 0, edgeCount);
+        // Reset lead vehicle tracking. Lead progress resets to -1 (not 0) so a vehicle at
+        // progress EXACTLY 0.0 still registers as the lead: an arc-exiter lands at the edge's
+        // entry trim (often 0.0), and on a short approach it can sit there — front bumper
+        // possibly already inside the stop window — while a 0-init made `progress > lead`
+        // fail, leaving the approach invisible to the FCFS (the node then served nobody).
         for (int e = 0; e < edgeCount; e++)
         {
+            _edgeLeadProgress[e] = -1f;
             _edgeLeadSpeed[e] = float.MaxValue;
             _edgeLeadVehicle[e] = -1;
         }
@@ -380,7 +384,7 @@ public class StopSignSystem
                 ? VehicleTypeDimensions.GetHalfLength(vehicles.PreferredVehicle[leadVeh])
                 : 0f);
 
-            bool isStopped = leadProgress > 0f
+            bool isStopped = leadVeh >= 0
                 && distToStop >= 0f && frontDist < StopDistanceThreshold
                 && leadSpeed < StopSpeedThreshold;
 
