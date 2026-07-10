@@ -28,7 +28,6 @@ public class LegendPanel : Panel
         "1-4     Select Lane",
         "Esc,RMB Cancel / Select Tool",
         "Sh+Clk  Tune Signal (exempt)",
-        "T       Sliders",
         "P       Perf HUD",
         "M       Minimap",
         "N       Statistics Panel",

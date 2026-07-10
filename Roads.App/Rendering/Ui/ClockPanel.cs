@@ -17,7 +17,7 @@ namespace Roads.App.Rendering.Ui;
 /// </summary>
 public class ClockPanel : Panel
 {
-    /// <summary>Panel height, public so the slider panel can anchor beneath it.</summary>
+    /// <summary>Panel height, public so other top-right panels can anchor beneath it.</summary>
     public const float PanelHeight = 164f;
     public const float PanelWidth = 120f;
 

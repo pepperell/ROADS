@@ -95,6 +95,12 @@ public static class SteeringController
     /// (~3 s at the 30 Hz sim rate) — far longer than any legitimate merge/yield wait.</summary>
     private const int OverlapStallTicks = 90;
 
+    /// <summary>Raised on the RISING edge of a vehicle becoming the breaker-freed front of a
+    /// stuck tangle (see <see cref="RunDeadlockBreaker"/>) — the audio engine's horn trigger.
+    /// Fires on the sim/UI thread during UpdateAll. Null (zero-cost) unless the audio engine
+    /// is running; the headless harness never subscribes, so determinism is unaffected.</summary>
+    public static event Action<int>? BreakerFreed;
+
     /// <summary>Thread-local buffer for the merge-into-exit-lane spatial query.</summary>
     [ThreadStatic] private static List<int>? _scan2Buffer;
     /// <summary>Thread-local buffer for the merge-yield / breaker overlap scans.</summary>
@@ -345,7 +351,10 @@ public static class SteeringController
             _overlapStall[i] = stalled ? _overlapStall[i] + 1 : 0;
 
             bool front = _overlapStall[i] >= OverlapStallTicks && IsTangleFront(store, i, grid, graph, arcCache);
+            bool wasFront = _breakerProceed[i];
             _breakerProceed[i] = front;
+            if (front && !wasFront)
+                BreakerFreed?.Invoke(i);
             if (front && store.Speed[i] < BreakerCreepSpeed)
             {
                 store.Brake[i] = 0f;

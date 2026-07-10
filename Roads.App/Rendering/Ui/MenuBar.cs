@@ -4,14 +4,14 @@ using Roads.App.Editor;
 namespace Roads.App.Rendering.Ui;
 
 /// <summary>Identifies a UI action triggered by an action button (not a tool toggle).
-/// New/Save/Load are raised by the <see cref="MenuBar"/>; Pause/SpeedDown/SpeedUp by the
-/// <see cref="ClockPanel"/>'s transport buttons. All route to the same owner callback
-/// (MainForm holds the dialogs and the sim loop).</summary>
-public enum UIAction { New, Save, Load, Pause, SpeedDown, SpeedUp }
+/// New/Save/Load/Settings are raised by the <see cref="MenuBar"/>; Pause/SpeedDown/SpeedUp
+/// by the <see cref="ClockPanel"/>'s transport buttons. All route to the same owner
+/// callback (MainForm holds the dialogs and the sim loop).</summary>
+public enum UIAction { New, Save, Load, Settings, Pause, SpeedDown, SpeedUp }
 
 /// <summary>
-/// The top-left menu bar: three file action <see cref="Button"/>s (New / Save / Load) at
-/// the far left, then four editor-tool toggle buttons (Select / Road / Dest Pt / Signal).
+/// The top-left menu bar: four action <see cref="Button"/>s (New / Save / Load / Settings)
+/// at the far left, then four editor-tool toggle buttons (Select / Road / Dest Pt / Signal).
 /// The Node / Delete / Update Seg tools live on the <see cref="RoadSubmenu"/> opened by
 /// the Road button, and the Change Type / Control Type / Rotate tools on the
 /// <see cref="SignalSubmenu"/> opened by the Signal button — not here. Tool buttons set
@@ -29,7 +29,7 @@ public class MenuBar : Panel
     private const float ToolbarX = 10f;
     private const float ToolbarY = 14f;
     private const float GroupGap = 16f;
-    private const int ActionCount = 3;
+    private const int ActionCount = 4;
 
     /// <summary>Left edge (canvas px) of the first tool button (after the action group).</summary>
     private static float ToolStartX
@@ -51,6 +51,7 @@ public class MenuBar : Panel
             (label: "New", action: UIAction.New),
             (label: "Save", action: UIAction.Save),
             (label: "Load", action: UIAction.Load),
+            (label: "Settings", action: UIAction.Settings),
         };
 
         for (int i = 0; i < actions.Length; i++)
@@ -102,7 +103,7 @@ public class MenuBar : Panel
 
     protected override void LayoutChildren(float canvasWidth, float canvasHeight)
     {
-        // Children are the 3 action buttons then the 4 tool buttons, in add order.
+        // Children are the 4 action buttons then the 4 tool buttons, in add order.
         // Offsets are panel-relative: the panel's left edge sits at ToolbarX - 6.
         for (int i = 0; i < Children.Count; i++)
         {

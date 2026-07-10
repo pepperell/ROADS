@@ -8,8 +8,9 @@ namespace Roads.App.Core;
 /// </summary>
 public class SimulationClock
 {
-    /// <summary>Game-seconds that pass per real second at 1x speed (1.0 = realtime).</summary>
-    private const double GameSecondsPerRealSecond = 10.0;
+    /// <summary>Game-seconds that pass per real second at 1x speed (1.0 = realtime).
+    /// Settable at runtime via the Settings dialog (Simulation page).</summary>
+    public double GameSecondsPerRealSecond { get; set; } = 10.0;
 
     /// <summary>Current time of day in fractional hours (0.0 = midnight, 12.0 = noon).</summary>
     public double TimeOfDay { get; set; } = 8.0;

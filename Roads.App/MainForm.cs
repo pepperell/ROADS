@@ -29,7 +29,6 @@ public class MainForm : Form
     private readonly NodeTool _nodeTool = new();
     private readonly DeleteTool _deleteTool = new();
     private readonly UpdateSegmentTool _updateSegmentTool = new();
-    private readonly Ui.SliderPanel _sliderPanel = new();
     private readonly DestinationTool _destinationTool = new();
     private readonly SignalTool _signalTool = new();
     private readonly LaneRestrictionTool _laneRestrictionTool = new();
@@ -47,6 +46,18 @@ public class MainForm : Form
     private readonly Ui.MinimapPanel _minimapPanel;
     private readonly Ui.StatisticsPanel _statisticsPanel;
     private readonly Ui.PerformanceHudPanel _hudPanel;
+    private readonly Ui.LegendPanel _legendPanel = new();
+    private readonly Ui.SettingsDialog _settingsDialog;
+
+    /// <summary>Last-APPLIED application settings — the values the live systems currently
+    /// run with, mirrored in settings.json. Mutated only by <see cref="ApplyStagedSettings"/>
+    /// (Settings dialog Apply/OK) and <see cref="MutateSettings"/> (hotkey toggles), both of
+    /// which re-push to the live systems and persist.</summary>
+    private Core.AppSettings _settings;
+
+    /// <summary>Pause state captured when the Settings dialog opened, restored on close —
+    /// so closing Settings never un-pauses a sim the user had manually paused.</summary>
+    private bool _settingsWasPaused;
     /// <summary>Frame-timing telemetry; <see cref="PerfTelemetry.Sample"/> runs once per
     /// paint regardless of HUD visibility (single consumer of the pathfind accumulators).</summary>
     private readonly PerfTelemetry _perfTelemetry = new();
@@ -59,6 +70,7 @@ public class MainForm : Form
     private readonly SimulationLoop _simLoop;
     private readonly SceneRenderer _sceneRenderer;
     private readonly Persistence.AutoSaveManager _autoSave;
+    private readonly Audio.AudioEngine _audioEngine;
 
     private Point _lastMousePos;
     private Point _currentMousePos;
@@ -105,22 +117,28 @@ public class MainForm : Form
         DoubleBuffered = true;
         StartPosition = FormStartPosition.CenterScreen;
 
+        // Persisted user settings first: the population cap feeds the manager's ctor, and
+        // ApplySettings below (once every target exists) pushes the rest before frame one.
+        _settings = Persistence.SettingsStore.Load();
+
         // The app always opens paused with the Select tool active (New/Load match this).
         _editorState.ActiveTool = EditorTool.Select;
         _spawner = new VehicleSpawner(_roadGraph, _vehicles, _vehicleGrid);
-        _populationManager = new PopulationManager(_roadGraph, _vehicles, _vehicleGrid, _poiRegistry, SimulationLoop.MaxVehicles);
+        _populationManager = new PopulationManager(_roadGraph, _vehicles, _vehicleGrid, _poiRegistry, _settings.MaxVehicles);
         _graphChangeHandler = new GraphChangeHandler(_roadGraph, _editorState, _vehicles, _edgeSpatialGrid, _spawner);
         _simLoop = new SimulationLoop(_roadGraph, _vehicles, _vehicleGrid, _stopLineCache, _intersectionArcs, _edgeSpatialGrid, _trafficSignals, _stopSigns, _yieldSigns, _spawner, _populationManager, _editorState, _graphChangeHandler);
         _simLoop.Paused = true;
+
+        // Procedural sound engine (self-disables when no audio device exists).
+        _audioEngine = new Audio.AudioEngine(_vehicles, _roadGraph, _trafficSignals, _simLoop, _camera);
 
         // Retained-mode UI tree (bottom→top add order = draw order; input hits topmost first).
         _uiRoot.Add(new Ui.MenuBar(_editorState, OnUiAction));
         _uiRoot.Add(new Ui.PoiSubmenu(_editorState));
         _uiRoot.Add(new Ui.RoadSubmenu(_editorState));
         _uiRoot.Add(new Ui.SignalSubmenu(_editorState));
-        _uiRoot.Add(new Ui.LegendPanel());
+        _uiRoot.Add(_legendPanel);
         _uiRoot.Add(new Ui.ClockPanel(_simLoop, OnUiAction));
-        _uiRoot.Add(_sliderPanel);
 
         // Bottom-left stack (second column, right of the shortcut legend): HUD at the very
         // bottom, statistics above it, then vehicle info, selection info on top — positioned
@@ -139,12 +157,22 @@ public class MainForm : Form
         _minimapPanel = new Ui.MinimapPanel(_camera, _roadGraph);
         _uiRoot.Add(_minimapPanel);
 
+        // Settings dialog last: topmost hit-testing (its scrim must swallow every click).
+        // It is ExternallyDrawn — painted by OnPaintSurface after the perf HUD, which is
+        // itself drawn after the whole UI pass and would otherwise cover the dialog.
+        _settingsDialog = new Ui.SettingsDialog(() => _settings, ApplyStagedSettings, OnSettingsClosed);
+        _uiRoot.Add(_settingsDialog);
+
         _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _laneRestrictionTool, _uiRoot);
         // AutoSaveManager shares the same object references used by SaveMap() so the
         // backup format is identical to a manual save (minus vehicles, which are transient).
         // Triggered from the render-timer tick so it runs on the UI thread with no locking.
         _autoSave = new Persistence.AutoSaveManager(_roadGraph, _vehicles, _camera,
             _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals, _populationManager);
+
+        // Push the loaded settings into every live system before the first frame (all
+        // targets — panels, renderer, autosave, sim — exist by this point).
+        ApplySettings();
 
         // Centralized vehicle-removal fixup: editor-held vehicle indices follow
         // swap-and-pop moves and drop on bulk clears (see VehicleStore.VehicleRemoving).
@@ -154,21 +182,20 @@ public class MainForm : Form
         _vehicles.VehiclesCleared += OnVehiclesCleared;
         _vehicles.VehicleRemoving += _vehicleGrid.OnEntityRemoving;
         _vehicles.VehiclesCleared += _vehicleGrid.Clear;
+        _vehicles.VehicleRemoving += _audioEngine.OnVehicleRemoving;
+        _vehicles.VehiclesCleared += _audioEngine.OnVehiclesCleared;
+        SteeringController.BreakerFreed += _audioEngine.OnBreakerFreed;
 
         // Migrate stop/yield exemptions across edge splits (they are keyed by edge index, which
         // SplitEdge changes) so splitting an exempt approach doesn't silently re-stop the road.
         _roadGraph.EdgeSplit += _stopSigns.OnEdgeSplit;
         _roadGraph.EdgeSplit += _yieldSigns.OnEdgeSplit;
 
-        _sliderPanel.AddSlider("Kp", 0.5f, 10f, () => SteeringController.Kp, v => SteeringController.Kp = v);
-        _sliderPanel.AddSlider("Kd", 0f, 5f, () => SteeringController.Kd, v => SteeringController.Kd = v);
-        _sliderPanel.AddSlider("Max Steer", 0.1f, 1.5f, () => SteeringController.MaxSteer, v => SteeringController.MaxSteer = v);
-        _sliderPanel.AddSlider("Target Speed", 1f, 30f, () => SteeringController.TargetSpeed, v => SteeringController.TargetSpeed = v);
-        _sliderPanel.AddSlider("Lookahead Base", 0.5f, 15f, () => SteeringController.LookaheadBase, v => SteeringController.LookaheadBase = v);
-        _sliderPanel.AddSlider("Lookahead/Speed", 0f, 2f, () => SteeringController.LookaheadPerSpeed, v => SteeringController.LookaheadPerSpeed = v);
-        _sliderPanel.AddSlider("Lateral Gain", 0f, 3f, () => SteeringController.Klat, v => SteeringController.Klat = v);
-
-        FormClosed += (_, _) => SteeringController.Shutdown();
+        FormClosed += (_, _) =>
+        {
+            SteeringController.Shutdown();
+            _audioEngine.Dispose();
+        };
 
         _canvas = new SkiaCanvas();
         _canvas.Dock = DockStyle.Fill;
@@ -192,6 +219,9 @@ public class MainForm : Form
         _perfStopwatch.Restart();
         _simLoop.Tick();
         _perfTelemetry.RecordSimTime(_perfStopwatch.Elapsed.TotalMilliseconds);
+
+        // Drive the sound engine from the post-tick state (positions/clock current).
+        _audioEngine.Update(_canvas.Width, _canvas.Height);
 
         // Accumulate wall time and trigger a backup when the interval elapses.
         // The auto-save clock is independent of simulation time and pause state
@@ -547,12 +577,24 @@ public class MainForm : Form
 
     /// <summary>
     /// Handles keyboard input: V to spawn vehicles, +/- to adjust lane count on selected edge,
-    /// [/] to adjust speed limit, T to toggle the slider panel, P to toggle the performance HUD,
-    /// M to toggle the minimap, N to toggle the statistics panel, Space to pause/unpause,
-    /// comma/period to decrease/increase simulation speed (1x-64x).
+    /// [/] to adjust speed limit, P to toggle the performance HUD, M to toggle the minimap,
+    /// N to toggle the statistics panel, Space to pause/unpause, comma/period to
+    /// decrease/increase simulation speed (1x-64x). While the Settings dialog is open,
+    /// Escape cancels it and every other key is swallowed (modal).
     /// </summary>
     private void OnCanvasKeyDown(object? sender, KeyEventArgs e)
     {
+        // Modal Settings dialog: Escape cancels it; every other shortcut is swallowed
+        // while it is open. Must run before ANY other key handling (including the
+        // universal Escape -> CancelActiveTool below).
+        if (_settingsDialog.Visible)
+        {
+            if (e.KeyCode == Keys.Escape)
+                _settingsDialog.Cancel();
+            e.Handled = true;
+            return;
+        }
+
         // Press 'V' to spawn a vehicle with a random path
         if (e.KeyCode == Keys.V && _roadGraph.ActiveEdgeCount > 0)
         {
@@ -709,35 +751,31 @@ public class MainForm : Form
             e.Handled = true;
         }
 
-        if (e.KeyCode == Keys.T)
-        {
-            _sliderPanel.Visible = !_sliderPanel.Visible;
-            e.Handled = true;
-        }
-
+        // Panel/overlay toggles route through MutateSettings so the quick keys, the
+        // Settings dialog, and settings.json always agree.
         if (e.KeyCode == Keys.P)
         {
-            _hudPanel.Visible = !_hudPanel.Visible;
+            MutateSettings(s => s.ShowPerformanceHud = !s.ShowPerformanceHud);
             e.Handled = true;
         }
 
         if (e.KeyCode == Keys.M)
         {
-            _minimapPanel.Visible = !_minimapPanel.Visible;
+            MutateSettings(s => s.ShowMinimap = !s.ShowMinimap);
             e.Handled = true;
         }
 
         // N = toggle statistics panel (vehicle count, avg speed, congestion)
         if (e.KeyCode == Keys.N)
         {
-            _statisticsPanel.Visible = !_statisticsPanel.Visible;
+            MutateSettings(s => s.ShowStatistics = !s.ShowStatistics);
             e.Handled = true;
         }
 
         // H = toggle the congestion heat-map overlay
         if (e.KeyCode == Keys.H)
         {
-            _sceneRenderer.HeatMapEnabled = !_sceneRenderer.HeatMapEnabled;
+            MutateSettings(s => s.HeatMapEnabled = !s.HeatMapEnabled);
             e.Handled = true;
         }
 
@@ -759,12 +797,15 @@ public class MainForm : Form
             e.Handled = true;
         }
 
-        // G = toggle arc conflict debug overlay + logging
+        // G = toggle arc conflict debug overlay + logging (turning the overlay ON also
+        // forces logging on — never off — the historical pairing)
         if (e.KeyCode == Keys.G)
         {
-            VehicleRenderer.ShowArcConflicts = !VehicleRenderer.ShowArcConflicts;
-            if (VehicleRenderer.ShowArcConflicts)
-                SteeringController.DebugLoggingEnabled = true;
+            MutateSettings(s =>
+            {
+                s.ShowArcConflicts = !s.ShowArcConflicts;
+                if (s.ShowArcConflicts) s.DebugLogging = true;
+            });
             e.Handled = true;
         }
 
@@ -983,6 +1024,9 @@ public class MainForm : Form
         // other overlay — and skips itself when hidden.
         _perfTelemetry.Sample();
         _hudPanel.Draw(canvas);
+        // The modal Settings dialog is ExternallyDrawn and painted after the HUD so it
+        // sits above every overlay (no-op while hidden).
+        _settingsDialog.Draw(canvas);
     }
 
     /// <summary>
@@ -998,6 +1042,7 @@ public class MainForm : Form
             case Ui.UIAction.New: NewMap(); break;
             case Ui.UIAction.Save: SaveMap(); break;
             case Ui.UIAction.Load: LoadMap(); break;
+            case Ui.UIAction.Settings: OpenSettings(); break;
             case Ui.UIAction.Pause:
                 _simLoop.Paused = !_simLoop.Paused;
                 break;
@@ -1012,6 +1057,75 @@ public class MainForm : Form
     }
 
     /// <summary>
+    /// Pushes every value in <see cref="_settings"/> into the live systems. The ONLY
+    /// place settings reach those systems, so applied state and settings.json can never
+    /// disagree. Idempotent; called at startup and by every settings mutation.
+    /// </summary>
+    private void ApplySettings()
+    {
+        _sceneRenderer.GridEnabled = _settings.ShowGrid;
+        _sceneRenderer.HeatMapEnabled = _settings.HeatMapEnabled;
+        _hudPanel.Visible = _settings.ShowPerformanceHud;
+        _minimapPanel.Visible = _settings.ShowMinimap;
+        _statisticsPanel.Visible = _settings.ShowStatistics;
+        _legendPanel.Visible = _settings.ShowLegend;
+
+        _populationManager.MaxActiveVehicles = _settings.MaxVehicles;
+        _simLoop.Clock.GameSecondsPerRealSecond = _settings.GameSecondsPerRealSecond;
+        _autoSave.IntervalSeconds = _settings.AutosaveIntervalSeconds;
+        _autoSave.MaxBackups = _settings.AutosaveMaxBackups;
+
+        SteeringController.Kp = _settings.Kp;
+        SteeringController.Kd = _settings.Kd;
+        SteeringController.MaxSteer = _settings.MaxSteer;
+        SteeringController.TargetSpeed = _settings.TargetSpeed;
+        SteeringController.LookaheadBase = _settings.LookaheadBase;
+        SteeringController.LookaheadPerSpeed = _settings.LookaheadPerSpeed;
+        SteeringController.Klat = _settings.Klat;
+
+        VehicleRenderer.ShowArcConflicts = _settings.ShowArcConflicts;
+        SteeringController.DebugLoggingEnabled = _settings.DebugLogging;
+
+        _audioEngine.ApplySettings(_settings.SoundEnabled, _settings.MasterVolume,
+            _settings.AmbientHumEnabled, _settings.EngineSoundsEnabled, _settings.EventSoundsEnabled);
+    }
+
+    /// <summary>Settings-dialog Apply/OK path: adopts the staged record as applied,
+    /// pushes it live, and persists it.</summary>
+    private void ApplyStagedSettings(Core.AppSettings staged)
+    {
+        _settings = staged;
+        ApplySettings();
+        Persistence.SettingsStore.Save(_settings);
+    }
+
+    /// <summary>Hotkey path (H/M/N/P/G): mutates the applied settings directly, pushes
+    /// live, and persists — so quick toggles stay in sync with the dialog and the file.</summary>
+    private void MutateSettings(Action<Core.AppSettings> mutate)
+    {
+        mutate(_settings);
+        ApplySettings();
+        Persistence.SettingsStore.Save(_settings);
+    }
+
+    /// <summary>Opens the Settings dialog: pauses the simulation for the dialog's
+    /// lifetime, remembering the prior state (the SaveMap idiom) so closing restores
+    /// a user-chosen pause rather than force-resuming.</summary>
+    private void OpenSettings()
+    {
+        _settingsWasPaused = _simLoop.Paused;
+        _simLoop.Paused = true;
+        _settingsDialog.Open();
+    }
+
+    /// <summary>Dialog-closed callback (OK, Cancel, or Escape): restores the pause state
+    /// captured by <see cref="OpenSettings"/>.</summary>
+    private void OnSettingsClosed()
+    {
+        _simLoop.Paused = _settingsWasPaused;
+    }
+
+    /// <summary>
     /// Handles mouse-down: middle button starts panning, left button dispatches to the
     /// retained-mode UI first, then the active editor tool (one case per
     /// <see cref="EditorTool"/> value). Right button is the universal cancel (see
@@ -1020,6 +1134,12 @@ public class MainForm : Form
     private void OnCanvasMouseDown(object? sender, MouseEventArgs e)
     {
         _canvas.Focus();
+
+        // While the Settings dialog is open only LEFT clicks proceed (the dialog's scrim
+        // consumes them via UiRoot) — middle-pan and right-click cancel bypass UiRoot
+        // entirely and must be gated here.
+        if (_settingsDialog.Visible && e.Button != MouseButtons.Left)
+            return;
 
         if (e.Button == MouseButtons.Middle)
         {
@@ -1613,6 +1733,9 @@ public class MainForm : Form
     /// </summary>
     private void OnCanvasMouseWheel(object? sender, MouseEventArgs e)
     {
+        // Wheel zoom bypasses UiRoot, so the modal Settings dialog gates it here.
+        if (_settingsDialog.Visible) return;
+
         float zoomFactor = e.Delta > 0 ? 1.15f : 1f / 1.15f;
         _camera.ZoomAt(zoomFactor, e.X, e.Y, _canvas.Width, _canvas.Height);
     }

@@ -3,8 +3,8 @@ using SkiaSharp;
 namespace Roads.App.Rendering.Ui;
 
 /// <summary>
-/// One labeled slider row inside a <see cref="SliderPanel"/>: label above, current value
-/// right-aligned, a filled track with a white thumb. The panel positions this row so its
+/// One labeled slider row (used by the Settings dialog pages): label above, current value
+/// right-aligned, a filled track with a white thumb. The owner positions this row so its
 /// <see cref="Panel.Bounds"/> are the generous HIT BOX (track ±4 px horizontally, ±6 px
 /// vertically — the historical grab feel); the visible track is inset from it. Mouse-down
 /// jumps the value to the clicked position and consumes the event, so <see cref="UiRoot"/>
@@ -21,6 +21,13 @@ public class Slider : Panel
     public readonly float Max;
     private readonly Func<float> _get;
     private readonly Action<float> _set;
+
+    /// <summary>Numeric format for the value readout (e.g. "F0" for integer settings).</summary>
+    public string ValueFormat = "F2";
+
+    /// <summary>When &gt; 0, dragged values snap to the nearest multiple of this step
+    /// (clamped to the range) — used for integer-valued settings.</summary>
+    public float Step;
 
     public Slider(string label, float min, float max, Func<float> get, Action<float> set)
     {
@@ -45,7 +52,7 @@ public class Slider : Panel
         UiTheme.TextScratch.Color = new SKColor(170, 175, 185);
         canvas.DrawText(LabelText, track.Left, labelY, SKTextAlign.Left, UiTheme.Font11, UiTheme.TextScratch);
         UiTheme.TextScratch.Color = new SKColor(120, 200, 255);
-        canvas.DrawText(val.ToString("F2"), track.Right, labelY, SKTextAlign.Right, UiTheme.Font11, UiTheme.TextScratch);
+        canvas.DrawText(val.ToString(ValueFormat), track.Right, labelY, SKTextAlign.Right, UiTheme.Font11, UiTheme.TextScratch);
 
         UiTheme.FillScratch.Color = new SKColor(50, 53, 60);
         canvas.DrawRoundRect(track, 3f, 3f, UiTheme.FillScratch);
@@ -77,6 +84,9 @@ public class Slider : Panel
     {
         var track = Track;
         float t = Math.Clamp((screenX - track.Left) / track.Width, 0f, 1f);
-        _set(Min + t * (Max - Min));
+        float value = Min + t * (Max - Min);
+        if (Step > 0f)
+            value = Math.Clamp(MathF.Round(value / Step) * Step, Min, Max);
+        _set(value);
     }
 }

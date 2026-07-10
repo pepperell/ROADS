@@ -113,6 +113,15 @@ public class TrafficSignalSystem
     }
 
     /// <summary>
+    /// Current cycle segment for a traffic-light node (0=green A, 1=yellow A, 2=all-red,
+    /// 3=green B, 4=yellow B, 5=all-red), or 0 for out-of-range/non-light nodes.
+    /// Read-only accessor consumed by the audio engine's signal-change tick — polled for
+    /// visible nodes only, so it adds no per-tick cost here.
+    /// </summary>
+    public byte GetNodePhase(int nodeIndex)
+        => nodeIndex >= 0 && nodeIndex < _nodePhase.Length ? _nodePhase[nodeIndex] : (byte)0;
+
+    /// <summary>
     /// Rotates the traffic light phase grouping at a node. At 4-way intersections this
     /// cycles through the three canonical 2+2 pairings (opposite pairs, then each of the
     /// two adjacent pairings); at other intersections it shifts the folded-angle split

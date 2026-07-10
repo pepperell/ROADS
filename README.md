@@ -331,10 +331,10 @@ Achieved via struct-of-arrays layout and value types.
 | :x: | Map templates |
 | :x: | Road type visuals |
 | :x: | Vehicle type variety |
-| :x: | Sound effects |
+| :white_check_mark: | Sound effects |
 | :x: | Tooltip / hover info |
 | :x: | Right-click context menus |
-| :x: | Settings dialog |
+| :white_check_mark: | Settings dialog |
 
 ---
 

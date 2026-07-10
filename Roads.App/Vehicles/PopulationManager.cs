@@ -65,6 +65,15 @@ public class PopulationManager
     /// <summary>Maximum number of vehicles that can be active simultaneously.</summary>
     private int _maxActiveVehicles;
 
+    /// <summary>Runtime-adjustable active-vehicle cap (Settings dialog). Consumed only in
+    /// live count comparisons, so raising it allows more spawns immediately and lowering
+    /// it never despawns — the population just drifts down by attrition.</summary>
+    public int MaxActiveVehicles
+    {
+        get => _maxActiveVehicles;
+        set => _maxActiveVehicles = Math.Max(1, value);
+    }
+
     /// <summary>Maximum spawns per simulation tick (prevents pop-in during rush hour).</summary>
     private const int MaxSpawnsPerTick = 5;
 

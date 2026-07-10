@@ -75,6 +75,9 @@ public class SceneRenderer
         set => _heatMap.Enabled = value;
     }
 
+    /// <summary>Draws the faint 100 m alignment grid when set (Settings dialog, Graphics page).</summary>
+    public bool GridEnabled { get; set; } = true;
+
     /// <summary>
     /// Notifies the scene that the graph was REPLACED wholesale (New / Load / stress scene)
     /// rather than edited. Cached scenery must NOT survive the settle-gate window here: the
@@ -126,9 +129,10 @@ public class SceneRenderer
         var viewRect = camera.GetVisibleWorldRect(info.Width, info.Height);
 
         // Terrain detail (grass mottling) over the base clear color, then a faint
-        // 100 m reference grid kept as an editor alignment aid.
+        // 100 m reference grid kept as an editor alignment aid (optional via Settings).
         _terrain.Draw(canvas, viewRect, camera.Zoom, darkness);
-        DrawGrid(canvas, camera, info, GetGridColor(darkness));
+        if (GridEnabled)
+            DrawGrid(canvas, camera, info, GetGridColor(darkness));
 
         // Update congestion heat-map before the road draw pass so values are current
         // (cheap no-op when the overlay is disabled).

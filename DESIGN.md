@@ -691,10 +691,10 @@ Phases are built by an Opus "director" that hands self-contained milestones to l
 - [X] Editor UX: Bézier handles hit-test topmost (grab radius tracks the drawn handle); new Node tool (ghost preview; splits a nearby road or places a free node); right-click/ESC = universal cancel, falling back to the Select tool; Signal tuning (exemptions/phase) moved to Shift+click; Road tool first click is a deferred ghost anchor (no split/node until the segment commits — cancel leaves the graph untouched); an anchor ghost always previews where a click will land (snap node / on-road split / free), and crossing intersections ghost along the preview line
 - [X] Polish: app/New/Load always start paused with the Select tool; US continental crosswalks (bars along travel, count scales with roadway width) with the stop line pulled back at signalized approaches so the crossing sits outside the junction; map replacement (New/Load/stress) rebuilds scenery immediately (fixes stale-footprint crash when the node list shrinks); stale UI mouse capture releases on the first buttonless move (hover works right after Save/Load/New dialogs)
 - [X] Vehicle type variety (sedan, SUV, truck, bus, motorcycle)
-- [ ] Sound effects (optional: ambient traffic hum scaling with density)
+- [X] Sound effects (optional: ambient traffic hum scaling with density)
 - [ ] Tooltip / info on hover (vehicle speed, driver traits, destination)
 - [ ] Right-click context menus
-- [ ] Settings dialog (graphics quality, simulation parameters)
+- [X] Settings dialog (graphics quality, simulation parameters)
 
 **Deliverable:** Polished, feature-complete simulation with save/load and full editor.
 
