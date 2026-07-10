@@ -277,6 +277,14 @@ public static class MapSerializer
         // Load graph (rebuilds adjacency and turn matrix)
         graph.LoadFromData(nodes, edges);
 
+        // Heal Bézier handles corrupted by the pre-fix MoveNode (handle lengths not
+        // rescaled on node drags) — saved maps may carry edges whose skewed
+        // parametrization breaks Δt·Length distance math. Idempotent; no-op on
+        // healthy maps. Edge indices are unchanged, so the sections below are safe.
+        int healed = graph.NormalizeDegenerateHandles();
+        if (healed > 0)
+            System.Diagnostics.Debug.WriteLine($"[MapSerializer] Normalized degenerate Bezier handles on {healed} edge(s)");
+
         // Section 3 — Lane Restrictions
         int restrictionCount = r.ReadInt32();
         for (int i = 0; i < restrictionCount; i++)

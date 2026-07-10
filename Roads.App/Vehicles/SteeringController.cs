@@ -26,6 +26,18 @@ public static class SteeringController
     public static float LookaheadPerSpeed = 0.3f;
     /// <summary>Gain for lateral error correction (cross-track error).</summary>
     public static float Klat = 0.5f;
+    /// <summary>
+    /// Cap on the lateral correction term, as a fraction of the heading gain (so it holds
+    /// for any user-tuned Kp/Klat combination). The lateral term acts as a constant steering
+    /// bias once a vehicle is off-lane; the vehicle's steady-state heading then settles
+    /// cap/(Kp·sharpness) radians away from the bearing to its lookahead target. That angle
+    /// must stay well below π/2 — at π/2 the closing speed toward the lane reaches zero and
+    /// the vehicle orbits its target forever instead of converging (uncapped, any vehicle
+    /// displaced more than Kp·π/Klat ≈ 15 m by a map edit was permanently trapped in a
+    /// full-lock spin). 0.35 rad ≈ 20°: recovery keeps ≥94% closing speed, while in-lane
+    /// corrections (|latErr| ≲ 1.7 m at default gains) are below the cap and unaffected.
+    /// </summary>
+    private const float LatCorrectionCapFraction = 0.35f;
     /// <summary>Lane width in meters.</summary>
     private const float LaneWidth = SimConstants.LaneWidth;
 
@@ -1000,13 +1012,17 @@ public static class SteeringController
             }
         }
 
-        // PD control + lateral correction
+        // PD control + lateral correction (capped so heading control always dominates —
+        // see LatCorrectionCapFraction for the convergence argument)
         float prevError = store.PrevHeadingError[index];
         float errorDerivative = (headingError - prevError) / dt;
         store.PrevHeadingError[index] = headingError;
 
         float sharpness = store.SteeringSharpness[index];
-        float steer = (Kp * sharpness) * headingError + (Kd * sharpness) * errorDerivative - Klat * lateralError;
+        float latCorrection = Klat * lateralError;
+        float latCap = LatCorrectionCapFraction * Kp * sharpness;
+        latCorrection = MathF.Max(-latCap, MathF.Min(latCap, latCorrection));
+        float steer = (Kp * sharpness) * headingError + (Kd * sharpness) * errorDerivative - latCorrection;
         steer = MathF.Max(-MaxSteer, MathF.Min(MaxSteer, steer));
         if (store.DiagVehicle == index)
         {

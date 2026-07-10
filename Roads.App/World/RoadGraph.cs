@@ -1110,8 +1110,14 @@ public class RoadGraph
     }
 
     /// <summary>
-    /// Moves a node to a new position and updates the control points and lengths
-    /// of all connected edges so the Bézier curves follow the node.
+    /// Moves a node to a new position and updates the control points and lengths of all
+    /// connected edges so the Bézier curves follow the node. Control points translate with
+    /// the node, and each edge's handle LENGTHS are then rescaled by the chord-length
+    /// change (directions preserved): translation alone keeps the old absolute handle
+    /// length, so a drag that lengthens an edge would compress its Bézier parametrization
+    /// near one end — breaking the uniform t≈distance convention that all Δt·Length math
+    /// relies on (IDM gaps, stop lines, signal detection zones). Proportional rescaling
+    /// keeps a chord/3 handle at chord/3 while preserving any hand-tuned handle ratio.
     /// </summary>
     /// <param name="nodeIndex">Index of the node to move.</param>
     /// <param name="newPosition">New world-space position.</param>
@@ -1131,10 +1137,23 @@ public class RoadGraph
         void UpdateEdge(int i)
         {
             var edge = _edges[i];
+            var p0Old = edge.FromNode == nodeIndex ? oldPosition : _nodes[edge.FromNode].Position;
+            var p3Old = edge.ToNode == nodeIndex ? oldPosition : _nodes[edge.ToNode].Position;
+            float chordOld = Vector2.Distance(p0Old, p3Old);
+
             if (edge.FromNode == nodeIndex) edge.ControlPoint1 += delta;
             if (edge.ToNode == nodeIndex) edge.ControlPoint2 += delta;
             var p0 = _nodes[edge.FromNode].Position;
             var p3 = _nodes[edge.ToNode].Position;
+            float chordNew = Vector2.Distance(p0, p3);
+
+            if (chordOld > 0.001f && chordNew > 0.001f)
+            {
+                float scale = chordNew / chordOld;
+                edge.ControlPoint1 = p0 + (edge.ControlPoint1 - p0) * scale;
+                edge.ControlPoint2 = p3 + (edge.ControlPoint2 - p3) * scale;
+            }
+
             edge.Length = EstimateBezierLength(p0, edge.ControlPoint1, edge.ControlPoint2, p3);
             _edges[i] = edge;
         }
@@ -1142,6 +1161,70 @@ public class RoadGraph
         foreach (int i in GetIncomingEdges(nodeIndex)) UpdateEdge(i);
 
         Version++;
+    }
+
+    /// <summary>Keep-band for Bézier handle length as a fraction of chord: every creation
+    /// path builds handles at chord/3 (drawing, straight edges, curved-mode both use d/3;
+    /// De Casteljau split halves stay within a few percent), so a measured handle-length
+    /// histogram of any healthy map is a razor-sharp spike at 1/3 with 91% inside
+    /// [0.30, 0.375]. This ±25% band around 1/3 clears that spike with margin, so no
+    /// legitimately-drawn curve is ever touched, while the corruption tail (near-zero and
+    /// bloated handles left by the pre-fix MoveNode) falls outside and is repaired.</summary>
+    private const float HandleKeepLo = 0.25f;         // chord/4
+    private const float HandleKeepHi = 5f / 12f;      // chord·0.4167
+
+    /// <summary>
+    /// Repairs edges whose Bézier handle lengths have drifted off the chord/3 convention
+    /// (see <see cref="HandleKeepLo"/>). An out-of-band handle skews the curve's
+    /// parametrization — arc-length no longer tracks t — which silently corrupts ALL
+    /// Δt·Length distance math (IDM gaps, stop lines, signal detection zones); the extreme
+    /// case is a near-zero handle producing a metre-scale hairpin on a long arterial that
+    /// flings vehicles off-lane. The historical source is the pre-fix <see cref="MoveNode"/>
+    /// translating handles without rescaling (a node dragged so its edge grew kept the old
+    /// absolute handle, now tiny relative to the new chord). Each out-of-band handle is
+    /// rescaled to exactly chord/3, preserving its direction (the curve's tangent intent)
+    /// unless it is near-zero (&lt; 5% of chord, direction unreliable) in which case it is
+    /// rebuilt along the chord — a vanishing handle means that end was essentially straight.
+    /// Because both an edge and its reverse twin carry the same world handle at each shared
+    /// node, they heal identically, so two-way pairs stay mirror-consistent. Returns the
+    /// edge count repaired. Called after map load; idempotent and safe to call anytime.
+    /// </summary>
+    public int NormalizeDegenerateHandles()
+    {
+        int repaired = 0;
+        for (int i = 0; i < _edges.Count; i++)
+        {
+            var edge = _edges[i];
+            if (edge.FromNode < 0 || edge.ToNode < 0) continue;
+            var p0 = _nodes[edge.FromNode].Position;
+            var p3 = _nodes[edge.ToNode].Position;
+            float chord = Vector2.Distance(p0, p3);
+            if (chord < 0.01f) continue;
+
+            bool changed = false;
+            Vector2 Fix(Vector2 cp, Vector2 anchor, Vector2 other)
+            {
+                var handle = cp - anchor;
+                float len = handle.Length();
+                if (len >= HandleKeepLo * chord && len <= HandleKeepHi * chord) return cp;
+                changed = true;
+                var dir = len > 0.05f * chord
+                    ? handle / len
+                    : Vector2.Normalize(other - anchor); // near-zero: rebuild along chord
+                return anchor + dir * (chord / 3f);
+            }
+            edge.ControlPoint1 = Fix(edge.ControlPoint1, p0, p3);
+            edge.ControlPoint2 = Fix(edge.ControlPoint2, p3, p0);
+
+            if (changed)
+            {
+                edge.Length = EstimateBezierLength(p0, edge.ControlPoint1, edge.ControlPoint2, p3);
+                _edges[i] = edge;
+                repaired++;
+            }
+        }
+        if (repaired > 0) Version++;
+        return repaired;
     }
 
     /// <summary>

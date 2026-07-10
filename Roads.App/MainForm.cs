@@ -297,6 +297,16 @@ public class MainForm : Form
                     DumpVehicleDiag(v);
                     dumped.Add(v);
                 }
+            // Off-lane sweep: a displaced vehicle orbiting off-road at speed never
+            // registers as stopped, so it would be invisible to the stuck filter above.
+            // Sweep in any Driving edge-vehicle > ~7 m from its lane center as well
+            // (arc vehicles excluded: DistToRoadSq is held at 0 on arcs).
+            const float offLaneDistSq = 49f;
+            for (int v = 0; v < _vehicles.Count; v++)
+                if (_vehicles.State[v] == Roads.App.Vehicles.VehicleState.Driving
+                    && _vehicles.CurrentArc[v] < 0
+                    && _vehicles.DistToRoadSq[v] > offLaneDistSq && dumped.Add(v))
+                    DumpVehicleDiag(v);
             if (dumped.Count == 0)
             {
                 // Nothing met the threshold; still record the worst offender so a keypress is never a no-op.
@@ -811,7 +821,8 @@ public class MainForm : Form
 
         // D = capture a live deadlock to diag_vehicle.log. With a vehicle selected, dumps it and walks
         // the blocking chain (the full cycle); with NOTHING selected, dumps every car stuck > ~6s (the
-        // whole wedged cluster). Press it the moment a deadlock is on screen — the arc/intersection
+        // whole wedged cluster) plus any car > ~7 m off its lane center (off-road spinners never
+        // register as stopped). Press it the moment a deadlock is on screen — the arc/intersection
         // wedge state is not saved, so this text dump is the only durable record.
         if (e.KeyCode == Keys.D)
         {

@@ -15,6 +15,17 @@ namespace Roads.App;
 /// </summary>
 public class GraphChangeHandler
 {
+    /// <summary>
+    /// Maximum distance a vehicle whose edge went defunct may be re-snapped onto a
+    /// surviving edge. Must exceed the largest legitimate on-road distance from a
+    /// vehicle to its edge's centerline (the outer lane of a 3-lane two-way edge sits
+    /// 2.5 lane widths ≈ 8.75 m out), so splits and in-place redraws keep their
+    /// traffic. A vehicle farther out has no plausible continuous drive onto the new
+    /// geometry — teleport-snapping it would strand it visibly off-road — so it is
+    /// removed instead, consistent with the no-edge/no-path removal below.
+    /// </summary>
+    private const float MaxResnapDistance = 4f * SimConstants.LaneWidth;
+
     private readonly RoadGraph _graph;
     private readonly EditorState _editorState;
     private readonly VehicleStore _vehicles;
@@ -36,7 +47,8 @@ public class GraphChangeHandler
     /// <summary>
     /// Checks if the graph version has changed and, if so, fixes stale editor selections,
     /// strips marker flags from nodes that now have too many edges, and reroutes vehicles
-    /// on defunct edges. Called once per tick by SimulationLoop; O(1) when unchanged.
+    /// on defunct edges (removing any stranded farther than <see cref="MaxResnapDistance"/>
+    /// from every surviving edge). Called once per tick by SimulationLoop; O(1) when unchanged.
     /// </summary>
     public void HandleIfNeeded()
     {
@@ -117,12 +129,13 @@ public class GraphChangeHandler
     }
 
     /// <summary>
-    /// Finds the nearest edge to a position, preferring edges whose tangent aligns with
-    /// the given direction. If direction is zero, falls back to pure distance matching.
+    /// Finds the nearest edge within <see cref="MaxResnapDistance"/> of a position,
+    /// preferring edges whose tangent aligns with the given direction. If direction is
+    /// zero, falls back to pure distance matching. Returns -1 when no edge is in range.
     /// </summary>
     private (int edgeIndex, float t) FindNearestEdgeDirectional(Vector2 position, Vector2 direction)
     {
-        var (bestEdge, bestT) = _edgeSpatialGrid.FindNearestEdgeWithT(_graph, position, float.MaxValue);
+        var (bestEdge, bestT) = _edgeSpatialGrid.FindNearestEdgeWithT(_graph, position, MaxResnapDistance);
         if (bestEdge < 0 || direction == Vector2.Zero) return (bestEdge, bestT);
 
         // Check if the matched edge's tangent aligns with our direction

@@ -47,6 +47,13 @@ public static class SimTestHarness
     private const float SimDt = SimulationLoop.SimDt;        // 1/30 s
     private const int SubstepsPerSecond = 30;
     private const int StuckThresholdSubsteps = 900;          // > 30 sim-seconds stopped
+    /// <summary>
+    /// Squared distance (m²) from lane center beyond which a Driving edge-vehicle is
+    /// reported as off-lane (~7 m, matching MainForm.CaptureBaseline's tripwire). Catches
+    /// failure modes the stuck tracker can't see — e.g. a displaced vehicle orbiting
+    /// off-road at full speed, which never registers as stopped.
+    /// </summary>
+    private const float OffLaneDistSqThreshold = 49f;
 
     private static StringBuilder? _reportAnomalies;
 
@@ -180,15 +187,16 @@ public static class SimTestHarness
             YieldSigns = yieldSigns,
         };
 
-        int clusterCount = WriteReport(outPath, deps, mapFile, hours, clockStart, dayStart,
+        int failureCount = WriteReport(outPath, deps, mapFile, hours, clockStart, dayStart,
             clockEnd, dayEnd, sw.Elapsed.TotalSeconds, totalSpawned, totalRemoved, peakLive,
             vehicles.Count, stuckSubsteps);
 
-        return clusterCount > 0 ? 1 : 0;
+        return failureCount > 0 ? 1 : 0;
     }
 
     /// <summary>
-    /// Writes the full deadlock report and returns the number of jam clusters found.
+    /// Writes the full deadlock report and returns the number of failure findings
+    /// (jam clusters + off-lane vehicles) — the process exits nonzero when any exist.
     /// </summary>
     private static int WriteReport(string outPath, DeadlockReport.Deps d, string mapFile, float hours,
         double clockStart, int dayStart, double clockEnd, int dayEnd, double wallSeconds,
@@ -220,6 +228,20 @@ public static class SimTestHarness
 
         foreach (int v in stuck)
             DeadlockReport.DumpVehicle(sb, d, v, stuckSubsteps[v]);
+
+        // ── Off-lane tripwire: Driving edge-vehicles far from their lane center ──
+        // (arc vehicles excluded: DistToRoadSq is held at 0 while on an arc)
+        var offLane = new List<int>();
+        for (int v = 0; v < veh.Count; v++)
+            if (veh.State[v] == VehicleState.Driving && veh.CurrentArc[v] < 0
+                && veh.DistToRoadSq[v] > OffLaneDistSqThreshold)
+                offLane.Add(v);
+
+        sb.AppendLine($"OFF-LANE VEHICLES (Driving, >{MathF.Sqrt(OffLaneDistSqThreshold):F0} m from lane center): {offLane.Count}");
+        sb.AppendLine();
+
+        foreach (int v in offLane)
+            DeadlockReport.DumpVehicle(sb, d, v, 0);
 
         // ── Group stuck vehicles into jam clusters by contended node ────────
         var clusters = new Dictionary<int, List<int>>();
@@ -327,7 +349,7 @@ public static class SimTestHarness
         sb.AppendLine("=== SIMTEST COMPLETE ===");
 
         File.WriteAllText(outPath, sb.ToString());
-        return clusters.Count;
+        return clusters.Count + offLane.Count;
     }
 
     /// <summary>Best-effort short mechanism label for the machine summary line.</summary>
