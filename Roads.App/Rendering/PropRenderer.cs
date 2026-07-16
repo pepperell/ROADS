@@ -98,6 +98,10 @@ public sealed class PropRenderer
     private int _cachedVersion = -1;
     /// <summary>Building count at the last rebuild (early-out key, paired with the graph version).</summary>
     private int _cachedBuildingCount = -1;
+    /// <summary>Water version at the last rebuild (early-out key — props must vacate painted water).</summary>
+    private int _cachedWaterVersion = -1;
+    /// <summary>Water layer captured by <see cref="Rebuild"/> for candidate rejection.</summary>
+    private WaterLayer? _water;
 
     // Reusable paints — colors are set per draw call; no per-frame allocation.
     private readonly SKPaint _shadowPaint = new()
@@ -139,12 +143,15 @@ public sealed class PropRenderer
     /// world AABBs from the building layer; each is inflated by 1.5 m for rejection.
     /// </summary>
     public void Rebuild(RoadGraph graph, EdgeSpatialGrid edgeGrid,
-        IReadOnlyList<SKRect> buildingBounds, int graphVersion)
+        IReadOnlyList<SKRect> buildingBounds, int graphVersion, WaterLayer water)
     {
-        if (graphVersion == _cachedVersion && buildingBounds.Count == _cachedBuildingCount)
+        if (graphVersion == _cachedVersion && buildingBounds.Count == _cachedBuildingCount
+            && water.Version == _cachedWaterVersion)
             return;
         _cachedVersion = graphVersion;
         _cachedBuildingCount = buildingBounds.Count;
+        _cachedWaterVersion = water.Version;
+        _water = water;
 
         edgeGrid.RebuildIfNeeded(graph);
         BuildBuildingHash(buildingBounds);
@@ -350,6 +357,7 @@ public sealed class PropRenderer
 
                 var pos = GeometryUtil.OffsetRight(graph, i, t, side * clearance);
                 if (InsideBuilding(pos.X, pos.Y)) continue;
+                if (InWater(pos)) continue;
                 if (TooCloseToRoad(graph, edgeGrid, pos, LightRoadSlack)) continue;
 
                 var tan = graph.EvaluateBezierTangent(i, t);
@@ -400,6 +408,7 @@ public sealed class PropRenderer
 
                 var pos = GeometryUtil.OffsetRight(graph, i, t, side * offset);
                 if (InsideBuilding(pos.X, pos.Y)) continue;
+                if (InWater(pos)) continue;
                 if (TooCloseToRoad(graph, edgeGrid, pos, VegRoadSlack)) continue;
 
                 float size = 2.5f + Hash01(seed, 13) * 2.0f;
@@ -457,6 +466,7 @@ public sealed class PropRenderer
                     var pos = new Vector2(centerX + MathF.Cos(ang) * dist,
                                           centerY + MathF.Sin(ang) * dist);
                     if (InsideBuilding(pos.X, pos.Y)) continue;
+                    if (InWater(pos)) continue;
                     if (TooCloseToRoad(graph, edgeGrid, pos, VegRoadSlack)) continue;
 
                     float size = 2.5f + Hash01(HashPos(pos), 5) * 2.5f;
@@ -492,6 +502,7 @@ public sealed class PropRenderer
                 var pos = new Vector2(node.Position.X + MathF.Cos(ang) * dist,
                                       node.Position.Y + MathF.Sin(ang) * dist);
                 if (InsideBuilding(pos.X, pos.Y)) continue;
+                if (InWater(pos)) continue;
                 if (TooCloseToRoad(graph, edgeGrid, pos, VegRoadSlack)) continue;
 
                 float size = 2.5f + Hash01(HashPos(pos), 6) * 2.0f;
@@ -508,6 +519,7 @@ public sealed class PropRenderer
                     var pos = new Vector2(node.Position.X + MathF.Cos(ang) * dist,
                                           node.Position.Y + MathF.Sin(ang) * dist);
                     if (InsideBuilding(pos.X, pos.Y)) continue;
+                    if (InWater(pos)) continue;
                     if (TooCloseToRoad(graph, edgeGrid, pos, VegRoadSlack)) continue;
 
                     float size = 1.0f + Hash01(HashPos(pos), 7) * 0.6f;
@@ -621,6 +633,9 @@ public sealed class PropRenderer
             }
         }
     }
+
+    /// <summary>True when the point lies in painted water (props never spawn in rivers or ponds).</summary>
+    private bool InWater(Vector2 p) => _water != null && _water.IsWater(p);
 
     /// <summary>True when the point lies inside any building AABB (already inflated by 1.5 m).</summary>
     private bool InsideBuilding(float x, float y)

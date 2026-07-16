@@ -237,9 +237,10 @@ public sealed class TerrainRenderer
     /// <summary>
     /// Applies the shared day/night formula to an undimmed base color: lerp toward night
     /// RGB(15,17,26) by <c>darkness * 0.85</c>, plus a warm dawn/dusk bias (+12R, −3G, −10B)
-    /// scaled by a factor that peaks mid-transition (mirrors SceneRenderer.GetEnvironmentColors).
+    /// scaled by a factor that peaks mid-transition. This is the single source of the
+    /// ground-plane tint formula — WaterRenderer shares it so water shifts with the land.
     /// </summary>
-    private static SKColor DimColor(SKColor c, float darkness)
+    internal static SKColor DimColor(SKColor c, float darkness)
     {
         darkness = Math.Clamp(darkness, 0f, 1f);
         float t = darkness * 0.85f;

@@ -14,8 +14,9 @@ namespace Roads.App.Rendering.Ui;
 /// on) the empty box. A chip in the box's top-left corner shows the current camera zoom.
 /// Road segments are colored/thickened by <see cref="RoadType"/> and
 /// recorded once into an <see cref="SKPicture"/> (panel-local pixels), re-recorded only
-/// when the graph version changes; the world→panel transform is kept alongside so
-/// screen→world mapping stays consistent with what was drawn.
+/// when the graph OR water version changes (water draws under the roads); the
+/// world→panel transform is kept alongside so screen→world mapping stays consistent
+/// with what was drawn.
 /// </summary>
 public class MinimapPanel : Panel
 {
@@ -27,9 +28,14 @@ public class MinimapPanel : Panel
 
     private readonly Camera _camera;
     private readonly RoadGraph _graph;
+    private readonly WaterLayer _water;
 
     /// <summary>Reusable road stroke; color and width are set per road type while recording.</summary>
     private readonly SKPaint _roadPaint = new() { Style = SKPaintStyle.Stroke, IsAntialias = true, StrokeCap = SKStrokeCap.Round };
+
+    /// <summary>Water fill/stroke for the recorded picture (muted blue, under the roads).</summary>
+    private readonly SKPaint _waterFillPaint = new() { Color = new SKColor(74, 108, 138), Style = SKPaintStyle.Fill, IsAntialias = true };
+    private readonly SKPaint _waterStrokePaint = new() { Color = new SKColor(74, 108, 138), Style = SKPaintStyle.Stroke, IsAntialias = true, StrokeCap = SKStrokeCap.Round };
     private readonly SKPaint _viewportPaint = new() { Color = new SKColor(120, 200, 255, 230), Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f, IsAntialias = true };
 
     /// <summary>Road-type record order, ascending visual importance so highways draw on top.</summary>
@@ -39,6 +45,7 @@ public class MinimapPanel : Panel
     // Cached network geometry (panel-local pixels) and the transform it was built with.
     private SKPicture? _networkPicture;
     private int _cachedVersion = -1;
+    private int _cachedWaterVersion = -1;
     private bool _hasContent;
     private float _scale, _offsetX, _offsetY;
     private Vector2 _worldMin;
@@ -46,10 +53,11 @@ public class MinimapPanel : Panel
     // Canvas size captured at layout, needed for the camera's visible-rect query at draw.
     private float _canvasWidth, _canvasHeight;
 
-    public MinimapPanel(Camera camera, RoadGraph graph)
+    public MinimapPanel(Camera camera, RoadGraph graph, WaterLayer water)
     {
         _camera = camera;
         _graph = graph;
+        _water = water;
         Anchor = UiAnchor.BottomRight;
         Margin = new SKPoint(10f, 10f);
         Size = new SKSize(BoxSize, BoxSize);
@@ -142,8 +150,9 @@ public class MinimapPanel : Panel
     /// </summary>
     private void EnsureCache(RoadGraph graph)
     {
-        if (graph.Version == _cachedVersion) return;
+        if (graph.Version == _cachedVersion && _water.Version == _cachedWaterVersion) return;
         _cachedVersion = graph.Version;
+        _cachedWaterVersion = _water.Version;
 
         float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
         bool any = false;
@@ -161,6 +170,26 @@ public class MinimapPanel : Panel
             minY = MathF.Min(minY, MathF.Min(a.Y, b.Y));
             maxX = MathF.Max(maxX, MathF.Max(a.X, b.X));
             maxY = MathF.Max(maxY, MathF.Max(a.Y, b.Y));
+        }
+
+        // Water counts as content too — a lake outside the road AABB must not be
+        // letterboxed out, and a roadless-but-watered map still draws.
+        foreach (var c in _water.Circles)
+        {
+            any = true;
+            minX = MathF.Min(minX, c.Center.X - c.Radius);
+            minY = MathF.Min(minY, c.Center.Y - c.Radius);
+            maxX = MathF.Max(maxX, c.Center.X + c.Radius);
+            maxY = MathF.Max(maxY, c.Center.Y + c.Radius);
+        }
+        foreach (var s in _water.Segments)
+        {
+            any = true;
+            float half = s.Width * 0.5f;
+            minX = MathF.Min(minX, MathF.Min(s.P0.X, s.P3.X) - half);
+            minY = MathF.Min(minY, MathF.Min(s.P0.Y, s.P3.Y) - half);
+            maxX = MathF.Max(maxX, MathF.Max(s.P0.X, s.P3.X) + half);
+            maxY = MathF.Max(maxY, MathF.Max(s.P0.Y, s.P3.Y) + half);
         }
 
         if (!any)
@@ -194,6 +223,20 @@ public class MinimapPanel : Panel
     {
         using var recorder = new SKPictureRecorder();
         var rec = recorder.BeginRecording(new SKRect(0, 0, BoxSize, BoxSize));
+
+        // Water first, so roads draw over it (a road across a river reads as a bridge).
+        foreach (var c in _water.Circles)
+        {
+            var p = WorldToPanel(c.Center.X, c.Center.Y);
+            rec.DrawCircle(p.X, p.Y, MathF.Max(0.6f, c.Radius * _scale), _waterFillPaint);
+        }
+        foreach (var s in _water.Segments)
+        {
+            var pa = WorldToPanel(s.P0.X, s.P0.Y);
+            var pb = WorldToPanel(s.P3.X, s.P3.Y);
+            _waterStrokePaint.StrokeWidth = MathF.Max(0.8f, s.Width * _scale);
+            rec.DrawLine(pa, pb, _waterStrokePaint);
+        }
 
         var paths = new SKPath[4];
         for (int t = 0; t < paths.Length; t++) paths[t] = new SKPath();

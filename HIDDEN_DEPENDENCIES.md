@@ -20,6 +20,8 @@ Two **private** surgery helpers intentionally mutate without bumping — `MarkNo
 
 Remaining risk is additive only: a future public mutator that forgets the bump. No runtime check can catch that from the consumer side — version-keyed caches compare for equality and cannot distinguish "unchanged" from "mutated without a bump" — so this contract remains doc-enforced (the Phase 4.5 frame-protocol guards assert staleness relative to the *reported* version, not unreported mutations).
 
+**A second, parallel invalidation stream exists: [WaterLayer.Version](Roads.App/World/WaterLayer.cs).** The painted water layer is not graph state (the sim never reads it), so it carries its own version counter with the same contract: every mutation bumps it. Three render-side caches key on BOTH versions — MinimapPanel's recorded picture, PropRenderer's placement (props must vacate painted water), and SceneRenderer's scenery settle-gate. A new water mutator that forgets its bump leaves stale props/minimap exactly the way a graph mutator would; a new consumer of water data must add the water version to its early-out key, not just `RoadGraph.Version`.
+
 ## 2. Graph mutation during cache maintenance — confined to a normalize phase
 
 Historically the rebuild chain mutated the graph mid-rebuild: signal auto-assignment called `graph.SetNodeFlags` inside the systems' `RebuildIfNeeded` (each call bumping Version *during* a rebuild keyed on Version, so **every version-keyed cache rebuilt a second time next tick** — the full double cascade), and `ApplyDefaultLaneRestrictions` bumped between the stop-line and arc rebuilds (re-rebuilding only stop lines next tick). Resolved in Phase 4.5: [SimulationLoop.RebuildWorldCaches](Roads.App/SimulationLoop.cs#L161) now runs two phases:

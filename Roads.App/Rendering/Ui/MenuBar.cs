@@ -11,10 +11,11 @@ public enum UIAction { New, Save, Load, Settings, Pause, SpeedDown, SpeedUp }
 
 /// <summary>
 /// The top-left menu bar: four action <see cref="Button"/>s (New / Save / Load / Settings)
-/// at the far left, then four editor-tool toggle buttons (Select / Road / Dest Pt / Signal).
-/// The Node / Delete / Update Seg tools live on the <see cref="RoadSubmenu"/> opened by
-/// the Road button, and the Change Type / Control Type / Rotate tools on the
-/// <see cref="SignalSubmenu"/> opened by the Signal button — not here. Tool buttons set
+/// at the far left, then five editor-tool toggle buttons (Select / Road / Dest Pt /
+/// Signal / Water). The Node / Delete / Update Seg tools live on the
+/// <see cref="RoadSubmenu"/> opened by the Road button, the Change Type / Control Type /
+/// Rotate tools on the <see cref="SignalSubmenu"/> opened by the Signal button, and the
+/// water brush modes/sizes on the <see cref="WaterSubmenu"/> — not here. Tool buttons set
 /// <see cref="EditorState.ActiveTool"/> directly (resetting transient tool state first)
 /// and highlight via live IsActive closures; actions are routed to the owner through the
 /// callback given at construction. Sits flush under the top edge (the row freed by the
@@ -37,8 +38,8 @@ public class MenuBar : Panel
 
     /// <summary>Left edge (canvas px) of the tool button at the given index — the road
     /// submenu anchors under the Road button (index 1), the POI submenu under the Dest Pt
-    /// button (index 2), the signals submenu under the Signal button (index 3). Constant
-    /// geometry.</summary>
+    /// button (index 2), the signals submenu under the Signal button (index 3), and the
+    /// water submenu under the Water button (index 4). Constant geometry.</summary>
     public static float ToolButtonLeft(int index) => ToolStartX + index * (ButtonWidth + ButtonSpacing);
 
     /// <summary>Y of the row below the toolbar where submenus anchor.</summary>
@@ -74,6 +75,7 @@ public class MenuBar : Panel
             (label: "Road", tool: EditorTool.Road),
             (label: "Dest Pt", tool: EditorTool.Destination),
             (label: "Signal", tool: EditorTool.Signal),
+            (label: "Water", tool: EditorTool.Water),
         };
 
         for (int i = 0; i < tools.Length; i++)

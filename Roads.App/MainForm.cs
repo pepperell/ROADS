@@ -32,6 +32,8 @@ public class MainForm : Form
     private readonly DestinationTool _destinationTool = new();
     private readonly SignalTool _signalTool = new();
     private readonly LaneRestrictionTool _laneRestrictionTool = new();
+    private readonly WaterTool _waterTool = new();
+    private readonly WaterLayer _waterLayer = new();
     private readonly SpatialGrid _vehicleGrid = new();
     private readonly StopLineCache _stopLineCache = new();
     private readonly EdgeSpatialGrid _edgeSpatialGrid = new();
@@ -137,6 +139,7 @@ public class MainForm : Form
         _uiRoot.Add(new Ui.PoiSubmenu(_editorState));
         _uiRoot.Add(new Ui.RoadSubmenu(_editorState));
         _uiRoot.Add(new Ui.SignalSubmenu(_editorState));
+        _uiRoot.Add(new Ui.WaterSubmenu(_editorState));
         _uiRoot.Add(_legendPanel);
         _uiRoot.Add(new Ui.ClockPanel(_simLoop, OnUiAction));
 
@@ -154,7 +157,7 @@ public class MainForm : Form
         bottomLeftStack.Add(new Ui.SelectionInfoPanel(_roadGraph, _editorState));
         _uiRoot.Add(bottomLeftStack);
 
-        _minimapPanel = new Ui.MinimapPanel(_camera, _roadGraph);
+        _minimapPanel = new Ui.MinimapPanel(_camera, _roadGraph, _waterLayer);
         _uiRoot.Add(_minimapPanel);
 
         // Settings dialog last: topmost hit-testing (its scrim must swallow every click).
@@ -163,12 +166,12 @@ public class MainForm : Form
         _settingsDialog = new Ui.SettingsDialog(() => _settings, ApplyStagedSettings, OnSettingsClosed);
         _uiRoot.Add(_settingsDialog);
 
-        _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _laneRestrictionTool, _uiRoot);
+        _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _laneRestrictionTool, _uiRoot, _waterLayer);
         // AutoSaveManager shares the same object references used by SaveMap() so the
         // backup format is identical to a manual save (minus vehicles, which are transient).
         // Triggered from the render-timer tick so it runs on the UI thread with no locking.
         _autoSave = new Persistence.AutoSaveManager(_roadGraph, _vehicles, _camera,
-            _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals, _populationManager);
+            _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals, _populationManager, _waterLayer);
 
         // Push the loaded settings into every live system before the first frame (all
         // targets — panels, renderer, autosave, sim — exist by this point).
@@ -874,6 +877,14 @@ public class MainForm : Form
             CaptureBaseline();
             e.Handled = true;
         }
+
+        // W: select the Water tool (mirrors the toolbar button's click body)
+        if (e.KeyCode == Keys.W)
+        {
+            _editorState.ResetToolState();
+            _editorState.ActiveTool = Editor.EditorTool.Water;
+            e.Handled = true;
+        }
     }
 
     /// <summary>
@@ -887,6 +898,7 @@ public class MainForm : Form
 
         _vehicles.ClearAll();
         _roadGraph.LoadFromData(new List<World.RoadNode>(), new List<World.RoadEdge>());
+        _waterLayer.Clear();
 
         // Reset per-map traffic-control overrides (exemptions, phase rotations). They
         // survive graph edits by design, so replacing the whole map must clear them
@@ -944,13 +956,13 @@ public class MainForm : Form
             {
                 Persistence.MapJsonSerializer.Save(dlg.FileName, _roadGraph, _vehicles,
                     _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
-                    _populationManager, includeVehicles);
+                    _populationManager, _waterLayer, includeVehicles);
             }
             else
             {
                 Persistence.MapSerializer.Save(dlg.FileName, _roadGraph, _vehicles,
                     _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
-                    _populationManager, includeVehicles);
+                    _populationManager, _waterLayer, includeVehicles);
             }
         }
         catch (Exception ex)
@@ -999,7 +1011,7 @@ public class MainForm : Form
 
             Persistence.MapSerializer.Load(dlg.FileName, _roadGraph, _vehicles,
                 _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
-                _populationManager, loadVehicles);
+                _populationManager, _waterLayer, loadVehicles);
             _simLoop.RebuildWorldCaches();
             _sceneRenderer.OnMapReplaced();
 
@@ -1287,6 +1299,9 @@ public class MainForm : Form
                 case EditorTool.UpdateSegment:
                     _updateSegmentTool.OnClick(worldVec, _roadGraph, _editorState, _edgeSpatialGrid);
                     break;
+                case EditorTool.Water:
+                    _waterTool.OnClick(worldVec, _waterLayer, _editorState);
+                    break;
             }
         }
         else if (e.Button == MouseButtons.Right)
@@ -1299,14 +1314,29 @@ public class MainForm : Form
 
     /// <summary>
     /// Shared right-click / ESC "cancel" semantics, one step per invocation: aborts the
-    /// in-progress road chain, then exits lane-restrict mode, then clears any selection;
-    /// with nothing left to cancel, switches the active tool back to Select.
+    /// in-progress road chain, then an in-progress water stroke or pending stream chain,
+    /// then exits lane-restrict mode, then clears any selection; with nothing left to
+    /// cancel, switches the active tool back to Select.
     /// </summary>
     private void CancelActiveTool()
     {
         if (_editorState.IsDrawingRoad)
         {
             _roadTool.OnCancel(_editorState);
+            return;
+        }
+        if (_editorState.IsPaintingWater)
+        {
+            // Abort an in-progress brush/erase stroke (Esc mid-drag).
+            _editorState.IsPaintingWater = false;
+            _editorState.WaterLastDabPos = null;
+            return;
+        }
+        if (_editorState.WaterStreamAnchor is not null)
+        {
+            // Drop the pending stream chain; a second cancel then falls through to Select.
+            _editorState.WaterStreamAnchor = null;
+            _editorState.WaterStreamPrevDir = null;
             return;
         }
         if (_editorState.LaneRestrictionMode)
@@ -1414,6 +1444,12 @@ public class MainForm : Form
         else if (e.Button == MouseButtons.Left)
         {
             _uiRoot.OnMouseUp(e.X, e.Y);
+            if (_editorState.IsPaintingWater)
+            {
+                // End of a brush/erase stroke.
+                _editorState.IsPaintingWater = false;
+                _editorState.WaterLastDabPos = null;
+            }
             if (_editorState.IsDraggingNode)
             {
                 // Split edges at any crossings created by the drag
@@ -1453,6 +1489,7 @@ public class MainForm : Form
         _editorState.RoadAnchorGhostPos = null;
         _editorState.RoadPreviewCp1 = null;
         _editorState.RoadPreviewCp2 = null;
+        _editorState.WaterGhostPos = null;
 
         // A captured UI drag (minimap scrub, slider thumb) owns every move until release,
         // even with the cursor far outside the panel. Capture with NO button held is
@@ -1479,6 +1516,23 @@ public class MainForm : Form
             _camera.Pan(dx, dy);
             _lastMousePos = e.Location;
             return;
+        }
+
+        // Water paint/erase stroke also runs before the UI hover gate (like panning) so
+        // an in-progress drag never stalls while the cursor crosses a panel.
+        if (_editorState.IsPaintingWater)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                var paintPos = _camera.ScreenToWorld(e.X, e.Y, _canvas.Width, _canvas.Height);
+                var paintVec = new Vector2(paintPos.X, paintPos.Y);
+                _waterTool.OnDrag(paintVec, _waterLayer, _editorState);
+                _editorState.WaterGhostPos = paintVec;
+                return;
+            }
+            // Self-heal: the matching mouse-up was lost (released outside the window).
+            _editorState.IsPaintingWater = false;
+            _editorState.WaterLastDabPos = null;
         }
 
         // Hovering any retained-mode panel suppresses map hover highlights.
@@ -1567,6 +1621,15 @@ public class MainForm : Form
                             _editorState.HoveredEdge = _edgeSpatialGrid.FindNearestEdge(_roadGraph, worldVec, EditorState.SnapDistance);
                         }
                     }
+                    break;
+                }
+                case EditorTool.Water:
+                {
+                    // No map hover with the Water tool — just the brush/stream ghost.
+                    _editorState.HoveredNode = -1;
+                    _editorState.HoveredEdge = -1;
+                    _editorState.HoveredVehicle = -1;
+                    _editorState.WaterGhostPos = worldVec;
                     break;
                 }
                 case EditorTool.Delete:
@@ -1765,6 +1828,7 @@ public class MainForm : Form
         _vehicles.ClearAll();
         var (nodes, edges) = Roads.App.World.GridNetworkGenerator.Generate(gridCols, gridRows, spacing);
         _roadGraph.LoadFromData(nodes, edges);
+        _waterLayer.Clear(); // stress scene replaces the whole map, water included
 
         // Reset per-map traffic-control overrides exactly as NewMap() does.
         _stopSigns.SetExemptEdges(new List<int>());

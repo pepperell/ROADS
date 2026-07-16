@@ -24,6 +24,13 @@ Usage:
       --boundary boundary.json --out town.roads \
       [--home-cap 1500] [--center LAT,LON] [--zoom 0.35] [--time 7.25]
 
+With --water, real hydrography is painted into the map's water layer (format v3):
+OSM natural=water polygons (ponds, lakes, wide-river banks) become circle fills —
+a quadtree cover whose circle radii follow the distance to the shoreline — and
+linear waterways (rivers, streams, brooks, canals, drains) become smooth
+stream-segment chains, width from the width/est_width tag or a per-class default.
+Waterway lines already covered by a water polygon are skipped (no double paint).
+
 Overpass queries (bbox = S,W,N,E covering the town):
   roads:     way["highway"~"^(motorway|trunk|primary|secondary|tertiary|
              unclassified|residential|living_street|motorway_link|trunk_link|
@@ -33,6 +40,8 @@ Overpass queries (bbox = S,W,N,E covering the town):
              tourism/leisure tags (bbox);                out center;
   boundary:  relation["boundary"="administrative"]["admin_level"="8"]
              ["name"="<Town>"](bbox);                    out geom;
+  water:     way["natural"="water"](bbox); relation["natural"="water"](bbox);
+             way["waterway"~"^(river|stream|canal|drain|brook)$"](bbox); out geom;
 """
 
 import argparse
@@ -974,6 +983,326 @@ def connect_pois(nodes, segs, pois, entry_nodes):
     return placed, skipped
 
 
+# --- Water layer -------------------------------------------------------------------
+
+# waterway value -> default painted width (m) when no width/est_width tag parses.
+WATERWAY_WIDTHS = {
+    "river": 25.0,
+    "canal": 8.0,
+    "stream": 3.5,
+    "brook": 3.5,
+    "drain": 2.5,
+}
+WATER_CIRCLE_MAX_R = 40.0   # largest fill circle
+WATER_CIRCLE_MIN_R = 2.2    # slivers thinner than this are left to the shore band
+WATER_ROOT_CELL = 48.0      # quadtree root cell (0.71*48 = 34 m needed radius < max)
+WATER_SEG_SPACING = 12.0    # min waypoint spacing along stream chains (m)
+
+
+def parse_width_tag(tags):
+    for key in ("width", "est_width"):
+        v = tags.get(key, "").replace("m", "").strip()
+        if not v:
+            continue
+        try:
+            w = float(v)
+            if w > 0:
+                return w
+        except ValueError:
+            pass
+    return None
+
+
+def point_seg_dist(p, a, b):
+    ax, ay = a
+    dx, dy = b[0] - ax, b[1] - ay
+    l2 = dx * dx + dy * dy
+    if l2 < 1e-12:
+        return dist(p, a)
+    t = max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / l2))
+    return math.hypot(p[0] - (ax + t * dx), p[1] - (ay + t * dy))
+
+
+class WaterPolygon:
+    """A water body: outer ring + island holes, with a segment hash for fast
+    distance-to-shoreline queries (drives the fill-circle radii)."""
+
+    CELL = 32.0
+
+    def __init__(self, outer, inners):
+        self.outer = outer
+        self.inners = [i for i in inners if len(i) >= 3]
+        xs = [p[0] for p in outer]
+        ys = [p[1] for p in outer]
+        self.bbox = (min(xs), min(ys), max(xs), max(ys))
+        self._segs = defaultdict(list)
+        for ring in [outer] + self.inners:
+            n = len(ring)
+            for i in range(n):
+                self._insert(ring[i], ring[(i + 1) % n])
+
+    def _insert(self, a, b):
+        cs = self.CELL
+        x0, x1 = sorted((a[0], b[0]))
+        y0, y1 = sorted((a[1], b[1]))
+        for cx in range(int(x0 // cs), int(x1 // cs) + 1):
+            for cy in range(int(y0 // cs), int(y1 // cs) + 1):
+                self._segs[(cx, cy)].append((a, b))
+
+    def boundary_dist(self, p, cap):
+        """Distance from p to the nearest shoreline segment, capped at `cap`."""
+        cs = self.CELL
+        cx, cy = int(p[0] // cs), int(p[1] // cs)
+        best = cap
+        max_ring = int(cap // cs) + 2
+        for radius in range(max_ring + 1):
+            for gx in range(cx - radius, cx + radius + 1):
+                for gy in range(cy - radius, cy + radius + 1):
+                    if max(abs(gx - cx), abs(gy - cy)) != radius:
+                        continue
+                    for a, b in self._segs.get((gx, gy), ()):
+                        d = point_seg_dist(p, a, b)
+                        if d < best:
+                            best = d
+            # No segment in a farther ring can beat what we already have.
+            if best <= max(0, radius - 1) * cs:
+                break
+        return best
+
+    def contains(self, p):
+        if not (self.bbox[0] <= p[0] <= self.bbox[2] and self.bbox[1] <= p[1] <= self.bbox[3]):
+            return False
+        if not point_in_ring(p, self.outer):
+            return False
+        return all(not point_in_ring(p, inner) for inner in self.inners)
+
+
+def stitch_ways_to_rings(point_lists):
+    """Stitches open way point-lists into closed rings (projected meters; endpoint
+    match tolerance 0.01 m). Returns the list of closed rings (unclosed leftovers
+    are dropped)."""
+
+    def key(p):
+        return (round(p[0], 2), round(p[1], 2))
+
+    rings = []
+    remaining = [list(pl) for pl in point_lists if len(pl) >= 2]
+    while remaining:
+        chain = remaining.pop(0)
+        extended = True
+        while extended and key(chain[0]) != key(chain[-1]):
+            extended = False
+            for i, w in enumerate(remaining):
+                if key(w[0]) == key(chain[-1]):
+                    chain.extend(w[1:])
+                elif key(w[-1]) == key(chain[-1]):
+                    chain.extend(reversed(w[:-1]))
+                elif key(w[-1]) == key(chain[0]):
+                    chain[:0] = w[:-1]
+                elif key(w[0]) == key(chain[0]):
+                    chain[:0] = list(reversed(w[1:]))
+                else:
+                    continue
+                remaining.pop(i)
+                extended = True
+                break
+        if key(chain[0]) == key(chain[-1]) and len(chain) >= 4:
+            rings.append(chain[:-1])
+    return rings
+
+
+def fill_polygon_circles(poly, town_ring, circles):
+    """Covers the polygon's water area with circles: a quadtree descent that emits a
+    big circle wherever a whole cell is deep inside the water (radius >= the cell's
+    half-diagonal, so coverage has no gaps) and refines toward the shoreline."""
+
+    def cover(cx, cy, s):
+        half_diag = s * 0.7072
+        r_need = max(half_diag, WATER_CIRCLE_MIN_R)
+        d = poly.boundary_dist((cx, cy), cap=r_need + s)
+        if d >= r_need:
+            # Deep on one side of the shoreline: fully water or fully land.
+            if poly.contains((cx, cy)) and point_in_ring((cx, cy), town_ring):
+                circles.append((cx, cy, min(max(d * 0.98, r_need), WATER_CIRCLE_MAX_R)))
+            return
+        if s <= 8.0:
+            if d >= WATER_CIRCLE_MIN_R and poly.contains((cx, cy)) \
+                    and point_in_ring((cx, cy), town_ring):
+                circles.append((cx, cy, min(d, s)))
+            return
+        q = s / 4.0
+        h = s / 2.0
+        cover(cx - q, cy - q, h)
+        cover(cx + q, cy - q, h)
+        cover(cx - q, cy + q, h)
+        cover(cx + q, cy + q, h)
+
+    minx, miny, maxx, maxy = poly.bbox
+    root = WATER_ROOT_CELL
+    gx0, gx1 = int(minx // root), int(maxx // root)
+    gy0, gy1 = int(miny // root), int(maxy // root)
+    for gx in range(gx0, gx1 + 1):
+        for gy in range(gy0, gy1 + 1):
+            cover((gx + 0.5) * root, (gy + 0.5) * root, root)
+
+
+def clip_polyline(pts, ring):
+    """Clips a raw polyline to the inside of a ring; returns runs of points with
+    exact interpolated boundary endpoints (the ref-less analog of the road clipper)."""
+    runs, cur = [], []
+    for a, b in zip(pts, pts[1:]):
+        if a == b:
+            continue
+        crossings = segment_ring_crossings(a, b, ring)
+        sub = [a]
+        for t in crossings:
+            sub.append((a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t))
+        sub.append(b)
+        for u, v in zip(sub, sub[1:]):
+            mid = ((u[0] + v[0]) / 2, (u[1] + v[1]) / 2)
+            if point_in_ring(mid, ring):
+                if not cur:
+                    cur = [u]
+                cur.append(v)
+            else:
+                if cur:
+                    runs.append(cur)
+                    cur = []
+    if cur:
+        runs.append(cur)
+    return runs
+
+
+def resample_polyline(pts, max_step):
+    """Inserts interpolated points so no sub-segment exceeds max_step meters."""
+    out = [pts[0]]
+    for a, b in zip(pts, pts[1:]):
+        d = dist(a, b)
+        n = max(1, int(math.ceil(d / max_step)))
+        for k in range(1, n + 1):
+            out.append((a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n))
+    return out
+
+
+def split_out_covered(pts, polys):
+    """Splits a run into pieces whose sub-segments are NOT inside any water polygon
+    (a river centerline over its own riverbank polygon would double-paint)."""
+    pieces, cur = [], []
+    for a, b in zip(pts, pts[1:]):
+        mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+        covered = any(p.contains(mid) for p in polys)
+        if not covered:
+            if not cur:
+                cur = [a]
+            cur.append(b)
+        else:
+            if cur:
+                pieces.append(cur)
+                cur = []
+    if cur:
+        pieces.append(cur)
+    return pieces
+
+
+def polyline_to_water_segments(pl, width, segments):
+    """DP-simplify + smooth a stream run and emit cubic water segments with the
+    same tangent/chord-thirds conventions as the road chains."""
+    keep = douglas_peucker(pl, tolerance=1.5)
+    spaced = [keep[0]]
+    for ki in keep[1:-1]:
+        if dist(pl[spaced[-1]], pl[ki]) >= WATER_SEG_SPACING:
+            spaced.append(ki)
+    while len(spaced) > 1 and dist(pl[spaced[-1]], pl[keep[-1]]) < WATER_SEG_SPACING / 2:
+        spaced.pop()
+    spaced.append(keep[-1])
+    sm = [pl[i] for i in spaced]
+    if len(sm) < 2:
+        return
+
+    tangents = []
+    for i in range(len(sm)):
+        if i == 0:
+            d = (sm[1][0] - sm[0][0], sm[1][1] - sm[0][1])
+        elif i == len(sm) - 1:
+            d = (sm[-1][0] - sm[-2][0], sm[-1][1] - sm[-2][1])
+        else:
+            d = (sm[i + 1][0] - sm[i - 1][0], sm[i + 1][1] - sm[i - 1][1])
+        n = math.hypot(d[0], d[1])
+        if n < 1e-9:
+            d, n = (1.0, 0.0), 1.0
+        tangents.append((d[0] / n, d[1] / n))
+
+    for i in range(len(sm) - 1):
+        a, b = sm[i], sm[i + 1]
+        chord = dist(a, b)
+        if chord < 1.0:
+            continue
+        h = chord / 3.0
+        segments.append({
+            "p0": a,
+            "c1": (a[0] + tangents[i][0] * h, a[1] + tangents[i][1] * h),
+            "c2": (b[0] - tangents[i + 1][0] * h, b[1] - tangents[i + 1][1] * h),
+            "p3": b,
+            "w": width,
+        })
+
+
+def load_water(path, ring, project):
+    """Parses the water Overpass download into fill circles + stream segments,
+    clipped to the town ring."""
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    poly_ways = []      # (points, id) closed natural=water ways
+    lines = []          # (points, width, id) linear waterways
+    relations = []
+    for e in data["elements"]:
+        tags = e.get("tags", {})
+        if e["type"] == "way" and "geometry" in e:
+            pts = [project(g["lat"], g["lon"]) for g in e["geometry"]]
+            if tags.get("natural") == "water":
+                if len(pts) >= 4:
+                    poly_ways.append((pts, e["id"]))
+            elif tags.get("waterway") in WATERWAY_WIDTHS:
+                width = parse_width_tag(tags) or WATERWAY_WIDTHS[tags["waterway"]]
+                lines.append((pts, width, e["id"]))
+        elif e["type"] == "relation" and tags.get("natural") == "water":
+            relations.append(e)
+
+    polys = []
+    for pts, _ in sorted(poly_ways, key=lambda q: q[1]):
+        outer = pts[:-1] if pts[0] == pts[-1] else pts
+        if len(outer) >= 3:
+            polys.append(WaterPolygon(outer, []))
+
+    for rel in sorted(relations, key=lambda r: r["id"]):
+        outers, inners = [], []
+        for role, bucket in (("outer", outers), ("inner", inners)):
+            member_pts = [
+                [project(g["lat"], g["lon"]) for g in m["geometry"]]
+                for m in rel.get("members", [])
+                if m.get("role") == role and m.get("type") == "way" and "geometry" in m
+            ]
+            bucket.extend(stitch_ways_to_rings(member_pts))
+        for outer in outers:
+            mine = [i for i in inners if point_in_ring(i[0], outer)]
+            polys.append(WaterPolygon(outer, mine))
+
+    circles = []
+    for poly in polys:
+        fill_polygon_circles(poly, ring, circles)
+
+    segments = []
+    for pts, width, _ in sorted(lines, key=lambda q: q[2]):
+        for run in clip_polyline(pts, ring):
+            run = resample_polyline(run, 25.0)
+            for piece in split_out_covered(run, polys):
+                if sum(dist(a, b) for a, b in zip(piece, piece[1:])) >= 8.0:
+                    polyline_to_water_segments(piece, width, segments)
+
+    return circles, segments, len(polys), len(lines)
+
+
 # --- Signals, entry/exit, output ---------------------------------------------------
 
 def emit_directed_edges(segs):
@@ -1024,10 +1353,10 @@ def apply_signals(nodes, edges, signal_positions):
     return count
 
 
-def write_roads(path, nodes, edges, camera, time_of_day):
+def write_roads(path, nodes, edges, camera, time_of_day, water_circles, water_segments):
     with open(path, "wb") as f:
         f.write(b"ROAD")
-        f.write(struct.pack("<HBf", 2, 0, time_of_day))
+        f.write(struct.pack("<HBf", 3, 0, time_of_day))
         f.write(struct.pack("<i", len(nodes)))
         for x, y, flags, poi in nodes:
             f.write(struct.pack("<ffBB", x, y, flags, poi))
@@ -1040,6 +1369,14 @@ def write_roads(path, nodes, edges, camera, time_of_day):
         f.write(struct.pack("<i", 0))            # yield exemptions
         f.write(struct.pack("<i", 0))            # phase rotations
         f.write(struct.pack("<fff", *camera))    # center x, center y, zoom
+        # Section 8 — Water (format v3; no vehicles were written, so it follows Camera).
+        f.write(struct.pack("<i", len(water_circles)))
+        for x, y, r in water_circles:
+            f.write(struct.pack("<fff", x, y, r))
+        f.write(struct.pack("<i", len(water_segments)))
+        for s in water_segments:
+            f.write(struct.pack("<9f", s["p0"][0], s["p0"][1], s["c1"][0], s["c1"][1],
+                                s["c2"][0], s["c2"][1], s["p3"][0], s["p3"][1], s["w"]))
 
 
 def main():
@@ -1048,6 +1385,9 @@ def main():
     ap.add_argument("--pois", required=True)
     ap.add_argument("--boundary", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--water", default=None,
+                    help="Overpass water JSON (natural=water + waterway lines, out geom); "
+                         "omit for a map with an empty water layer")
     ap.add_argument("--home-cap", type=int, default=1500)
     ap.add_argument("--center", default=None, help="initial camera LAT,LON (default: town centroid)")
     ap.add_argument("--zoom", type=float, default=0.35)
@@ -1084,6 +1424,12 @@ def main():
     n_signals = apply_signals(nodes, edges, signal_positions)
     print(f"entry/exit nodes: {n_entry}, traffic signals: {n_signals}")
 
+    water_circles, water_segments = [], []
+    if args.water:
+        water_circles, water_segments, n_polys, n_lines = load_water(args.water, ring, project)
+        print(f"water: {n_polys} polygons -> {len(water_circles)} fill circles; "
+              f"{n_lines} waterways -> {len(water_segments)} stream segments")
+
     # Sanity checks (mirror the app's structural limits).
     assert len(edges) <= 65535, f"too many directed edges ({len(edges)}) for ushort adjacency"
     out_deg = Counter(e[0] for e in edges)
@@ -1106,13 +1452,14 @@ def main():
         cx, cy = 0.0, 0.0
     camera = (-args.zoom * cx, -args.zoom * cy, args.zoom)
 
-    write_roads(args.out, nodes, edges, camera, args.time)
+    write_roads(args.out, nodes, edges, camera, args.time, water_circles, water_segments)
 
     road_km = sum(s["len"] for s in segs if not s["dead"] and not s["conn"]) / 1000
     lens = sorted(s["len"] for s in segs if not s["dead"] and not s["conn"])
-    print(f"written: {args.out}")
+    print(f"written: {args.out} (format v3)")
     print(f"  {len(nodes)} nodes, {len(edges)} directed edges, {road_km:.1f} km of road")
     print(f"  shortest road segment: {lens[0]:.1f}m, median {lens[len(lens) // 2]:.1f}m")
+    print(f"  water: {len(water_circles)} circles, {len(water_segments)} stream segments")
     print(f"  time of day {args.time:.2f}h, camera zoom {args.zoom}")
 
 

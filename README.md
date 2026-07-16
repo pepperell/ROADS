@@ -27,7 +27,8 @@ A real-time, city-scale traffic simulation built in C# with a graphical editor. 
 - **Deterministic simulation RNG** — headless runs and jam replays are exactly reproducible from a seed
 - **Spatial indexing** via uniform grids for fast collision queries, nearest-road lookups, and visible-only rendering
 - **Day/night cycle** with schedule-driven commuter behavior, warm dawn/dusk tinting, and lit windows, street lights, and signal lenses at night
-- **Procedural scenery** — grass terrain, buildings drawn per destination type (homes, offices, shops, schools, parking), roadside trees/bushes, and street lights, all deterministically placed with no road/building overlap
+- **Painted water layer** — ponds and lakes with a circular brush (4 sizes), rivers and brooks as smooth Bezier stream segments with per-segment width (straight/curved chain drawing like roads), an eraser, day/night-tinted rendering with shorelines, and minimap/prop-placement integration; roads crossing water read as bridges
+- **Procedural scenery** — grass terrain, buildings drawn per destination type (homes, offices, shops, schools, parking), roadside trees/bushes, and street lights, all deterministically placed with no road/building overlap (and never in water)
 - **Visually distinct road types** — residential, arterial, highway, and dirt differ in surface, shoulders/sidewalks, lane markings, and medians, not just color
 - **Realistic traffic furniture** — signal heads with colored lenses, octagonal stop signs, yield triangles, and speed-limit signs posted only where the limit actually changes
 - **Procedural sound** — ambient traffic hum, pooled per-vehicle engine voices, and event one-shots, all synthesized in real time with NAudio (no samples)
@@ -133,6 +134,7 @@ ROADS/
     │   ├── RoadEdge.cs               # Road segment (Bezier geometry, lanes, speed limit)
     │   ├── SpatialGrid.cs            # Uniform grid for vehicles
     │   ├── EdgeSpatialGrid.cs        # Uniform grid for road edges (also drives render culling)
+    │   ├── WaterLayer.cs             # Painted water: brush circles + stream segments (sim-inert)
     │   ├── Pathfinder.cs             # A* pathfinding
     │   ├── GridNetworkGenerator.cs   # Procedural grid city for stress testing
     │   ├── IntersectionArc.cs        # Turn arc geometry
@@ -164,12 +166,14 @@ ROADS/
     │   ├── DeleteTool.cs             # Road/node deletion
     │   ├── SignalTool.cs             # Signal type/control/rotation/exemption editing
     │   ├── DestinationTool.cs        # POI placement (incl. Entry/Exit nodes)
+    │   ├── WaterTool.cs              # Water brush / stream chains / eraser
     │   └── LaneRestrictionTool.cs    # Per-lane turn restriction editing
     │
     └── Rendering/
         ├── SceneRenderer.cs          # Main render orchestrator (layer/z-order authority)
         ├── SkiaCanvas.cs             # SkiaSharp surface management
         ├── TerrainRenderer.cs        # Procedural grass terrain background
+        ├── WaterRenderer.cs          # Water layer (shoreline + fill, day/night tinted)
         ├── RoadRenderer.cs           # Per-type road surfaces, markings, shoulders, crosswalks
         ├── RoadTypeVisuals.cs        # Per-RoadType style table (colors, widths, shoulders)
         ├── BuildingLayer.cs          # Deterministic building placement from destination nodes
@@ -195,6 +199,7 @@ ROADS/
             │                         #   one-way, shared lane, straight/curved)
             ├── SignalSubmenu.cs      # Change Type / Control Type / Rotate / Exempt
             ├── PoiSubmenu.cs         # POI-type buttons under the Dest Pt tool
+            ├── WaterSubmenu.cs       # Water modes (Brush/Stream/Erase) + sizes
             ├── SettingsDialog.cs     # Modal in-canvas settings dialog (paged)
             ├── ClockPanel.cs         # Analog 12h clock, digital time, speed + transport buttons
             ├── SelectionInfoPanel.cs # Selected node/edge details ("No selection" idle)
@@ -267,6 +272,7 @@ The toolbar shows **Select**, **Road**, **Signal**, and **Dest Pt**; the Road an
 | **Signal** *(submenu)* | **Change Type** cycles a node: light → stop → yield → none; **Control Type** toggles fixed-time ↔ actuated; **Rotate** shifts the light's phase grouping; **Exempt** toggles whether an approach must stop |
 | **Dest Pt** | Click to place vehicle destination points — homes, offices, shops, schools, parking, plus Entry/Exit nodes where traffic enters and leaves the map |
 | **Lane Restriction** | Configure per-lane turn restrictions (L to enter, 1–4 select lane, C applies defaults) |
+| **Water** *(submenu)* | **Brush** paints water circles on click/drag; **Stream** draws Bezier water segments as a click chain (straight/curved, width from the size preset, variable mid-chain); **Erase** removes water; sizes S/M/L/XL = 4/8/16/32 m |
 
 The Road submenu's sticky options (road type, per-direction width, one-way, single-lane two-way, straight/curved) apply to both new roads and Update Seg clicks.
 
@@ -350,6 +356,7 @@ ROADS.exe --simtest=<map.roads> # reproducible jam detection on a saved map; exi
 | **Space** | Pause / Resume simulation |
 | **< / >** | Decrease / Increase sim speed (1x–64x) |
 | **V** | Spawn a vehicle |
+| **W** | Select the Water tool |
 | **R** | Cycle road type of selected segment |
 | **+ / -** | Lane count of selected segment |
 | **[ / ]** | Speed limit of selected segment |

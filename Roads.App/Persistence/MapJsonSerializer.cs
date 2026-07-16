@@ -77,7 +77,7 @@ namespace Roads.App.Persistence;
 /// </summary>
 public static class MapJsonSerializer
 {
-    private const int SchemaVersion = 2;
+    private const int SchemaVersion = 3;
 
     /// <summary>
     /// Writes a human-readable JSON snapshot of the current map state to <paramref name="path"/>.
@@ -94,11 +94,12 @@ public static class MapJsonSerializer
     /// <param name="yieldSigns">Yield-sign system for exempt-edge overrides.</param>
     /// <param name="signals">Traffic-signal system for phase-rotation overrides.</param>
     /// <param name="population">Population manager owning the resident list.</param>
+    /// <param name="water">Painted water layer (schema v3; always written).</param>
     /// <param name="includeVehicles">When true, serializes vehicles and the resident population.</param>
     public static void Save(string path, RoadGraph graph, VehicleStore vehicles,
         Camera camera, SimulationClock clock,
         StopSignSystem stopSigns, YieldSignSystem yieldSigns, TrafficSignalSystem signals,
-        PopulationManager population, bool includeVehicles)
+        PopulationManager population, WaterLayer water, bool includeVehicles)
     {
         using var fs = File.Create(path);
         using var writer = new Utf8JsonWriter(fs, new JsonWriterOptions { Indented = true });
@@ -315,6 +316,32 @@ public static class MapJsonSerializer
             }
             writer.WriteEndArray();
         }
+
+        // ── Water (schema v3; mirrors MapSerializer Section 8, always written) ─
+        writer.WriteStartObject("water");
+        writer.WriteStartArray("circles");
+        foreach (var c in water.Circles)
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("x", c.Center.X);
+            writer.WriteNumber("y", c.Center.Y);
+            writer.WriteNumber("radius", c.Radius);
+            writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
+        writer.WriteStartArray("streams");
+        foreach (var s in water.Segments)
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("p0x", s.P0.X); writer.WriteNumber("p0y", s.P0.Y);
+            writer.WriteNumber("c1x", s.C1.X); writer.WriteNumber("c1y", s.C1.Y);
+            writer.WriteNumber("c2x", s.C2.X); writer.WriteNumber("c2y", s.C2.Y);
+            writer.WriteNumber("p3x", s.P3.X); writer.WriteNumber("p3y", s.P3.Y);
+            writer.WriteNumber("width", s.Width);
+            writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
+        writer.WriteEndObject();
 
         writer.WriteEndObject(); // root
     }

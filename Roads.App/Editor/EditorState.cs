@@ -26,6 +26,20 @@ public enum EditorTool
     /// signals-toolbar "Exempt" tool; an exempt approach does not stop at its
     /// node's sign).</summary>
     SignalExempt,
+    /// <summary>Paints the visual water layer (brush dabs, stream segments, eraser —
+    /// see <see cref="WaterMode"/>). Water never touches the road graph.</summary>
+    Water,
+}
+
+/// <summary>Sub-mode of the Water tool (the water-toolbar mode group).</summary>
+public enum WaterMode
+{
+    /// <summary>Paint circular dabs on click/drag.</summary>
+    Brush,
+    /// <summary>Draw stream segments as a click chain (straight or curved), like the Road tool.</summary>
+    Stream,
+    /// <summary>Remove intersecting water primitives on click/drag.</summary>
+    Erase,
 }
 
 /// <summary>
@@ -231,6 +245,39 @@ public class EditorState
     /// 1 = one-way (selected direction), 2 = one-way reversed.</summary>
     public int OneWayCycleStep { get; set; }
 
+    // ── Water-toolbar options (sticky across tool switches, like the road options) ──
+
+    /// <summary>Active sub-mode of the Water tool (sticky).</summary>
+    public WaterMode WaterMode { get; set; } = WaterMode.Brush;
+
+    /// <summary>Brush/eraser radius in meters (sticky; the water-toolbar size presets).
+    /// Stream segments are drawn 2× this wide, so an S stream matches an S dab's diameter.</summary>
+    public float WaterBrushRadius { get; set; } = 8f;
+
+    /// <summary>Curved drawing mode for water streams (sticky; independent of the road
+    /// tool's <see cref="SelectedCurved"/>). Same convention: each new segment leaves
+    /// its start tangent to the previous segment of the chain.</summary>
+    public bool WaterCurved { get; set; }
+
+    // ── Water tool transient state (cleared by ResetToolState) ──
+
+    /// <summary>Whether a brush/erase drag stroke is in progress.</summary>
+    public bool IsPaintingWater { get; set; }
+
+    /// <summary>Position of the last brush dab of the in-progress stroke (spacing gate), or null.</summary>
+    public System.Numerics.Vector2? WaterLastDabPos { get; set; }
+
+    /// <summary>Pending start point of the next stream segment (the stream chain anchor), or null.</summary>
+    public System.Numerics.Vector2? WaterStreamAnchor { get; set; }
+
+    /// <summary>End tangent of the chain's previous stream segment (unit), or null on the
+    /// first segment — curved mode's tangent reference, mirroring RoadPrevEdge.</summary>
+    public System.Numerics.Vector2? WaterStreamPrevDir { get; set; }
+
+    /// <summary>Water-tool hover ghost: cursor world position (brush/erase circle preview,
+    /// stream pending-segment end), or null when inactive (over UI, mid-pan).</summary>
+    public System.Numerics.Vector2? WaterGhostPos { get; set; }
+
     /// <summary>Whether lane restriction editing mode is active (node must be selected).</summary>
     public bool LaneRestrictionMode { get; set; }
 
@@ -270,5 +317,10 @@ public class EditorState
         GhostT = 0f;
         NodeGhostPos = null;
         NodeGhostRadius = 0f;
+        IsPaintingWater = false;
+        WaterLastDabPos = null;
+        WaterStreamAnchor = null;
+        WaterStreamPrevDir = null;
+        WaterGhostPos = null;
     }
 }

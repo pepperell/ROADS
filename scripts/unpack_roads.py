@@ -235,6 +235,28 @@ def unpack(filepath: str) -> str:
                     w(f"         schedule: {sched_str}")
             w()
 
+        # --- Section 8: Water (v3+) ---
+        water_circles = 0
+        water_segments = 0
+        if version >= 3:
+            (water_circles,) = read_fmt(f, "<i")
+            w(f"=== WATER: {water_circles} circles ===")
+            for i in range(water_circles):
+                x, y, r = read_fmt(f, "<fff")
+                if i < 10:
+                    w(f"  [{i:4d}] ({x:9.1f}, {y:9.1f})  r={r:.1f}m")
+            if water_circles > 10:
+                w(f"  ... {water_circles - 10} more")
+            (water_segments,) = read_fmt(f, "<i")
+            w(f"=== WATER: {water_segments} stream segments ===")
+            for i in range(water_segments):
+                p0x, p0y, c1x, c1y, c2x, c2y, p3x, p3y, width = read_fmt(f, "<9f")
+                if i < 10:
+                    w(f"  [{i:4d}] ({p0x:8.1f},{p0y:8.1f}) -> ({p3x:8.1f},{p3y:8.1f})  w={width:.1f}m")
+            if water_segments > 10:
+                w(f"  ... {water_segments - 10} more")
+            w()
+
         # --- Summary ---
         w("=== SUMMARY ===")
         # Count distinct undirected road segments (pair forward/reverse edges)
@@ -244,6 +266,8 @@ def unpack(filepath: str) -> str:
             key = (min(fn, tn), max(fn, tn))
             edge_pairs.add(key)
         w(f"  {node_count} nodes, {edge_count} edges ({len(edge_pairs)} road segments)")
+        if version >= 3:
+            w(f"  Water: {water_circles} circles, {water_segments} stream segments")
 
         # Count intersection types
         flag_counts = {}

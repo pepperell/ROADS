@@ -6,16 +6,17 @@ using Roads.App.World;
 namespace Roads.App.Persistence;
 
 /// <summary>
-/// Binary save/load for road maps. File format version 2.
+/// Binary save/load for road maps. File format version 3.
 /// Saves the road graph (nodes, edges, lane restrictions, traffic control overrides),
-/// camera state, simulation time, and optionally all vehicle state plus the resident
-/// population (v2). v1 files (no population section) still load — their vehicles fall
-/// back to legacy handling.
+/// camera state, simulation time, the water layer (v3 — always present, even when
+/// vehicles are not saved), and optionally all vehicle state plus the resident
+/// population (v2). v1 files (no population section) and v2 files (no water section)
+/// still load — their vehicles fall back to legacy handling and their water is empty.
 /// </summary>
 public static class MapSerializer
 {
     private static readonly byte[] Magic = "ROAD"u8.ToArray();
-    private const ushort FormatVersion = 2;
+    private const ushort FormatVersion = 3;
 
     /// <summary>
     /// Saves the current map state to a binary file.
@@ -23,7 +24,7 @@ public static class MapSerializer
     public static void Save(string path, RoadGraph graph, VehicleStore vehicles,
         Camera camera, SimulationClock clock,
         StopSignSystem stopSigns, YieldSignSystem yieldSigns, TrafficSignalSystem signals,
-        PopulationManager population, bool includeVehicles)
+        PopulationManager population, WaterLayer water, bool includeVehicles)
     {
         using var fs = File.Create(path);
         using var w = new BinaryWriter(fs);
@@ -209,6 +210,26 @@ public static class MapSerializer
                 w.Write(res.VehicleIndex);
             }
         }
+
+        // Section 8 — Water (v3). Always written, regardless of the vehicles flag, so the
+        // section's position is deterministic: directly after Camera when vehicles were
+        // not saved, after Population when they were.
+        w.Write(water.Circles.Count);
+        foreach (var c in water.Circles)
+        {
+            w.Write(c.Center.X);
+            w.Write(c.Center.Y);
+            w.Write(c.Radius);
+        }
+        w.Write(water.Segments.Count);
+        foreach (var s in water.Segments)
+        {
+            w.Write(s.P0.X); w.Write(s.P0.Y);
+            w.Write(s.C1.X); w.Write(s.C1.Y);
+            w.Write(s.C2.X); w.Write(s.C2.Y);
+            w.Write(s.P3.X); w.Write(s.P3.Y);
+            w.Write(s.Width);
+        }
     }
 
     /// <summary>
@@ -218,7 +239,7 @@ public static class MapSerializer
     public static bool Load(string path, RoadGraph graph, VehicleStore vehicles,
         Camera camera, SimulationClock clock,
         StopSignSystem stopSigns, YieldSignSystem yieldSigns, TrafficSignalSystem signals,
-        PopulationManager population, bool loadVehicles)
+        PopulationManager population, WaterLayer water, bool loadVehicles)
     {
         using var fs = File.OpenRead(path);
         using var r = new BinaryReader(fs);
@@ -444,6 +465,41 @@ public static class MapSerializer
 
             if (loadVehicles)
                 population.AdoptLoadedPopulation(loadedResidents);
+        }
+
+        // Section 8 — Water (v3+). Always present in v3 regardless of the vehicles flag.
+        // Loading replaces the layer wholesale; older files carry no water, so the layer
+        // is cleared to match the loaded map (both paths bump WaterLayer.Version once).
+        if (version >= 3)
+        {
+            int circleCount = r.ReadInt32();
+            var circles = new List<WaterCircle>(circleCount);
+            for (int i = 0; i < circleCount; i++)
+            {
+                circles.Add(new WaterCircle
+                {
+                    Center = new Vector2(r.ReadSingle(), r.ReadSingle()),
+                    Radius = r.ReadSingle(),
+                });
+            }
+            int segmentCount = r.ReadInt32();
+            var segments = new List<WaterSegment>(segmentCount);
+            for (int i = 0; i < segmentCount; i++)
+            {
+                segments.Add(new WaterSegment
+                {
+                    P0 = new Vector2(r.ReadSingle(), r.ReadSingle()),
+                    C1 = new Vector2(r.ReadSingle(), r.ReadSingle()),
+                    C2 = new Vector2(r.ReadSingle(), r.ReadSingle()),
+                    P3 = new Vector2(r.ReadSingle(), r.ReadSingle()),
+                    Width = r.ReadSingle(),
+                });
+            }
+            water.LoadFromData(circles, segments);
+        }
+        else
+        {
+            water.Clear();
         }
 
         return hasVehicles;

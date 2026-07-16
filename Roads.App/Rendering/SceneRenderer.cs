@@ -34,6 +34,12 @@ public class SceneRenderer
     /// <summary>Procedural terrain background (grass mottling); replaces the old flat clear color.</summary>
     private readonly TerrainRenderer _terrain = new();
 
+    /// <summary>The painted water layer (shared with the editor and serializer).</summary>
+    private readonly WaterLayer _waterLayer;
+
+    /// <summary>Draws the water layer between the terrain and the roads.</summary>
+    private readonly WaterRenderer _waterRenderer;
+
     /// <summary>Deterministic building placement derived from destination nodes; rebuilt on graph version change.</summary>
     private readonly BuildingLayer _buildingLayer = new();
 
@@ -60,6 +66,14 @@ public class SceneRenderer
     private const int SceneryRebuildDelayFrames = 8;
     private int _lastSeenGraphVersion = -1;
     private int _graphStableFrames;
+
+    /// <summary>Water version last seen by the settle-gate — water paint strokes bump
+    /// <see cref="WaterLayer.Version"/> every dab, so they defer scenery rebuilds the
+    /// same way node drags do (props must re-place to vacate new water).</summary>
+    private int _lastSeenWaterVersion = -1;
+
+    /// <summary>Water version the prop placement was last rebuilt against.</summary>
+    private int _propKeyWaterVersion = -1;
 
     /// <summary>Reusable buffer of visible edge indices, refilled each frame from the edge grid.</summary>
     private readonly List<int> _visibleEdges = new();
@@ -92,6 +106,8 @@ public class SceneRenderer
         _lastSeenGraphVersion = -1;
         _graphStableFrames = 0;
         _buildingBoundsVersion = -1;
+        _lastSeenWaterVersion = -1;
+        _propKeyWaterVersion = -1;
     }
 
     /// <summary>
@@ -100,12 +116,14 @@ public class SceneRenderer
     /// sub-renderers are fully initialized.
     /// </summary>
     public SceneRenderer(RoadRenderer roadRenderer, VehicleRenderer vehicleRenderer,
-        LaneRestrictionTool laneRestrictionTool, Ui.UiRoot uiRoot)
+        LaneRestrictionTool laneRestrictionTool, Ui.UiRoot uiRoot, WaterLayer waterLayer)
     {
         _roadRenderer = roadRenderer;
         _vehicleRenderer = vehicleRenderer;
         _laneRestrictionTool = laneRestrictionTool;
         _uiRoot = uiRoot;
+        _waterLayer = waterLayer;
+        _waterRenderer = new WaterRenderer(waterLayer);
     }
 
     /// <summary>
@@ -128,9 +146,11 @@ public class SceneRenderer
         // frustum culling so they can skip off-screen geometry cheaply.
         var viewRect = camera.GetVisibleWorldRect(info.Width, info.Height);
 
-        // Terrain detail (grass mottling) over the base clear color, then a faint
+        // Terrain detail (grass mottling) over the base clear color, then water on the
+        // ground plane (under roads, so crossings read as bridges), then a faint
         // 100 m reference grid kept as an editor alignment aid (optional via Settings).
         _terrain.Draw(canvas, viewRect, camera.Zoom, darkness);
+        _waterRenderer.Draw(canvas, viewRect, camera.Zoom, darkness);
         if (GridEnabled)
             DrawGrid(canvas, camera, info, GetGridColor(darkness));
 
@@ -150,9 +170,10 @@ public class SceneRenderer
         // graph version has held still for SceneryRebuildDelayFrames (drags bump it every
         // frame); the very first build runs immediately. Rebuild order matters: the building
         // layer first, then bounds collection, then props so they avoid footprints.
-        if (graph.Version != _lastSeenGraphVersion)
+        if (graph.Version != _lastSeenGraphVersion || _waterLayer.Version != _lastSeenWaterVersion)
         {
             _lastSeenGraphVersion = graph.Version;
+            _lastSeenWaterVersion = _waterLayer.Version;
             _graphStableFrames = 0;
         }
         else if (_graphStableFrames <= SceneryRebuildDelayFrames)
@@ -160,12 +181,14 @@ public class SceneRenderer
             _graphStableFrames++;
         }
         bool scenerySettled = _graphStableFrames >= SceneryRebuildDelayFrames || _buildingBoundsVersion < 0;
-        if (scenerySettled && graph.Version != _buildingBoundsVersion)
+        if (scenerySettled && (graph.Version != _buildingBoundsVersion
+                               || _waterLayer.Version != _propKeyWaterVersion))
         {
-            _buildingLayer.RebuildIfNeeded(graph, simLoop.EdgeGrid);
+            _buildingLayer.RebuildIfNeeded(graph, simLoop.EdgeGrid); // self-early-outs on unchanged graph
             _buildingLayer.CollectBounds(_buildingBounds);
             _buildingBoundsVersion = graph.Version;
-            _propRenderer.Rebuild(graph, simLoop.EdgeGrid, _buildingBounds, graph.Version);
+            _propRenderer.Rebuild(graph, simLoop.EdgeGrid, _buildingBounds, graph.Version, _waterLayer);
+            _propKeyWaterVersion = _waterLayer.Version;
         }
         _buildingRenderer.Draw(canvas, _buildingLayer, graph, viewRect, camera.Zoom, darkness);
         _propRenderer.Draw(canvas, viewRect, camera.Zoom, darkness);
@@ -202,6 +225,9 @@ public class SceneRenderer
 
         // Node tool placement ghost (translucent preview at the exact click-result position)
         DrawNodeGhost(canvas, editorState, camera);
+
+        // Water tool ghost (brush/erase circle at the cursor; pending stream segment band)
+        DrawWaterGhost(canvas, editorState, camera);
 
         // Control-type badges (F/A over every traffic light) while the Ctrl Type tool is active
         DrawSignalControlIcons(canvas, graph, editorState, camera, viewRect);
@@ -617,6 +643,79 @@ public class SceneRenderer
         };
         canvas.DrawCircle(pos.X, pos.Y, radius, fill);
         canvas.DrawCircle(pos.X, pos.Y, radius, stroke);
+    }
+
+    /// <summary>
+    /// Water tool ghost. Brush/Erase: a dashed circle at the cursor at the brush radius
+    /// (red-tinted for Erase). Stream: the brush-size circle at the cursor plus — once a
+    /// chain anchor exists — a translucent round-capped band at the width the segment
+    /// will commit with, following the same curve <see cref="WaterTool"/> will store
+    /// (recomputed here from published state via <see cref="RoadTool.ComputeCurveControls"/>,
+    /// so preview and commit always agree), with a thin dashed centerline on top —
+    /// the <see cref="DrawRoadPreview"/> band pattern.
+    /// </summary>
+    private static void DrawWaterGhost(SKCanvas canvas, EditorState editorState, Camera camera)
+    {
+        if (editorState.ActiveTool != EditorTool.Water) return;
+        if (editorState.WaterGhostPos is not { } cursor) return;
+
+        bool erase = editorState.WaterMode == WaterMode.Erase;
+        float radius = editorState.WaterBrushRadius;
+
+        // Cursor circle: dashed ring at the brush radius; red tint when erasing.
+        using var fill = new SKPaint
+        {
+            Color = erase ? new SKColor(255, 90, 70, 60) : new SKColor(80, 160, 230, 70),
+            Style = SKPaintStyle.Fill,
+            IsAntialias = true,
+        };
+        float dash = MathF.Max(0.8f, radius * MathF.Tau / 16f);
+        using var ring = new SKPaint
+        {
+            Color = new SKColor(255, 255, 255, 150),
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = Math.Max(1f, 1.5f / camera.Zoom),
+            IsAntialias = true,
+            PathEffect = SKPathEffect.CreateDash(new[] { dash, dash }, 0),
+        };
+        canvas.DrawCircle(cursor.X, cursor.Y, radius, fill);
+        canvas.DrawCircle(cursor.X, cursor.Y, radius, ring);
+
+        // Pending stream segment: band + dashed centerline from the anchor to the cursor.
+        if (editorState.WaterMode != WaterMode.Stream) return;
+        if (editorState.WaterStreamAnchor is not { } anchor) return;
+
+        using var previewPath = new SKPath();
+        previewPath.MoveTo(anchor.X, anchor.Y);
+        if (editorState.WaterCurved && editorState.WaterStreamPrevDir is { } prevDir)
+        {
+            var (cp1, cp2) = RoadTool.ComputeCurveControls(anchor, cursor, prevDir);
+            previewPath.CubicTo(cp1.X, cp1.Y, cp2.X, cp2.Y, cursor.X, cursor.Y);
+        }
+        else
+        {
+            previewPath.LineTo(cursor.X, cursor.Y);
+        }
+
+        using var bandPaint = new SKPaint
+        {
+            Color = new SKColor(80, 160, 230, 60),
+            StrokeWidth = 2f * radius,
+            Style = SKPaintStyle.Stroke,
+            StrokeCap = SKStrokeCap.Round,
+            IsAntialias = true,
+        };
+        canvas.DrawPath(previewPath, bandPaint);
+
+        using var centerPaint = new SKPaint
+        {
+            Color = new SKColor(140, 200, 255, 160),
+            StrokeWidth = 1.5f,
+            Style = SKPaintStyle.Stroke,
+            IsAntialias = true,
+            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0),
+        };
+        canvas.DrawPath(previewPath, centerPaint);
     }
 
     /// <summary>

@@ -100,6 +100,7 @@ public static class SimTestHarness
         var yieldSigns = new YieldSignSystem();
         var intersectionArcs = new IntersectionArcCache();
         var poiRegistry = new POIRegistry();
+        var water = new WaterLayer();
 
         var spawner = new VehicleSpawner(graph, vehicles, vehicleGrid);
         var population = new PopulationManager(graph, vehicles, vehicleGrid, poiRegistry, SimulationLoop.MaxVehicles);
@@ -135,7 +136,7 @@ public static class SimTestHarness
         }
 
         MapSerializer.Load(path, graph, vehicles, camera, sim.Clock, stopSigns, yieldSigns,
-            trafficSignals, population, loadVehicles: loadVehicles);
+            trafficSignals, population, water, loadVehicles: loadVehicles);
         sim.RebuildWorldCaches();
         sim.Paused = false;
 

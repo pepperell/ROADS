@@ -17,6 +17,7 @@ public class LegendPanel : Panel
         "Space   Pause / Resume",
         "<  >    Sim Speed - / +",
         "V       Spawn Vehicle",
+        "W       Water Tool",
         "+  -    Lane Count",
         "[  ]    Speed Limit",
         "R       Cycle Road Type",
