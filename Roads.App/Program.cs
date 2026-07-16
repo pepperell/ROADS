@@ -17,6 +17,11 @@ static class Program
     /// <c>--simseed=&lt;n&gt;</c> RNG seed, <c>--simvehicles</c> to load the map's saved
     /// vehicles (replay a captured live jam), and <c>--diagvehicle=&lt;n&gt;</c> to stream
     /// that vehicle's per-tick diagnostics to diag.log. Exit code 0 = no jams found.
+    ///
+    /// Pass <c>--musictest</c> (or <c>--musictest=&lt;seconds&gt;</c>, default 32) to render
+    /// the generative music engine offline via <see cref="Diagnostics.MusicTestHarness"/>:
+    /// four mood presets to a WAV (<c>--musicout=&lt;path&gt;</c>, default musictest.wav)
+    /// plus an RMS report beside it. Exit code 0 = every phase produced audio.
     /// </summary>
     [STAThread]
     static void Main()
@@ -30,6 +35,8 @@ static class Program
         int simSeed = 12345;
         bool simVehicles = false;
         int diagVehicle = -1;
+        float musicTestSeconds = 0f;
+        string musicOut = "musictest.wav";
         foreach (var arg in Environment.GetCommandLineArgs())
         {
             if (arg == "--autobench")
@@ -52,6 +59,18 @@ static class Program
             else if (arg.StartsWith("--diagvehicle=", StringComparison.Ordinal)
                      && int.TryParse(arg.AsSpan("--diagvehicle=".Length), out int dv))
                 diagVehicle = dv;
+            else if (arg == "--musictest")
+                musicTestSeconds = 32f;
+            else if (arg.StartsWith("--musictest=", StringComparison.Ordinal)
+                     && float.TryParse(arg.AsSpan("--musictest=".Length), out float ms) && ms > 0f)
+                musicTestSeconds = ms;
+            else if (arg.StartsWith("--musicout=", StringComparison.Ordinal))
+                musicOut = arg["--musicout=".Length..];
+        }
+
+        if (musicTestSeconds > 0f)
+        {
+            Environment.Exit(Diagnostics.MusicTestHarness.Run(musicTestSeconds, musicOut));
         }
 
         if (simTestMap != null)

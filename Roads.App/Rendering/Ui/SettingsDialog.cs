@@ -7,8 +7,8 @@ namespace Roads.App.Rendering.Ui;
 /// The modal Settings dialog: a full-canvas translucent scrim (this panel itself — it
 /// consumes every left click so nothing behind it receives input; middle/right/wheel are
 /// gated in MainForm, which also pauses the simulation while the dialog is open) with a
-/// centered window of tabbed pages (Graphics / Simulation / Driving / Audio / Debug)
-/// built from the standard retained-mode controls.
+/// centered window of tabbed pages (Graphics / Simulation / Driving / Audio / Music /
+/// Debug) built from the standard retained-mode controls.
 ///
 /// Edits go to a STAGED copy of <see cref="AppSettings"/> taken on <see cref="Open"/>;
 /// nothing touches the live systems until Apply/OK. The Apply button's IsEnabled closure
@@ -28,7 +28,7 @@ public class SettingsDialog : Panel
     private const float Pad = 20f;
     private const float TitleY = 14f;
     private const float TabRowY = 44f;
-    private const float TabWidth = 90f;
+    private const float TabWidth = 74f; // six tabs must fit inside the window padding
     private const float TabHeight = 26f;
     private const float TabSpacing = 4f;
     private const float PageY = 82f;
@@ -44,7 +44,7 @@ public class SettingsDialog : Panel
     private const float HitPadX = 4f;
     private const float HitPadY = 6f;
 
-    private enum Tab { Graphics, Simulation, Driving, Audio, Debug }
+    private enum Tab { Graphics, Simulation, Driving, Audio, Music, Debug }
 
     private Tab _tab = Tab.Graphics;
     private AppSettings _staged = new();
@@ -143,6 +143,30 @@ public class SettingsDialog : Panel
             () => _staged.MasterVolume, v => _staged.MasterVolume = v,
             format: "F2", step: 0.05f);
 
+        // Music: the generative-jazz tuning page. Check row 0 ends at y 24; slider rows
+        // start at index 1 (track top 52) so the check row clears the first slider label.
+        var music = AddPage(Tab.Music);
+        AddCheckRow(music, 0, "Background music (generative jazz)",
+            () => _staged.MusicEnabled, v => _staged.MusicEnabled = v);
+        AddSliderRow(music, 1, "Music volume", 0f, 1f,
+            () => _staged.MusicVolume, v => _staged.MusicVolume = v,
+            format: "F2", step: 0.05f);
+        AddSliderRow(music, 2, "Tempo (BPM)", 72f, 132f,
+            () => _staged.MusicTempoBpm, v => _staged.MusicTempoBpm = MathF.Round(v),
+            format: "F0", step: 2f);
+        AddSliderRow(music, 3, "Swing feel (straight - triplet)", 0f, 1f,
+            () => _staged.MusicSwing, v => _staged.MusicSwing = v,
+            format: "F2", step: 0.05f);
+        AddSliderRow(music, 4, "Traffic drives band energy", 0f, 1f,
+            () => _staged.MusicTrafficResponse, v => _staged.MusicTrafficResponse = v,
+            format: "F2", step: 0.05f);
+        AddSliderRow(music, 5, "Night mellows the band", 0f, 1f,
+            () => _staged.MusicNightResponse, v => _staged.MusicNightResponse = v,
+            format: "F2", step: 0.05f);
+        AddSliderRow(music, 6, "Congestion adds tension", 0f, 1f,
+            () => _staged.MusicTensionResponse, v => _staged.MusicTensionResponse = v,
+            format: "F2", step: 0.05f);
+
         var debug = AddPage(Tab.Debug);
         AddCheckRow(debug, 0, "Arc-conflict overlay",
             () => _staged.ShowArcConflicts, v => _staged.ShowArcConflicts = v);
@@ -198,6 +222,7 @@ public class SettingsDialog : Panel
             (label: "Simulation", tab: Tab.Simulation),
             (label: "Driving", tab: Tab.Driving),
             (label: "Audio", tab: Tab.Audio),
+            (label: "Music", tab: Tab.Music),
             (label: "Debug", tab: Tab.Debug),
         };
         for (int i = 0; i < tabs.Length; i++)

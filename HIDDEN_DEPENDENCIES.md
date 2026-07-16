@@ -75,7 +75,17 @@ What remains:
 - [SplitEdge](Roads.App/World/RoadGraph.cs#L1006) must capture the reverse edge *before* `SplitEdgeSingle` (adjacency goes stale mid-operation), and `SplitEdgeSingle` intentionally skips the `RebuildAdjacency` / `RebuildTurnMatrix` / `Version++` trio — every caller doing direct edge surgery must finish with those three.
 - PopulationManager tracks the graph version **twice** ([POIRegistry's internal copy](Roads.App/Vehicles/PopulationManager.cs#L71) and its own [`_poiGraphVersion`](Roads.App/Vehicles/PopulationManager.cs#L88-L92)) with different reactions to a change — easy to update one and not the other.
 
-## 8. Scenery pipeline — settle-gated, ordered, and deliberately stale during edits
+## 8. Generative music — playback-thread sequencing contracts
+
+The music path ([Audio/Music/](Roads.App/Audio/Music/)) runs the [Composer](Roads.App/Audio/Music/Composer.cs) entirely on NAudio's playback thread inside [MusicProvider.Read](Roads.App/Audio/Music/MusicProvider.cs); the UI thread only writes plain float targets (the AudioEngine idiom). Three contracts are invisible at the call sites:
+
+- **Compose trigger is the playhead, not the queue.** `ComposeBar()` fires when `_pos >= _nextBarStart`. It must NOT be gated on queue exhaustion: note-offs overhanging a bar-line keep the queue non-empty, and gating on emptiness makes `Read` spin forever at the first bar boundary (this shipped broken once — the hang was live).
+- **Same-sample MIDI ordering.** The event queue sort uses `MidiEvent.TieRank` (program/CC = 0, note-off = 1, note-on = 2) because `List.Sort` is unstable: without the rank, a section-boundary program change can land after the note it was meant to voice, and a repeated note can be chopped by its predecessor's note-off.
+- **The music bus bypasses the pause duck.** [MasterProvider](Roads.App/Audio/Synth/MasterProvider.cs) applies `TargetDuck` only to the SFX mixer; music joins after the duck (band plays through pause — deliberate). Any new "silence everything" feature must handle both buses.
+- **The soundfont is a copied asset.** `Assets/GeneralUser-GS.sf2` reaches the output dir via a csproj `CopyToOutputDirectory` entry; if it's missing at runtime the app silently runs without music (by design), so a broken copy step looks like a music bug.
+- **Determinism invariant extends here.** Nothing under `Roads.App.Audio` (Music included) may touch SimRandom or sim state; the composer's RNG is private and mood arrives as copied floats via `AudioEngine.UpdateMusicMood`.
+
+## 9. Scenery pipeline — settle-gated, ordered, and deliberately stale during edits
 
 The procedural scenery renderers (TerrainRenderer, BuildingLayer/BuildingRenderer, PropRenderer, SignRenderer's speed-sign cache) are wired in [SceneRenderer.Render](Roads.App/Rendering/SceneRenderer.cs) with three contracts that differ from the rest of the render pass:
 

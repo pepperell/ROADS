@@ -32,8 +32,9 @@ A real-time, city-scale traffic simulation built in C# with a graphical editor. 
 - **Visually distinct road types** — residential, arterial, highway, and dirt differ in surface, shoulders/sidewalks, lane markings, and medians, not just color
 - **Realistic traffic furniture** — signal heads with colored lenses, octagonal stop signs, yield triangles, and speed-limit signs posted only where the limit actually changes
 - **Procedural sound** — ambient traffic hum, pooled per-vehicle engine voices, and event one-shots, all synthesized in real time with NAudio (no samples)
+- **Generative background music** — a bar-at-a-time jazz composer (12-bar blues, funk vamp, and night-float forms in the SimCity 2000 / Transport Tycoon lineage) rendered live through MeltySynth and a bundled GM soundfont; traffic density drives band energy, nightfall mellows the arrangement, and map-wide congestion raises musical tension — all tunable in Settings → Music
 - **Save/load** — binary map format plus human-readable JSON export, with rotating timestamped autosaves
-- **In-app settings dialog** — graphics, simulation, audio, and autosave options persisted to `settings.json`
+- **In-app settings dialog** — graphics, simulation, audio, music, and autosave options persisted to `settings.json`
 - **Overlays & tooling** — minimap, statistics panel, congestion heat-map, performance HUD, and a benchmark/stress-test harness (procedural grid city + 10K bulk spawn)
 
 ---
@@ -46,7 +47,7 @@ A real-time, city-scale traffic simulation built in C# with a graphical editor. 
 | Rendering | SkiaSharp 3.x (GPU-accelerated 2D) |
 | Windowing | WinForms |
 | UI | Retained-mode control hierarchy (panels/labels/buttons) rendered via SkiaSharp |
-| Audio | NAudio 2.x (real-time procedural synthesis) |
+| Audio | NAudio 2.x (real-time procedural synthesis) + MeltySynth (SoundFont MIDI synth for generative music) |
 | Architecture | Single-threaded fixed-timestep sim (30 Hz), SoA data layout, spatial grid indexing |
 
 ---
@@ -110,8 +111,14 @@ ROADS/
     │
     ├── Audio/
     │   ├── AudioEngine.cs            # Always-running NAudio graph, parameters driven per frame
-    │   └── Synth/                    # Allocation-free DSP: engine voices, ambient hum bed,
-    │                                 #   event one-shots, master gain/duck stage
+    │   ├── Synth/                    # Allocation-free DSP: engine voices, ambient hum bed,
+    │   │                             #   event one-shots, master gain/duck stage
+    │   └── Music/
+    │       ├── Theory.cs             # Chord-scales, rootless voicings, GM patch/drum tables
+    │       ├── Composer.cs           # Bar-at-a-time generative jazz (blues/vamp/nocturne forms)
+    │       └── MusicProvider.cs      # Composer → MeltySynth bridge on the music bus
+    ├── Assets/
+    │   └── GeneralUser-GS.sf2        # GM/GS SoundFont (S. Christian Collins) for the music synth
     ├── Core/
     │   ├── AppSettings.cs            # All user-adjustable settings (record, dialog-paged)
     │   ├── Camera.cs                 # Pan/zoom/world-to-screen transform
@@ -120,7 +127,8 @@ ROADS/
     │
     ├── Diagnostics/
     │   ├── DeadlockReport.cs         # Stuck-vehicle diagnostics (in-app D key + headless)
-    │   └── SimTestHarness.cs         # Headless reproducible sim runs (--simtest)
+    │   ├── SimTestHarness.cs         # Headless reproducible sim runs (--simtest)
+    │   └── MusicTestHarness.cs       # Offline music render across mood presets (--musictest)
     │
     ├── Persistence/
     │   ├── MapSerializer.cs          # Binary .roads save/load (graph, signals, vehicles)
@@ -341,6 +349,9 @@ ROADS.exe --autobench[=N]       # 10K-vehicle stress benchmark, N frames (defaul
 
 ROADS.exe --simtest=<map.roads> # reproducible jam detection on a saved map; exit code 0 = no jams
          [--simhours=H] [--simseed=N] [--simvehicles] [--simout=path] [--diagvehicle=N]
+
+ROADS.exe --musictest[=seconds] # render the generative music offline across four mood presets
+         [--musicout=path]      #   (calm/busy/gridlock/night) to a WAV + RMS report; 0 = all audible
 ```
 
 ---

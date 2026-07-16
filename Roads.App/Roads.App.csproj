@@ -11,8 +11,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="MeltySynth" Version="2.4.1" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="SkiaSharp" Version="3.119.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- GeneralUser GS (S. Christian Collins): free GM/GS SoundFont voiced against the
+         Roland Sound Canvas sets that mid-90s game soundtracks were authored for. -->
+    <None Update="Assets\GeneralUser-GS.sf2" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

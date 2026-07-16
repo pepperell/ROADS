@@ -3,16 +3,20 @@ using NAudio.Wave;
 namespace Roads.App.Audio.Synth;
 
 /// <summary>
-/// Final stage of the synth graph: pulls from the mixer, applies the smoothed master
-/// gain (settings volume × sound-enabled) and the pause duck (glides everything to
-/// silence while the sim is paused), then a per-sample tanh soft clip so a busy mix can
-/// never hard-clip the device. Targets are plain floats written by the UI thread each
-/// frame and slewed here per sample (the idiomatic NAudio live-control pattern —
-/// 32-bit float writes are atomic; smoothing erases staleness).
+/// Final stage of the synth graph: pulls from the SFX mixer and (optionally) the music
+/// bus, applies the smoothed master gain (settings volume × sound-enabled) and the pause
+/// duck, then a per-sample tanh soft clip so a busy mix can never hard-clip the device.
+/// The duck applies ONLY to the SFX bus — pausing freezes the diegetic world so its
+/// sounds glide to silence, but the background band plays on (the classic city-builder
+/// behavior); the master gain and soft clip cover both buses. Targets are plain floats
+/// written by the UI thread each frame and slewed here per sample (the idiomatic NAudio
+/// live-control pattern — 32-bit float writes are atomic; smoothing erases staleness).
 /// </summary>
 public class MasterProvider : ISampleProvider
 {
-    private readonly ISampleProvider _source;
+    private readonly ISampleProvider _sfx;
+    private readonly ISampleProvider? _music;
+    private float[] _musicBuffer = Array.Empty<float>();
     private ParamSmoother _master;
     private ParamSmoother _duck;
 
@@ -22,18 +26,25 @@ public class MasterProvider : ISampleProvider
     /// <summary>Pause duck target: 0 while the sim is paused (TimeScale == 0), else 1.</summary>
     public float TargetDuck = 1f;
 
-    public WaveFormat WaveFormat => _source.WaveFormat;
+    public WaveFormat WaveFormat => _sfx.WaveFormat;
 
-    public MasterProvider(ISampleProvider source)
+    public MasterProvider(ISampleProvider sfx, ISampleProvider? music = null)
     {
-        _source = source;
+        _sfx = sfx;
+        _music = music;
         _master.Reset(0f);
         _duck.Reset(1f);
     }
 
     public int Read(float[] buffer, int offset, int count)
     {
-        int read = _source.Read(buffer, offset, count);
+        int read = _sfx.Read(buffer, offset, count);
+        if (_music != null)
+        {
+            if (_musicBuffer.Length < count) _musicBuffer = new float[count];
+            _music.Read(_musicBuffer, 0, count);
+        }
+
         float fs = WaveFormat.SampleRate;
         float kMaster = DspUtil.SlewCoeff(0.05f, fs);
         // Duck slews slower down (release) than up (resume attack).
@@ -44,10 +55,13 @@ public class MasterProvider : ISampleProvider
         // Stereo interleaved: apply identical gain to the L/R pair so the image is stable.
         for (int i = 0; i < read; i += 2)
         {
-            float g = _master.Next(masterTarget, kMaster) * _duck.Next(duckTarget, kDuck);
-            buffer[offset + i] = MathF.Tanh(buffer[offset + i] * g);
+            float g = _master.Next(masterTarget, kMaster);
+            float d = _duck.Next(duckTarget, kDuck);
+            float musL = _music != null ? _musicBuffer[i] : 0f;
+            float musR = _music != null && i + 1 < read ? _musicBuffer[i + 1] : 0f;
+            buffer[offset + i] = MathF.Tanh((buffer[offset + i] * d + musL) * g);
             if (i + 1 < read)
-                buffer[offset + i + 1] = MathF.Tanh(buffer[offset + i + 1] * g);
+                buffer[offset + i + 1] = MathF.Tanh((buffer[offset + i + 1] * d + musR) * g);
         }
         return read;
     }

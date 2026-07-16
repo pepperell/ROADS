@@ -1109,8 +1109,7 @@ public class MainForm : Form
         VehicleRenderer.ShowArcConflicts = _settings.ShowArcConflicts;
         SteeringController.DebugLoggingEnabled = _settings.DebugLogging;
 
-        _audioEngine.ApplySettings(_settings.SoundEnabled, _settings.MasterVolume,
-            _settings.AmbientHumEnabled, _settings.EngineSoundsEnabled, _settings.EventSoundsEnabled);
+        _audioEngine.ApplySettings(_settings);
     }
 
     /// <summary>Settings-dialog Apply/OK path: adopts the staged record as applied,

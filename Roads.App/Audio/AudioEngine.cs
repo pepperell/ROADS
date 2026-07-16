@@ -1,5 +1,6 @@
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
+using Roads.App.Audio.Music;
 using Roads.App.Audio.Synth;
 using Roads.App.Core;
 using Roads.App.Vehicles;
@@ -12,13 +13,16 @@ namespace Roads.App.Audio;
 /// below) whose parameters are driven once per UI frame by <see cref="Update"/> reading
 /// sim state — nothing here ever writes to the simulation. Layers:
 /// ambient traffic hum (density/speed near the camera, quieter and duller at night),
-/// a pool of per-vehicle engine tones that fade in as the camera zooms close, and
-/// one-shot events (horn on a deadlock-breaker release, brake screech on hard braking,
-/// soft tick on visible signal changes).
+/// a pool of per-vehicle engine tones that fade in as the camera zooms close, one-shot
+/// events (horn on a deadlock-breaker release, brake screech on hard braking, soft tick
+/// on visible signal changes), and the generative background music (MeltySynth +
+/// bundled GM soundfont, composed on the fly by <see cref="Composer"/> and steered by
+/// global sim mood — see <see cref="UpdateMusicMood"/>).
 ///
-///   WaveOutEvent → MasterProvider (master gain × pause duck × tanh)
-///     → MixingSampleProvider (float 44.1 kHz stereo, ReadFully)
-///       → HumProvider + EngineVoice×8 + OneShotVoice×6   (permanently connected)
+///   WaveOutEvent → MasterProvider (SFX×duck + music → master gain → tanh)
+///     ├→ MixingSampleProvider (float 44.1 kHz stereo, ReadFully)
+///     │    → HumProvider + EngineVoice×8 + OneShotVoice×6   (permanently connected)
+///     └→ MusicProvider (music bus — NOT pause-ducked; the band plays through pause)
 ///
 /// Threading: the UI thread writes plain float targets; the playback thread slews them
 /// per sample (32-bit float writes are atomic; smoothing erases staleness). One-shot
@@ -61,6 +65,7 @@ public sealed class AudioEngine : IDisposable
     private HumProvider _hum = null!;
     private EngineVoice[] _engineVoices = Array.Empty<EngineVoice>();
     private OneShotVoice[] _oneShots = Array.Empty<OneShotVoice>();
+    private MusicProvider? _music;
 
     /// <summary>False when no output device could be opened (or it failed mid-run);
     /// the engine is inert and every public method no-ops.</summary>
@@ -72,6 +77,14 @@ public sealed class AudioEngine : IDisposable
     private bool _ambientEnabled = true;
     private bool _enginesEnabled = true;
     private bool _eventsEnabled = true;
+    private bool _musicEnabled = true;
+    private float _musicVolume = 0.5f;
+    private float _musicTempo = 96f;
+    private float _musicSwing = 0.6f;
+    private float _musicTraffic = 1f;
+    private float _musicNight = 1f;
+    private float _musicTension = 1f;
+    private int _maxVehicles = 200;
 
     // ── Per-vehicle event state (index-aligned to VehicleStore, swap-and-pop fixed up) ──
     private float[] _prevBrake = Array.Empty<float>();
@@ -127,7 +140,22 @@ public sealed class AudioEngine : IDisposable
                 mixer.AddMixerInput(_oneShots[i]);
             }
 
-            _master = new MasterProvider(mixer);
+            // Generative music: MeltySynth + the bundled GM soundfont. A missing or
+            // corrupt soundfont just means no music — never no app. TickCount seed:
+            // a fresh opening chorus each launch (music variety is a feature; the
+            // determinism invariant only concerns SimRandom).
+            try
+            {
+                string soundFontPath = Path.Combine(AppContext.BaseDirectory, "Assets", "GeneralUser-GS.sf2");
+                if (File.Exists(soundFontPath))
+                    _music = new MusicProvider(soundFontPath, 44100, seed: Environment.TickCount);
+            }
+            catch
+            {
+                _music = null;
+            }
+
+            _master = new MasterProvider(mixer, _music);
             _waveOut = new WaveOutEvent { DesiredLatency = 100, NumberOfBuffers = 3 };
             _waveOut.PlaybackStopped += (_, e) =>
             {
@@ -147,16 +175,34 @@ public sealed class AudioEngine : IDisposable
         }
     }
 
-    /// <summary>Pushes the audio settings (called from MainForm.ApplySettings — the single
-    /// choke point through which every settings mutation flows).</summary>
-    public void ApplySettings(bool soundEnabled, float masterVolume,
-        bool ambientEnabled, bool engineSoundsEnabled, bool eventSoundsEnabled)
+    /// <summary>Pushes the audio + music settings (called from MainForm.ApplySettings —
+    /// the single choke point through which every settings mutation flows).</summary>
+    public void ApplySettings(AppSettings settings)
     {
-        _soundEnabled = soundEnabled;
-        _masterVolume = Math.Clamp(masterVolume, 0f, 1f);
-        _ambientEnabled = ambientEnabled;
-        _enginesEnabled = engineSoundsEnabled;
-        _eventsEnabled = eventSoundsEnabled;
+        _soundEnabled = settings.SoundEnabled;
+        _masterVolume = Math.Clamp(settings.MasterVolume, 0f, 1f);
+        _ambientEnabled = settings.AmbientHumEnabled;
+        _enginesEnabled = settings.EngineSoundsEnabled;
+        _eventsEnabled = settings.EventSoundsEnabled;
+        _musicEnabled = settings.MusicEnabled;
+        _musicVolume = Math.Clamp(settings.MusicVolume, 0f, 1f);
+        _musicTempo = settings.MusicTempoBpm;
+        _musicSwing = settings.MusicSwing;
+        _musicTraffic = settings.MusicTrafficResponse;
+        _musicNight = settings.MusicNightResponse;
+        _musicTension = settings.MusicTensionResponse;
+        _maxVehicles = Math.Max(1, settings.MaxVehicles);
+        PushMusicSettings();
+    }
+
+    /// <summary>Pushes the settings-derived music targets (gain, tempo, swing) so a
+    /// toggle takes effect immediately even while the sim is paused.</summary>
+    private void PushMusicSettings()
+    {
+        if (_music == null) return;
+        _music.TargetGain = _soundEnabled && _musicEnabled ? _musicVolume : 0f;
+        _music.TempoSetting = _musicTempo;
+        _music.SwingSetting = _musicSwing;
     }
 
     /// <summary>
@@ -203,6 +249,7 @@ public sealed class AudioEngine : IDisposable
         float density = 0f, speedSum = 0f;
         int speedCount = 0;
         int candidates = 0;
+        int drivingCount = 0, congestedCount = 0; // global (map-wide) — feeds the music mood
         for (int i = 0; i < _vehicles.Count; i++)
         {
             float brake = _vehicles.Brake[i];
@@ -214,6 +261,8 @@ public sealed class AudioEngine : IDisposable
 
             float x = _vehicles.PosX[i], y = _vehicles.PosY[i];
             float speed = _vehicles.Speed[i];
+            drivingCount++;
+            if (speed < 2f) congestedCount++; // StatisticsPanel.CongestionThresholdMs
             float dx = x - camX, dy = y - camY;
             float dist = MathF.Sqrt(dx * dx + dy * dy);
 
@@ -261,6 +310,33 @@ public sealed class AudioEngine : IDisposable
         UpdateEngineVoices(candidates, engineMix, camX, camY, viewWidth, zoom);
         DrainPendingHorns(oneShotsAllowed, eventRect, camX, viewWidth, zoom);
         UpdateSignalTicks(oneShotsAllowed, rect, zoom, camX, viewWidth);
+        UpdateMusicMood(drivingCount, congestedCount, dark);
+    }
+
+    /// <summary>
+    /// Maps global sim state to the music mood: traffic density (vehicles vs. half the
+    /// population cap) drives arrangement energy, time-of-day darkness pulls the band
+    /// toward the night float, and the map-wide congestion share (vehicles below the
+    /// StatisticsPanel stall threshold) raises harmonic tension. The Music settings
+    /// sliders scale each response; at zero a mapping is pinned to its neutral value.
+    /// The composer consumes these at bar boundaries, so changes always land musically.
+    /// </summary>
+    private void UpdateMusicMood(int driving, int congested, float dark)
+    {
+        if (_music == null) return;
+        float trafficNorm = Math.Clamp(driving / MathF.Max(1f, 0.5f * _maxVehicles), 0f, 1f);
+        // Response slider lerps between a fixed mid-energy band (0) and the full mapping (1).
+        float intensity = Math.Clamp(0.5f + _musicTraffic * (0.15f + 1.05f * trafficNorm - 0.5f), 0f, 1f);
+        float congestionShare = driving > 0 ? (float)congested / driving : 0f;
+        // Below ~15% slow vehicles is normal signal queuing, not a jam; scale by a small
+        // fleet factor so five stopped cars on an empty map don't read as gridlock.
+        float tension = Math.Clamp((congestionShare - 0.15f) / 0.45f, 0f, 1f)
+            * MathF.Min(1f, driving / 25f) * _musicTension;
+
+        _music.TargetIntensity = intensity;
+        _music.TargetNight = dark * _musicNight;
+        _music.TargetTension = tension;
+        PushMusicSettings();
     }
 
     // ═══════════════════════ Engine voice pool ═══════════════════════

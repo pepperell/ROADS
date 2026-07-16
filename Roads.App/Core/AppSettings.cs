@@ -66,6 +66,22 @@ public sealed record AppSettings
     /// <summary>One-shot events: horns, brake screeches, signal ticks.</summary>
     public bool EventSoundsEnabled { get; set; } = true;
 
+    // ── Music (generative jazz engine — see Audio/Music/Composer) ──
+    /// <summary>Background music master switch (also requires <see cref="SoundEnabled"/>).</summary>
+    public bool MusicEnabled { get; set; } = true;
+    /// <summary>Music bus volume (0–1), independent of the SFX layers.</summary>
+    public float MusicVolume { get; set; } = 0.5f;
+    /// <summary>Base tempo in BPM; night/tension modulate around it (±~10%).</summary>
+    public float MusicTempoBpm { get; set; } = 96f;
+    /// <summary>Swing feel: 0 = straight 8ths, 1 = full triplet swing.</summary>
+    public float MusicSwing { get; set; } = 0.6f;
+    /// <summary>How strongly traffic density drives band energy (0 = constant mid-energy).</summary>
+    public float MusicTrafficResponse { get; set; } = 1f;
+    /// <summary>How strongly night mellows the band toward the ambient float (0 = never).</summary>
+    public float MusicNightResponse { get; set; } = 1f;
+    /// <summary>How strongly map-wide congestion raises musical tension (0 = never).</summary>
+    public float MusicTensionResponse { get; set; } = 1f;
+
     // ── Debug ──
     /// <summary>Arc-conflict debug overlay (also toggled by the G key, which additionally
     /// forces <see cref="DebugLogging"/> ON — never off — matching its historical behavior).</summary>
