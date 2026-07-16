@@ -96,7 +96,8 @@ ROADS/
 ├── settings.json                     # Persisted app settings (written on change)
 ├── *.roads                           # Sample / test maps (binary format)
 ├── backups/                          # Rotating timestamped autosaves
-├── scripts/                          # parse_benchmark.py, unpack_roads.py
+├── scripts/                          # parse_benchmark.py, unpack_roads.py,
+│                                     #   osm_to_roads.py (build a map from OpenStreetMap data)
 │
 └── Roads.App/                        # Main application
     ├── Program.cs                    # Entry point; --autobench / --simtest CLI modes
