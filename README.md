@@ -5,26 +5,35 @@ A real-time, city-scale traffic simulation built in C# with a graphical editor. 
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows-blue)
 ![.NET 8](https://img.shields.io/badge/.NET-8.0-purple)
 ![Renderer: SkiaSharp](https://img.shields.io/badge/renderer-SkiaSharp-green)
+![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue)
 
 ---
 
 ## Features
 
-- **Real-time simulation** of thousands of vehicles at 30 Hz fixed timestep, decoupled from 60 FPS rendering
+- **Real-time simulation** at a fixed 30 Hz timestep with time scaling from pause to 64x — stress-tested at **10,000 vehicles at ~30 FPS**
 - **Physics-based driving** using the bicycle model (simplified Ackermann steering) for realistic vehicle motion
-- **Intelligent Driver Model (IDM)** for natural car-following behavior with per-driver parameters
-- **Full road network editor** — draw roads, place intersections, set traffic signals, and configure lanes while the simulation runs
-- **Traffic signals & stop signs** with phase cycling, queue-based priority, and right-of-way rules
+- **Intelligent Driver Model (IDM)** for natural car-following behavior
+- **Driver personalities** — five weighted archetypes (Commuter, Lead Foot, Sunday Driver, Nervous Nellie, Trucker) whose traits (speed bias, reaction time, following distance, steering gains) feed directly into the physics
+- **Town life** — persistent residents with homes and archetype-driven daily schedules; morning and evening rush hours emerge naturally; vehicles park at their destination and depart later
+- **Five vehicle types** (sedan, SUV, truck, bus, motorcycle) with per-type dimensions, wheelbase, and acceleration
+- **Full road network editor** — draw straight or curved roads, place intersections, configure signals and lanes **while the simulation runs**
+- **Traffic control** — traffic lights (fixed-time or vehicle-actuated), stop signs, and yield signs, with per-approach exemptions and editable phase groupings
+- **Right-of-way rules** — queue priority at stop signs, road-class priority (arterial over residential) at unsignalized intersections
+- **Deadlock detection & recovery** — layered mechanisms detect and dissolve gridlock; stuck-vehicle diagnostics feed a reproducible headless test harness
 - **Lane change logic** — vehicles merge to the correct lane ahead of turns, factoring in congestion
-- **Bezier curve roads** with draggable control points for smooth, realistic road geometry
-- **Multi-lane roads** with computed lane offsets and center-line tracking via PID steering
-- **A\* pathfinding** on a directed road graph with path caching
-- **Spatial indexing** via uniform grids for fast collision queries, nearest-road lookups, and render culling
-- **Adjustable time scale** from paused (0x) to 64x speed
+- **Bezier curve roads** with draggable control points; multi-lane, one-way, and single-lane two-way (shared) roads
+- **A\* pathfinding** on a directed road graph, with graceful rerouting when the network changes under moving traffic
+- **Deterministic simulation RNG** — headless runs and jam replays are exactly reproducible from a seed
+- **Spatial indexing** via uniform grids for fast collision queries, nearest-road lookups, and visible-only rendering
 - **Day/night cycle** with schedule-driven commuter behavior, warm dawn/dusk tinting, and lit windows, street lights, and signal lenses at night
 - **Procedural scenery** — grass terrain, buildings drawn per destination type (homes, offices, shops, schools, parking), roadside trees/bushes, and street lights, all deterministically placed with no road/building overlap
 - **Visually distinct road types** — residential, arterial, highway, and dirt differ in surface, shoulders/sidewalks, lane markings, and medians, not just color
 - **Realistic traffic furniture** — signal heads with colored lenses, octagonal stop signs, yield triangles, and speed-limit signs posted only where the limit actually changes
+- **Procedural sound** — ambient traffic hum, pooled per-vehicle engine voices, and event one-shots, all synthesized in real time with NAudio (no samples)
+- **Save/load** — binary map format plus human-readable JSON export, with rotating timestamped autosaves
+- **In-app settings dialog** — graphics, simulation, audio, and autosave options persisted to `settings.json`
+- **Overlays & tooling** — minimap, statistics panel, congestion heat-map, performance HUD, and a benchmark/stress-test harness (procedural grid city + 10K bulk spawn)
 
 ---
 
@@ -35,126 +44,166 @@ A real-time, city-scale traffic simulation built in C# with a graphical editor. 
 | Language | C# / .NET 8 |
 | Rendering | SkiaSharp 3.x (GPU-accelerated 2D) |
 | Windowing | WinForms |
-| UI | Retained-mode control hierarchy (WinForms-like panels/labels/buttons) rendered via SkiaSharp |
-| Architecture | Double-buffered sim/render, SoA data layout, spatial grid indexing |
+| UI | Retained-mode control hierarchy (panels/labels/buttons) rendered via SkiaSharp |
+| Audio | NAudio 2.x (real-time procedural synthesis) |
+| Architecture | Single-threaded fixed-timestep sim (30 Hz), SoA data layout, spatial grid indexing |
 
 ---
 
 ## Architecture Overview
 
+Everything runs on the main thread, once per rendered frame — profiling showed the tick fits comfortably in a frame even at 10K vehicles, so no sim thread or double-buffering is needed. Audio renders on NAudio's playback thread, parameter-driven once per frame.
+
 ```
-┌─────────────────────────────────────────────┐
-│              Main Thread                     │
-│  ┌─────────┐  ┌──────────┐  ┌────────────┐  │
-│  │  Input   │→│  Render  │→│  UI/Editor │  │
-│  │ Handling │  │ (SkiaSharp)│ │  Overlay   │  │
-│  └─────────┘  └──────────┘  └────────────┘  │
-└─────────────────────────────────────────────┘
-         ↕ (double-buffered state snapshot)
-┌─────────────────────────────────────────────┐
-│           Simulation Thread(s)               │
-│  ┌──────┐ ┌──────────┐ ┌─────────────────┐  │
-│  │ Time │→│ Vehicle  │→│  Traffic Rule   │  │
-│  │ Step │ │ Physics  │ │  Enforcement    │  │
-│  └──────┘ └──────────┘ └─────────────────┘  │
-│  ┌──────────────┐ ┌────────────────────────┐ │
-│  │ Pathfinding  │ │  Spawn/Despawn/Park   │ │
-│  │ (background) │ │  Manager              │ │
-│  └──────────────┘ └────────────────────────┘ │
-└─────────────────────────────────────────────┘
+┌────────────────── Main thread, per frame ───────────────────────┐
+│                                                                  │
+│  Input           Simulation tick                Render           │
+│  ┌──────────┐    ┌──────────────────────────┐   ┌─────────────┐  │
+│  │ WinForms │ →  │ fixed 30 Hz accumulator; │ → │ SkiaSharp:  │  │
+│  │ mouse/   │    │ substeps scale with time │   │ terrain,    │  │
+│  │ keyboard │    │ warp (1x–64x, clamped)   │   │ roads,      │  │
+│  └──────────┘    │                          │   │ buildings,  │  │
+│                  │ caches/signals → lane    │   │ vehicles,   │  │
+│                  │ change → steering + IDM  │   │ retained UI │  │
+│                  │ → physics → reroute →    │   └─────────────┘  │
+│                  │ population/schedules     │                    │
+│                  └──────────────────────────┘                    │
+└──────────────────────────────────────────────────────────────────┘
 ```
+
+The same tick logic is reused headless by two harnesses: `--autobench` (10K-vehicle performance benchmark) and `--simtest` (reproducible jam detection on a saved map).
 
 ### Key Design Decisions
 
 - **Struct-of-Arrays (SoA)** layout for vehicle data — hot simulation fields packed together for cache efficiency
-- **Uniform spatial grid** (50m cells) for O(1) point queries used in collision broad-phase, editor interactions, and render culling
+- **Uniform spatial grids** for vehicles and road edges — O(1) point queries for collision broad-phase, editor picking, and visible-only render passes
 - **Bicycle model** physics instead of per-wheel simulation — captures realistic steering at minimal cost for 10,000+ vehicles
 - **IDM car-following** with per-driver personality parameters for natural traffic flow
-- **Directed graph** road network with Bezier curve geometry and precomputed adjacency lists
+- **Directed graph** road network with Bezier curve geometry, precomputed adjacency, and cached intersection turn arcs
+- **Deterministic RNG** (`SimRandom`) for every simulation-affecting draw, so headless replays reproduce jams exactly
+- **Measure before optimizing** — the heavyweight planned optimizations (contraction hierarchies, double-buffered sim thread, SIMD) were all *measured out*; the real 300x win came from clamping the fixed-timestep substep spiral, replacing O(n²) arc-conflict scans with an arc-occupancy index, caching Bézier projections, and culling render passes to the visible viewport
 
 ---
 
 ## Project Structure
 
 ```
-Roads/
+ROADS/
 ├── Roads.slnx                        # Solution file
-├── DESIGN.md                         # Full design document
-├── Roads.App/                        # Main application
-│   ├── Program.cs                    # Entry point
-│   ├── MainForm.cs                   # WinForms host window
-│   ├── SimulationLoop.cs             # Main loop orchestrator
-│   ├── SimConstants.cs               # Global simulation constants
-│   ├── GeometryUtil.cs               # Shared geometry helpers
-│   ├── GraphChangeHandler.cs         # Thread-safe graph mutation queue
-│   │
-│   ├── Core/
-│   │   └── Camera.cs                 # Pan/zoom/world-to-screen transform
-│   │
-│   ├── World/
-│   │   ├── RoadGraph.cs              # Directed graph structure
-│   │   ├── RoadNode.cs               # Intersection data
-│   │   ├── RoadEdge.cs               # Road segment (Bezier geometry, lanes, speed limit)
-│   │   ├── SpatialGrid.cs            # Uniform grid for vehicles
-│   │   ├── EdgeSpatialGrid.cs        # Uniform grid for road edges
-│   │   ├── Pathfinder.cs             # A* pathfinding
-│   │   ├── IntersectionArc.cs        # Turn arc geometry
-│   │   ├── IntersectionArcCache.cs   # Cached intersection arcs
-│   │   ├── StopLineCache.cs          # Precomputed stop line positions
-│   │   ├── TrafficSignalSystem.cs    # Traffic light phase logic
-│   │   ├── StopSignSystem.cs         # Stop sign queue logic
-│   │   └── YieldSignSystem.cs        # Yield sign logic
-│   │
-│   ├── Vehicles/
-│   │   ├── VehicleStore.cs           # SoA vehicle data store
-│   │   ├── VehiclePhysics.cs         # Bicycle model kinematics
-│   │   ├── SteeringController.cs     # PID lane-center tracking
-│   │   ├── LaneChangeLogic.cs        # Lane selection and merging
-│   │   └── VehicleSpawner.cs         # Spawn/despawn management
-│   │
-│   ├── Editor/
-│   │   ├── EditorState.cs            # Current tool, selection state
-│   │   ├── RoadTool.cs               # Road drawing (click to place nodes)
-│   │   ├── DeleteTool.cs             # Road/node deletion
-│   │   ├── SignalTool.cs             # Traffic signal assignment
-│   │   ├── DestinationTool.cs        # Destination point placement
-│   │   ├── EdgeSnapTool.cs           # Snap-to-edge helpers
-│   │   └── LaneRestrictionTool.cs    # Lane restriction editing
-│   │
-│   └── Rendering/
-│       ├── SceneRenderer.cs          # Main render orchestrator (layer/z-order authority)
-│       ├── SkiaCanvas.cs             # SkiaSharp surface management
-│       ├── TerrainRenderer.cs        # Procedural grass terrain background
-│       ├── RoadRenderer.cs           # Per-type road surfaces, markings, shoulders, crosswalks
-│       ├── RoadTypeVisuals.cs        # Per-RoadType style table (colors, widths, shoulders)
-│       ├── BuildingLayer.cs          # Deterministic building placement from destination nodes
-│       ├── BuildingRenderer.cs       # Procedural building art (roofs, lots, night windows)
-│       ├── PropRenderer.cs           # Street lights, trees, bushes (deterministic scatter)
-│       ├── SignRenderer.cs           # Signal heads, stop/yield signs, change-only speed signs
-│       ├── VehicleRenderer.cs        # Vehicle shape drawing
-│       ├── CongestionHeatMap.cs      # Per-edge congestion overlay (H key)
-│       ├── RenderDetail.cs           # LOD thresholds and frustum-culling helpers
-│       ├── PerfTelemetry.cs          # Frame timing + pathfind stats (feeds HUD & benchmarks)
-│       │
-│       └── Ui/                       # Retained-mode control hierarchy (WinForms-like)
-│           ├── Panel.cs              # Base control: bounds, background/border, mouse events
-│           ├── Label.cs              # Panel + font/text (static or live TextSource)
-│           ├── Button.cs             # Label + hover/pressed/active/disabled color states
-│           ├── UiRoot.cs             # Z-order, layout, hover tracking, mouse capture
-│           ├── UiTheme.cs            # Shared fonts, colors, POI palette, scratch paints
-│           ├── MenuBar.cs            # File actions (New/Save/Load) + tool buttons (top-left)
-│           ├── PoiSubmenu.cs         # POI-type buttons under the Dest Pt tool
-│           ├── ClockPanel.cs         # Analog 12h clock (AM/PM), digital time, speed + transport buttons
-│           ├── SelectionInfoPanel.cs # Selected node/edge details (always shown; "No selection" idle)
-│           ├── LegendPanel.cs        # Keyboard shortcut legend
-│           ├── SliderPanel.cs        # Runtime-tunable parameter sliders (container)
-│           ├── Slider.cs             # One labeled slider row (drag with capture)
-│           ├── MinimapPanel.cs       # Corner minimap (cached SKPicture, click/scrub)
-│           ├── StatisticsPanel.cs    # Population/traffic statistics (on by default; N toggles)
-│           ├── VehicleInfoPanel.cs   # Selected vehicle info (auto height)
-│           ├── PerformanceHudPanel.cs# FPS / sim / draw / GC readout (on by default; P toggles)
-│           ├── PerformanceBar.cs     # Stacked sim/draw/idle frame-time bar
-│           └── BottomLeftStack.cs    # Overlap-free stacking of HUD/stats/vehicle/selection info
+├── DESIGN.md                         # Full design document + phase checklists
+├── HIDDEN_DEPENDENCIES.md            # Catalogue of implicit ordering contracts
+├── LICENSE                           # GPL v3
+├── settings.json                     # Persisted app settings (written on change)
+├── *.roads                           # Sample / test maps (binary format)
+├── backups/                          # Rotating timestamped autosaves
+├── scripts/                          # parse_benchmark.py, unpack_roads.py
+│
+└── Roads.App/                        # Main application
+    ├── Program.cs                    # Entry point; --autobench / --simtest CLI modes
+    ├── MainForm.cs                   # WinForms host window, input routing
+    ├── SimulationLoop.cs             # Fixed 30 Hz tick orchestrator
+    ├── SimConstants.cs               # Global simulation constants
+    ├── GeometryUtil.cs               # Shared geometry helpers
+    ├── GraphChangeHandler.cs         # Per-frame reaction to graph edits (cache rebuilds, vehicle fix-ups)
+    │
+    ├── Audio/
+    │   ├── AudioEngine.cs            # Always-running NAudio graph, parameters driven per frame
+    │   └── Synth/                    # Allocation-free DSP: engine voices, ambient hum bed,
+    │                                 #   event one-shots, master gain/duck stage
+    ├── Core/
+    │   ├── AppSettings.cs            # All user-adjustable settings (record, dialog-paged)
+    │   ├── Camera.cs                 # Pan/zoom/world-to-screen transform
+    │   ├── SimRandom.cs              # Deterministic process-wide simulation RNG
+    │   └── SimulationClock.cs        # In-game time of day (0–24 h)
+    │
+    ├── Diagnostics/
+    │   ├── DeadlockReport.cs         # Stuck-vehicle diagnostics (in-app D key + headless)
+    │   └── SimTestHarness.cs         # Headless reproducible sim runs (--simtest)
+    │
+    ├── Persistence/
+    │   ├── MapSerializer.cs          # Binary .roads save/load (graph, signals, vehicles)
+    │   ├── MapJsonSerializer.cs      # Human-readable JSON export (parallel walk order)
+    │   ├── AutoSaveManager.cs        # Timestamped rotating backups
+    │   └── SettingsStore.cs          # settings.json load/save
+    │
+    ├── World/
+    │   ├── RoadGraph.cs              # Directed graph structure
+    │   ├── RoadNode.cs               # Intersection data
+    │   ├── RoadEdge.cs               # Road segment (Bezier geometry, lanes, speed limit)
+    │   ├── SpatialGrid.cs            # Uniform grid for vehicles
+    │   ├── EdgeSpatialGrid.cs        # Uniform grid for road edges (also drives render culling)
+    │   ├── Pathfinder.cs             # A* pathfinding
+    │   ├── GridNetworkGenerator.cs   # Procedural grid city for stress testing
+    │   ├── IntersectionArc.cs        # Turn arc geometry
+    │   ├── IntersectionArcCache.cs   # Cached intersection arcs
+    │   ├── StopLineCache.cs          # Precomputed stop line positions
+    │   ├── TrafficSignalSystem.cs    # Traffic light phases (fixed-time + actuated)
+    │   ├── StopSignSystem.cs         # Stop sign queue logic
+    │   └── YieldSignSystem.cs        # Yield sign logic
+    │
+    ├── Vehicles/
+    │   ├── VehicleStore.cs           # SoA vehicle data store
+    │   ├── VehicleType.cs            # Per-type dimensions, wheelbase, acceleration
+    │   ├── VehiclePhysics.cs         # Bicycle model kinematics
+    │   ├── SteeringController.cs     # PID lane-center tracking
+    │   ├── LaneChangeLogic.cs        # Lane selection and merging
+    │   ├── ArcOccupancyIndex.cs      # Arc → occupying-vehicles index (kills O(n²) scans)
+    │   ├── VehicleSpawner.cs         # Spawn/despawn management
+    │   ├── DriverPersonality.cs      # Archetypes + trait generation
+    │   ├── Resident.cs               # A townsperson: home, activity state
+    │   ├── ScheduleGenerator.cs      # Archetype-driven daily schedules
+    │   ├── POIRegistry.cs            # POI lookup by type + occupancy tracking
+    │   └── PopulationManager.cs      # Town-life orchestrator (departures, arrivals, lifecycle)
+    │
+    ├── Editor/
+    │   ├── EditorState.cs            # Current tool, selection, sticky road options
+    │   ├── RoadTool.cs               # Road drawing (straight/curved chains, ghost previews)
+    │   ├── NodeTool.cs               # Add node: split a road or place a free node
+    │   ├── UpdateSegmentTool.cs      # Retype an existing segment to the sticky options
+    │   ├── DeleteTool.cs             # Road/node deletion
+    │   ├── SignalTool.cs             # Signal type/control/rotation/exemption editing
+    │   ├── DestinationTool.cs        # POI placement (incl. Entry/Exit nodes)
+    │   └── LaneRestrictionTool.cs    # Per-lane turn restriction editing
+    │
+    └── Rendering/
+        ├── SceneRenderer.cs          # Main render orchestrator (layer/z-order authority)
+        ├── SkiaCanvas.cs             # SkiaSharp surface management
+        ├── TerrainRenderer.cs        # Procedural grass terrain background
+        ├── RoadRenderer.cs           # Per-type road surfaces, markings, shoulders, crosswalks
+        ├── RoadTypeVisuals.cs        # Per-RoadType style table (colors, widths, shoulders)
+        ├── BuildingLayer.cs          # Deterministic building placement from destination nodes
+        ├── BuildingRenderer.cs       # Procedural building art (roofs, lots, night windows)
+        ├── PropRenderer.cs           # Street lights, trees, bushes (deterministic scatter)
+        ├── SignRenderer.cs           # Signal heads, stop/yield signs, change-only speed signs
+        ├── VehicleRenderer.cs        # Vehicle shape drawing (per-type bodies, LOD dots)
+        ├── CongestionHeatMap.cs      # Per-edge congestion overlay (H key)
+        ├── RenderDetail.cs           # LOD thresholds and frustum-culling helpers
+        ├── PerfTelemetry.cs          # Frame timing + pathfind stats (feeds HUD & benchmarks)
+        ├── BenchmarkCapture.cs       # Appends labeled perf snapshots to benchmark.log
+        │
+        └── Ui/                       # Retained-mode control hierarchy
+            ├── Panel.cs              # Base control: bounds, background/border, mouse events
+            ├── Label.cs              # Panel + font/text (static or live TextSource)
+            ├── Button.cs             # Label + hover/pressed/active/disabled color states
+            ├── Checkbox.cs           # Live-bound checkbox (get/set accessors)
+            ├── Slider.cs             # One labeled slider row (drag with capture)
+            ├── UiRoot.cs             # Z-order, layout, hover tracking, mouse capture
+            ├── UiTheme.cs            # Shared fonts, colors, POI palette, scratch paints
+            ├── MenuBar.cs            # File actions (New/Save/Load), tool buttons, Settings
+            ├── RoadSubmenu.cs        # Road-family tools + sticky options (type, width,
+            │                         #   one-way, shared lane, straight/curved)
+            ├── SignalSubmenu.cs      # Change Type / Control Type / Rotate / Exempt
+            ├── PoiSubmenu.cs         # POI-type buttons under the Dest Pt tool
+            ├── SettingsDialog.cs     # Modal in-canvas settings dialog (paged)
+            ├── ClockPanel.cs         # Analog 12h clock, digital time, speed + transport buttons
+            ├── SelectionInfoPanel.cs # Selected node/edge details ("No selection" idle)
+            ├── VehicleInfoPanel.cs   # Selected vehicle info (auto height)
+            ├── LegendPanel.cs        # Keyboard shortcut legend
+            ├── MinimapPanel.cs       # Corner minimap (cached SKPicture, click/scrub)
+            ├── StatisticsPanel.cs    # Population/traffic statistics (N toggles)
+            ├── PerformanceHudPanel.cs# FPS / sim / draw / GC readout (P toggles)
+            ├── PerformanceBar.cs     # Stacked sim/draw/idle frame-time bar
+            └── BottomLeftStack.cs    # Overlap-free stacking of HUD/stats/vehicle/selection info
 ```
 
 ---
@@ -176,40 +225,49 @@ position = (frontWheel + rearWheel) / 2
 
 A **PID steering controller** tracks the lane center Bezier curve with a speed-scaled lookahead distance. The **Intelligent Driver Model (IDM)** governs acceleration and braking based on the gap to the vehicle ahead.
 
-### Vehicle Types (Planned)
+### Vehicle Types
 
-| Type | Length | Max Speed | Acceleration |
-|------|--------|-----------|-------------|
-| Sedan | 4.5m | 50 m/s | 3.5 m/s² |
-| SUV | 5.2m | 45 m/s | 3.0 m/s² |
-| Truck | 8.0m | 35 m/s | 2.0 m/s² |
-| Bus | 12.0m | 30 m/s | 1.5 m/s² |
-| Motorcycle | 2.2m | 55 m/s | 5.0 m/s² |
+| Type | Length | Width | Max Acceleration |
+|------|--------|-------|------------------|
+| Sedan | 4.5 m | 2.0 m | 3.4 m/s² |
+| SUV | 4.9 m | 2.15 m | 3.0 m/s² |
+| Truck | 8.5 m | 2.45 m | 0.8 m/s² |
+| Bus | 12.0 m | 2.55 m | 1.2 m/s² |
+| Motorcycle | 2.2 m | 0.85 m | 4.0 m/s² |
+
+Dimensions feed both rendering and simulation — car-following gaps, stop-line offsets, overlap detection, and lane-change fit checks are all bumper-accurate per type, and the kinematic wheelbase scales with body length. Acceleration values are the full-throttle physical ceiling; drivers usually command less, per their personality.
 
 ---
 
 ## Traffic Rules
 
-- **Traffic signals** cycle through green/yellow/red phases per approach direction
-- **Stop signs** use first-come-first-served queue priority
+- **Traffic signals** cycle green/yellow/red phases per approach, as either **fixed-time or vehicle-actuated** controllers; phase groupings can be rotated per intersection in the editor
+- **Stop signs** use first-come-first-served queue priority; **yield signs** give way to conflicting traffic
+- **Per-approach exemptions** let individual approaches skip a stop/yield (e.g. the major road of a two-way stop)
+- **Road-class right-of-way** at unsignalized intersections — minor-road traffic yields to the higher-class road
 - **Speed limits** per road edge, respected by vehicles with personality-based bias
-- **Right-of-way** at unsignalized intersections
 - **Yellow light dilemma** — vehicles decide to stop or proceed based on distance and speed
 - **Lane changes** are smooth lateral transitions triggered by upcoming turn requirements and congestion
+- **Deadlock recovery** — layered detection dissolves intersection gridlock instead of letting it spread map-wide
 
 ---
 
 ## Editor Tools
 
+The toolbar shows **Select**, **Road**, **Signal**, and **Dest Pt**; the Road and Signal buttons open submenus with their tool families and options.
+
 | Tool | Action |
 |------|--------|
-| **Road** | Click to place nodes; creates connected road edges with Bezier curves |
-| **Node** | Click to add a node — splits a nearby road at the ghost-preview position, or places a free node in empty space |
-| **Delete** | Click to remove road segments or nodes |
-| **Signal** | Click intersection to cycle: none → stop sign → yield → traffic light; Shift+click tunes (per-edge stop/yield exemption, light phase rotation) |
-| **Destination** | Click to place vehicle destination points (incl. Entry/Exit nodes, where traffic enters and leaves the map) |
-| **Lane Restriction** | Configure lane-specific rules |
-| **Edge Snap** | Snap new connections to existing road edges |
+| **Select** | Click a vehicle, node, or edge to inspect it; keyboard shortcuts retype the selected segment (R = road type, +/− = lanes, [ ] = speed limit, O = one-way, J = shared single lane) |
+| **Road** | Click to draw road chains — straight or curved mode; an anchor ghost always previews where the click will land (snap to node, split a road, or free) |
+| **Node** *(Road submenu)* | Click to add a node — splits a nearby road at the ghost-preview position, or places a free node in empty space |
+| **Delete** *(Road submenu)* | Click to remove road segments or nodes |
+| **Update Seg** *(Road submenu)* | Click a segment to retype it to the current sticky road options (type, width, one-way, shared lane) |
+| **Signal** *(submenu)* | **Change Type** cycles a node: light → stop → yield → none; **Control Type** toggles fixed-time ↔ actuated; **Rotate** shifts the light's phase grouping; **Exempt** toggles whether an approach must stop |
+| **Dest Pt** | Click to place vehicle destination points — homes, offices, shops, schools, parking, plus Entry/Exit nodes where traffic enters and leaves the map |
+| **Lane Restriction** | Configure per-lane turn restrictions (L to enter, 1–4 select lane, C applies defaults) |
+
+The Road submenu's sticky options (road type, per-direction width, one-way, single-lane two-way, straight/curved) apply to both new roads and Update Seg clicks.
 
 Right-click (or ESC) is the universal cancel: it aborts the in-progress operation (road chain, lane-restrict mode, selection) one step per press, and with nothing left to cancel switches back to the Select tool.
 
@@ -217,7 +275,7 @@ Roads can be added and removed **while the simulation is running** — vehicles 
 
 ---
 
-## Memory Budget
+## Memory Budget (design targets)
 
 | Entity | Target | Count |
 |--------|--------|-------|
@@ -232,109 +290,23 @@ Achieved via struct-of-arrays layout and value types.
 
 ---
 
-## Development Progress
+## Development Status
 
-### Phase 1: Foundation — *Complete*
-> Window with pannable/zoomable canvas, basic road drawing, and a single vehicle driving along a road.
+All planned phases are complete except a few Phase 6 stragglers. The full task-level checklists live in [DESIGN.md](DESIGN.md).
 
-| Status | Task |
-|--------|------|
-| :white_check_mark: | Project setup (.NET 8, SkiaSharp, WinForms host window) |
-| :white_check_mark: | Camera system (pan, zoom, world-to-screen transform) |
-| :white_check_mark: | Road data structures (RoadNode, RoadEdge, RoadGraph) |
-| :white_check_mark: | Road rendering (straight lines, basic lane markings) |
-| :white_check_mark: | Editor: Road placement tool (click to place nodes, creates edges) |
-| :white_check_mark: | Single vehicle struct, bicycle model physics |
-| :white_check_mark: | Vehicle follows a single road edge (parametric Bezier tracking) |
-| :white_check_mark: | Basic render loop (road + one vehicle) |
-| :white_check_mark: | Toolbar skeleton (Select, Road, Delete buttons) |
+| Phase | Scope | Status |
+|-------|-------|--------|
+| **1 — Foundation** | Window, camera, road drawing, single vehicle on a road | :white_check_mark: Complete |
+| **2 — Road Network & Pathfinding** | Intersections, Bezier/multi-lane roads, A*, many vehicles | :white_check_mark: Complete |
+| **3 — Traffic Rules & Signals** | Lights, stop signs, IDM, right-of-way, lane changes | :white_check_mark: Complete |
+| **4 — Driver Personalities & Daily Routines** | Archetypes, schedules, parking, sim clock, day/night | :white_check_mark: Complete |
+| **4.5 — Dependency Hardening** | Implicit ordering contracts made explicit or self-enforcing | :white_check_mark: Complete |
+| **5 — Performance & Scale** | 10,000+ vehicles at interactive frame rates | :white_check_mark: Complete — **10K vehicles at ~30 FPS** |
+| **6 — Polish & Features** | Editor UX, save/load, scenery overhaul, UI, sound, settings | :large_orange_diamond: Nearly complete |
 
-### Phase 2: Road Network & Pathfinding — *Complete*
-> Connected road graph with intersections, A* pathfinding, and multiple vehicles navigating the network.
+**Phase 5 postscript:** the heavyweight planned optimizations (contraction hierarchies, path caching, a double-buffered sim thread, SIMD) were all measured out as unnecessary. The actual bottlenecks — taking the stress scene from 0.1 to ~30 FPS — were the fixed-timestep substep spiral, O(n²) arc-conflict scans (replaced by an arc-occupancy index), per-call Bézier projection, and whole-network render passes (now culled to the visible viewport).
 
-| Status | Task |
-|--------|------|
-| :white_check_mark: | Intersection nodes (auto-created when roads cross or connect) |
-| :white_check_mark: | Turn matrix per intersection (which edges connect) |
-| :white_check_mark: | Bezier curve roads (control point dragging in editor) |
-| :white_check_mark: | Multi-lane roads (lane offset computation, lane rendering) |
-| :white_check_mark: | A* pathfinding on the road graph |
-| :white_check_mark: | Path representation (edge sequence) and vehicle path-following |
-| :white_check_mark: | Spawn points: place in editor, vehicles spawn and pick random destination *(since removed — traffic enters/leaves via Entry/Exit nodes)* |
-| :white_check_mark: | Multiple vehicles (VehicleStore SoA, batch update loop) |
-| :white_check_mark: | Spatial grid for vehicles |
-| :white_check_mark: | Basic collision avoidance (brake if vehicle ahead is too close) |
-| :white_check_mark: | Delete tool: spatial grid edge lookup |
-| :white_check_mark: | Compact adjacency optimization |
-
-### Phase 3: Traffic Rules & Signals — *Complete*
-> Vehicles obey traffic signals, stop signs, speed limits, and intersection right-of-way rules.
-
-| Status | Task |
-|--------|------|
-| :white_check_mark: | Traffic light system (phase cycling, green/yellow/red per approach) |
-| :white_check_mark: | Stop sign behavior (full stop, queue-based priority) |
-| :white_check_mark: | Speed limit enforcement |
-| :white_check_mark: | Intersection signal rendering |
-| :white_check_mark: | Editor: Signal tool |
-| :white_check_mark: | IDM car-following model |
-| :white_check_mark: | Yellow light dilemma handling |
-| :white_check_mark: | Right-of-way at unsignalized intersections |
-| :white_check_mark: | Lane change logic |
-
-### Phase 4: Driver Personalities & Daily Routines — *In Progress*
-> Each driver has unique traits, follows a daily schedule with commutes, errands, and day/night cycle.
-
-| Status | Task |
-|--------|------|
-| :x: | DriverPersonality struct with trait generation |
-| :x: | Named archetypes (Lead Foot, Sunday Driver, etc.) |
-| :x: | Traits wired into physics (speed bias, reaction delay, steering gains) |
-| :x: | Simulation clock (0-24 hour cycle, displayed on UI) |
-| :white_check_mark: | Time scale controls (pause, 1x-64x, keyboard shortcuts) |
-| :x: | Points of Interest (POI) data structure and editor placement |
-| :x: | Daily schedule system (departure times, destination types) |
-| :x: | Schedule-driven spawning (morning/evening rush) |
-| :x: | Vehicle parking (arrive at POI → parked state → depart later) |
-| :x: | Population manager (target vehicle count, spawn rate control) |
-| :x: | Day/night visual changes (background color, headlights) |
-
-### Phase 5: Performance & Scale — *Not Started*
-> Optimize to handle 10,000+ vehicles at interactive frame rates.
-
-| Status | Task |
-|--------|------|
-| :x: | Contraction Hierarchies |
-| :x: | Path caching and batch pathfinding |
-| :x: | Double-buffered simulation state |
-| :x: | LOD rendering |
-| :x: | Frustum culling via spatial grid |
-| :x: | Parked vehicle optimization |
-| :x: | SIMD hot loop optimization |
-| :x: | Memory pooling |
-| :x: | Stress testing: 10K vehicles |
-| :x: | Performance HUD |
-
-### Phase 6: Polish & Features — *Not Started*
-> Complete editor, visual polish, save/load, quality-of-life features.
-
-| Status | Task |
-|--------|------|
-| :x: | Save/Load (binary format) |
-| :x: | JSON export |
-| :x: | Auto-save |
-| :x: | Undo/Redo system |
-| :x: | Minimap |
-| :x: | Statistics panel |
-| :x: | Congestion heat-map overlay |
-| :x: | Zone painting tool |
-| :x: | Map templates |
-| :x: | Road type visuals |
-| :x: | Vehicle type variety |
-| :white_check_mark: | Sound effects |
-| :x: | Tooltip / hover info |
-| :x: | Right-click context menus |
-| :white_check_mark: | Settings dialog |
+**Remaining Phase 6 items:** undo/redo, zone painting tool, hover tooltips, right-click context menus. (Map templates were cut.)
 
 ---
 
@@ -348,9 +320,20 @@ Achieved via struct-of-arrays layout and value types.
 ### Build & Run
 
 ```bash
-cd Roads
 dotnet build Roads.slnx
 dotnet run --project Roads.App
+```
+
+Sample maps (`*.roads`) live in the repo root — load them with **Ctrl+O**. Settings persist to `settings.json` and rotating autosaves land in `backups/`, both relative to the working directory.
+
+### Headless modes
+
+```bash
+ROADS.exe --autobench[=N]       # 10K-vehicle stress benchmark, N frames (default 100);
+                                #   appends metrics to benchmark.log (see scripts/parse_benchmark.py)
+
+ROADS.exe --simtest=<map.roads> # reproducible jam detection on a saved map; exit code 0 = no jams
+         [--simhours=H] [--simseed=N] [--simvehicles] [--simout=path] [--diagvehicle=N]
 ```
 
 ---
@@ -360,15 +343,27 @@ dotnet run --project Roads.App
 | Input | Action |
 |-------|--------|
 | **Left Click** | Use current editor tool |
-| **Right Click** | Finish road chain / cancel |
+| **Right Click / Esc** | Cancel one step; falls back to the Select tool |
 | **Middle Mouse Drag** | Pan camera |
 | **Scroll Wheel** | Zoom in/out |
-| **WASD** | Pan camera |
 | **Space** | Pause / Resume simulation |
-| **+ / -** | Increase / Decrease time scale |
+| **< / >** | Decrease / Increase sim speed (1x–64x) |
+| **V** | Spawn a vehicle |
+| **R** | Cycle road type of selected segment |
+| **+ / -** | Lane count of selected segment |
+| **[ / ]** | Speed limit of selected segment |
+| **O** | Cycle one-way direction |
+| **J** | Toggle single-lane two-way (shared) |
+| **Del** | Delete selected node |
+| **L, C, 1–4** | Lane-restrict mode, default restrictions, select lane |
+| **Shift+Click** | Tune signal (exemptions) |
+| **Ctrl+S / Ctrl+O** | Save / Load map |
+| **P, M, N, H** | Toggle perf HUD, minimap, statistics, heat-map |
+| **G, D, F** | Arc-conflict debug, vehicle diagnostics dump, frame diag log |
+| **K, B** | Stress test (grid city + 10K vehicles), capture benchmark baseline |
 
 ---
 
 ## License
 
-This project is not currently published under an open-source license.
+This project is licensed under the **GNU General Public License v3.0** — see [LICENSE](LICENSE).
