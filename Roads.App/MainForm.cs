@@ -77,9 +77,6 @@ public class MainForm : Form
     private Point _lastMousePos;
     private Point _currentMousePos;
     private bool _isPanning;
-    /// <summary>True while the retained-mode UI owns the pointer (hover or captured
-    /// drag) — maintained by OnCanvasMouseMove, read by UpdateCursor each tick.</summary>
-    private bool _uiOwnsPointer;
 
     /// <summary>Screen position where a drag-candidate click occurred.</summary>
     private Point _dragStartScreenPos;
@@ -246,17 +243,15 @@ public class MainForm : Form
     }
 
     /// <summary>
-    /// Applies the mouse cursor for the current context once per tick: the active tool's
-    /// cursor over the world (see <see cref="Ui.ToolCursors.ForTool"/>), the system arrow
-    /// over UI panels and while the Settings dialog is open. Per-frame (rather than
-    /// per-tool-switch call sites) so keyboard and menu tool changes are covered without
-    /// hooking every mutation of ActiveTool; the assignment only fires on change.
+    /// Applies the active tool's mouse cursor once per tick (see
+    /// <see cref="Ui.ToolCursors.ForTool"/> — currently the finger pointer everywhere).
+    /// Per-frame (rather than per-tool-switch call sites) so keyboard and menu tool
+    /// changes are covered without hooking every mutation of ActiveTool; the
+    /// assignment only fires on change.
     /// </summary>
     private void UpdateCursor()
     {
-        var desired = _uiOwnsPointer || _settingsDialog.Visible
-            ? Cursors.Default
-            : Ui.ToolCursors.ForTool(_editorState.ActiveTool);
+        var desired = Ui.ToolCursors.ForTool(_editorState.ActiveTool);
         if (!ReferenceEquals(_canvas.Cursor, desired))
             _canvas.Cursor = desired;
     }
@@ -1495,10 +1490,6 @@ public class MainForm : Form
     private void OnCanvasMouseMove(object? sender, MouseEventArgs e)
     {
         _currentMousePos = e.Location;
-        // Assume the pointer is over the world; the capture branch and the UI-hover
-        // gate below flip this back on — every early return in between (pan, water
-        // stroke) is world interaction and correctly keeps the tool cursor.
-        _uiOwnsPointer = false;
 
         // Clear the placement ghosts up front; the Destination/Node hover cases below
         // recompute them when applicable. This guarantees no stale ghost renders down any
@@ -1524,7 +1515,6 @@ public class MainForm : Form
         {
             if (e.Button != MouseButtons.None)
             {
-                _uiOwnsPointer = true;
                 _uiRoot.OnMouseMove(e.X, e.Y);
                 return;
             }
@@ -1562,7 +1552,6 @@ public class MainForm : Form
         // Hovering any retained-mode panel suppresses map hover highlights.
         if (_uiRoot.OnMouseMove(e.X, e.Y))
         {
-            _uiOwnsPointer = true;
             _editorState.HoveredNode = -1;
             _editorState.HoveredEdge = -1;
             _editorState.HoveredVehicle = -1;

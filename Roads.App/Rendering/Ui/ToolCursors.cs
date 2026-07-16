@@ -12,10 +12,9 @@ namespace Roads.App.Rendering.Ui;
 /// own handles passed to it, so there is deliberately no disposal). Any failure in the
 /// Win32 conversion falls back to the system arrow: a cursor must never crash the app.
 ///
-/// <see cref="ForTool"/> is the single mapping point — a tool without bespoke art gets
-/// the system arrow, so new tool cursors are one drawing method plus one switch arm.
-/// MainForm applies the result once per frame (see MainForm.UpdateCursor), keeping the
-/// arrow over UI panels and the tool cursor over the world.
+/// <see cref="ForTool"/> is the single mapping point — for now every tool (and the UI)
+/// shares the finger pointer, so new tool cursors are one drawing method plus one
+/// switch arm. MainForm applies the result once per frame (see MainForm.UpdateCursor).
 /// </summary>
 public static class ToolCursors
 {
@@ -24,12 +23,12 @@ public static class ToolCursors
     /// <summary>The classic pointing-hand cursor — the Select tool.</summary>
     public static Cursor FingerPointer => _fingerPointer ??= CreateFingerPointer();
 
-    /// <summary>Cursor for the given editor tool (system arrow until a tool grows its
-    /// own art — add a drawing method and a switch arm here).</summary>
+    /// <summary>Cursor for the given editor tool. For now the finger pointer is the
+    /// application-wide cursor — every tool falls through to it until it grows its own
+    /// art (add a drawing method and a switch arm here).</summary>
     public static Cursor ForTool(EditorTool tool) => tool switch
     {
-        EditorTool.Select => FingerPointer,
-        _ => Cursors.Default,
+        _ => FingerPointer,
     };
 
     // ═══════════════════════ Cursor art ═══════════════════════
