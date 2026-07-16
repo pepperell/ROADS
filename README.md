@@ -118,7 +118,8 @@ ROADS/
     │       ├── Composer.cs           # Bar-at-a-time generative jazz (blues/vamp/nocturne forms)
     │       └── MusicProvider.cs      # Composer → MeltySynth bridge on the music bus
     ├── Assets/
-    │   └── GeneralUser-GS.sf2        # GM/GS SoundFont (S. Christian Collins) for the music synth
+    │   ├── GeneralUser-GS.sf2        # GM/GS SoundFont (S. Christian Collins) for the music synth
+    │   └── GeneralUser-GS.LICENSE.txt # Its license (own terms, not GPL) — ships with every build
     ├── Core/
     │   ├── AppSettings.cs            # All user-adjustable settings (record, dialog-paged)
     │   ├── Camera.cs                 # Pan/zoom/world-to-screen transform
@@ -385,4 +386,9 @@ ROADS.exe --musictest[=seconds] # render the generative music offline across fou
 
 ## License
 
-This project is licensed under the **GNU General Public License v3.0** — see [LICENSE](LICENSE).
+This project's source code is licensed under the **GNU General Public License v3.0** — see [LICENSE](LICENSE).
+
+### Third-party components
+
+- **GeneralUser GS SoundFont** (`Roads.App/Assets/GeneralUser-GS.sf2`) by **S. Christian Collins** — the GM sound bank used by the generative music engine. It is **not** covered by this project's GPL; it is bundled as a separate work under its own free license (use, modification, and inclusion in software projects permitted; see [GeneralUser-GS.LICENSE.txt](Roads.App/Assets/GeneralUser-GS.LICENSE.txt), which ships beside the bank in every build). Updates and more instruments at [schristiancollins.com](https://www.schristiancollins.com). Note the license's good-faith disclosure: a small number of samples came from freely distributed banks whose provenance the author cannot fully verify.
+- **NuGet dependencies** — [SkiaSharp](https://github.com/mono/SkiaSharp), [NAudio](https://github.com/naudio/NAudio), and [MeltySynth](https://github.com/sinshu/meltysynth) are all MIT-licensed and restored at build time rather than vendored.

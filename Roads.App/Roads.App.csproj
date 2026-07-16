@@ -18,8 +18,11 @@
 
   <ItemGroup>
     <!-- GeneralUser GS (S. Christian Collins): free GM/GS SoundFont voiced against the
-         Roland Sound Canvas sets that mid-90s game soundtracks were authored for. -->
+         Roland Sound Canvas sets that mid-90s game soundtracks were authored for.
+         Distributed under its own license (not GPL) — the license text ships beside
+         the bank so every build carries the attribution. -->
     <None Update="Assets\GeneralUser-GS.sf2" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Assets\GeneralUser-GS.LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
