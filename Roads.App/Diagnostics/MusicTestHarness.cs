@@ -50,15 +50,20 @@ public static class MusicTestHarness
             TargetGain = 0.85f,
         };
 
-        var phases = new (string Name, float Intensity, float Night, float Tension)[]
+        // Mood sweep: hour steers the setlist repertoire, ambience simulates far zoom,
+        // the resolution phase fires the jam-cleared cadence, and the night phase bumps
+        // the day number to force a tune rotation on top of the darkness shift.
+        var phases = new (string Name, float I, float N, float T, float Hour, float Amb, bool Resolve, int Day)[]
         {
-            ("day-calm", 0.30f, 0f, 0f),
-            ("day-busy", 0.95f, 0f, 0f),
-            ("gridlock", 0.70f, 0f, 0.9f),
-            ("night", 0.35f, 1f, 0f),
+            ("morning-rush", 0.90f, 0f, 0f, 8f, 0f, false, 0),
+            ("midday-calm", 0.40f, 0f, 0f, 12f, 0.2f, false, 0),
+            ("evening-jam", 0.70f, 0f, 0.9f, 17f, 0f, false, 0),
+            ("resolution", 0.60f, 0f, 0f, 17f, 0f, true, 0),
+            ("night", 0.35f, 1f, 0f, 23f, 0.4f, false, 1),
         };
 
         report.AppendLine($"musictest: {seconds:F0}s total, {phases.Length} mood phases -> {outPath}");
+        report.AppendLine($"  brush kit (bank 128 patch 40): {(music.BrushKitAvailable ? "present" : "MISSING - standard kit fallback")}");
         bool ok = true;
         using (var writer = new WaveFileWriter(outPath, music.WaveFormat))
         {
@@ -66,9 +71,13 @@ public static class MusicTestHarness
             int framesPerPhase = (int)(SampleRate * seconds / phases.Length);
             foreach (var phase in phases)
             {
-                music.TargetIntensity = phase.Intensity;
-                music.TargetNight = phase.Night;
-                music.TargetTension = phase.Tension;
+                music.TargetIntensity = phase.I;
+                music.TargetNight = phase.N;
+                music.TargetTension = phase.T;
+                music.TargetHour = phase.Hour;
+                music.TargetAmbience = phase.Amb;
+                music.TargetDayNumber = phase.Day;
+                if (phase.Resolve) music.ResolutionSeq++;
 
                 double sumSquares = 0;
                 long sampleCount = 0;
@@ -86,11 +95,19 @@ public static class MusicTestHarness
                 double rms = Math.Sqrt(sumSquares / Math.Max(1, sampleCount));
                 bool phaseOk = rms >= SilenceRmsFloor;
                 ok &= phaseOk;
-                report.AppendLine($"  {phase.Name,-9} RMS {rms:F4}  {(phaseOk ? "ok" : "SILENT")}");
+                report.AppendLine($"  {phase.Name,-12} RMS {rms:F4}  tune {music.CurrentTune,-14} {(phaseOk ? "ok" : "SILENT")}");
             }
         }
 
-        report.AppendLine(ok ? "musictest OK" : "musictest FAILED (silent phase)");
+        report.AppendLine($"  tunes started: {music.TunesStarted}");
+        // Long renders must actually rotate the setlist (tune budgets are 4-6 min).
+        if (seconds >= 360 && music.TunesStarted < 2)
+        {
+            ok = false;
+            report.AppendLine("  FAILED: no tune rotation in a long render");
+        }
+
+        report.AppendLine(ok ? "musictest OK" : "musictest FAILED");
         File.WriteAllText(reportPath, report.ToString());
         Console.WriteLine(report.ToString());
         return ok ? 0 : 1;

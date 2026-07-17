@@ -310,18 +310,26 @@ public sealed class AudioEngine : IDisposable
         UpdateEngineVoices(candidates, engineMix, camX, camY, viewWidth, zoom);
         DrainPendingHorns(oneShotsAllowed, eventRect, camX, viewWidth, zoom);
         UpdateSignalTicks(oneShotsAllowed, rect, zoom, camX, viewWidth);
-        UpdateMusicMood(drivingCount, congestedCount, dark);
+        UpdateMusicMood(drivingCount, congestedCount, dark, zoom, wallDt);
     }
+
+    // ── Music resolution-trigger state (jam-cleared detection) ──
+    private float _musicTensionHighSecs;
+    private float _musicResolutionCooldown;
 
     /// <summary>
     /// Maps global sim state to the music mood: traffic density (vehicles vs. half the
     /// population cap) drives arrangement energy, time-of-day darkness pulls the band
-    /// toward the night float, and the map-wide congestion share (vehicles below the
-    /// StatisticsPanel stall threshold) raises harmonic tension. The Music settings
+    /// toward the night float, the map-wide congestion share (vehicles below the
+    /// StatisticsPanel stall threshold) raises harmonic tension, the in-game hour and
+    /// day steer the setlist repertoire, and camera zoom sets the far-view ambience
+    /// (pads up, drums down). A tension FALLING edge — congestion that held above 0.5
+    /// for a few seconds then cleared — fires the one-shot resolution tag, with a
+    /// cooldown so oscillating jams don't machine-gun cadences. The Music settings
     /// sliders scale each response; at zero a mapping is pinned to its neutral value.
     /// The composer consumes these at bar boundaries, so changes always land musically.
     /// </summary>
-    private void UpdateMusicMood(int driving, int congested, float dark)
+    private void UpdateMusicMood(int driving, int congested, float dark, float zoom, float wallDt)
     {
         if (_music == null) return;
         float trafficNorm = Math.Clamp(driving / MathF.Max(1f, 0.5f * _maxVehicles), 0f, 1f);
@@ -336,6 +344,25 @@ public sealed class AudioEngine : IDisposable
         _music.TargetIntensity = intensity;
         _music.TargetNight = dark * _musicNight;
         _music.TargetTension = tension;
+        _music.TargetHour = (float)_simLoop.Clock.TimeOfDay;
+        _music.TargetDayNumber = _simLoop.Clock.DayNumber;
+        _music.TargetAmbience = 1f - DspUtil.SmoothStep(0.25f, 0.9f, zoom);
+
+        _musicResolutionCooldown = MathF.Max(0f, _musicResolutionCooldown - wallDt);
+        if (tension > 0.5f)
+        {
+            _musicTensionHighSecs += wallDt;
+        }
+        else if (tension < 0.2f)
+        {
+            if (_musicTensionHighSecs >= 3f && _musicResolutionCooldown <= 0f)
+            {
+                _music.ResolutionSeq++;
+                _musicResolutionCooldown = 45f;
+            }
+            _musicTensionHighSecs = 0f;
+        }
+
         PushMusicSettings();
     }
 

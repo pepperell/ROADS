@@ -42,7 +42,9 @@ public sealed class MusicProvider : ISampleProvider
 
     public WaveFormat WaveFormat { get; }
 
-    // ── Targets (UI thread writes each frame; playback thread reads) ──
+    // ── Targets (UI thread writes each frame; playback thread reads). All are
+    //    individually-atomic 32-bit values; the composer's MoodInputs snapshot is
+    //    assembled from them on the playback thread in ComposeBar. ──
     /// <summary>Music bus gain: music-volume setting, or 0 when music/sound is disabled.</summary>
     public float TargetGain;
     /// <summary>Arrangement energy 0–1 (traffic density mapping).</summary>
@@ -51,10 +53,30 @@ public sealed class MusicProvider : ISampleProvider
     public float TargetNight;
     /// <summary>Congestion tension 0–1.</summary>
     public float TargetTension;
+    /// <summary>In-game hour of day 0–24 (drives the setlist repertoire).</summary>
+    public float TargetHour = 8f;
+    /// <summary>Far-zoom ambience 0–1 (0 = street level, 1 = overview: pads up, drums down).</summary>
+    public float TargetAmbience;
+    /// <summary>In-game day counter — a change forces a tune rotation.</summary>
+    public int TargetDayNumber;
     /// <summary>Base tempo setting in BPM (night/tension modulate around it).</summary>
     public float TempoSetting = 96f;
     /// <summary>Swing feel setting 0–1 (0 = straight 8ths, 1 = full triplet swing).</summary>
     public float SwingSetting = 0.6f;
+
+    /// <summary>Jam-cleared one-shot: the UI increments; the playback thread fires the
+    /// resolution tag when the count changes (the OneShotVoice.TriggerSeq idiom — a bool
+    /// has no visibility guarantee and no discard semantics). Triggers that arrive while
+    /// the music is faded out are discarded in Read's frozen branch.</summary>
+    public volatile int ResolutionSeq;
+    private int _lastResolutionSeq;
+
+    // ── Diagnostics (playback-thread values; read by the offline harness between
+    //    same-thread Read() calls — not a cross-thread UI surface) ──
+    /// <summary>Number of tunes the setlist has started (count-ins included).</summary>
+    public int TunesStarted => _composer.TunesStarted;
+    /// <summary>Chart name + key center of the current tune, e.g. "bossa@5".</summary>
+    public string CurrentTune => _composer.CurrentTuneName;
 
     /// <exception cref="Exception">Any SoundFont load/parse failure — the caller
     /// (AudioEngine) catches and runs without music.</exception>
@@ -65,11 +87,20 @@ public sealed class MusicProvider : ISampleProvider
             MaximumPolyphony = 64,
             EnableReverbAndChorus = true,
         };
-        _synth = new Synthesizer(new SoundFont(soundFontPath), settings);
+        var soundFont = new SoundFont(soundFontPath);
+        _synth = new Synthesizer(soundFont, settings);
         _composer = new Composer(sampleRate, seed);
+        // Brush-kit availability is a soundfont fact, checked once: percussion presets
+        // live in bank 128; without the preset a program change would silently fall
+        // back, so the composer only *asks* for brushes when they truly exist.
+        _composer.BrushKitAvailable = soundFont.Presets
+            .Any(p => p.BankNumber == 128 && p.PatchNumber == Theory.GmBrushKit);
         WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(sampleRate, 2);
         _gain.Reset(0f);
     }
+
+    /// <summary>True when the loaded soundfont has the GS brush drum kit (diagnostic).</summary>
+    public bool BrushKitAvailable => _composer.BrushKitAvailable;
 
     public int Read(float[] buffer, int offset, int count)
     {
@@ -78,7 +109,10 @@ public sealed class MusicProvider : ISampleProvider
         if (target <= 0f && _gain.Value < 1e-4f)
         {
             // Fully faded: kill hanging voices once, then freeze the timeline for free.
+            // Resolution triggers arriving while frozen are DISCARDED — otherwise the
+            // band would play an inexplicable cadence minutes later on unmute.
             if (!_silent) { _synth.NoteOffAll(false); _silent = true; }
+            _lastResolutionSeq = ResolutionSeq;
             return count;
         }
         _silent = false;
@@ -131,7 +165,12 @@ public sealed class MusicProvider : ISampleProvider
             _queue.RemoveRange(0, _queueIdx);
             _queueIdx = 0;
         }
-        _composer.SetMood(TargetIntensity, TargetNight, TargetTension, TempoSetting, SwingSetting);
+        int seq = ResolutionSeq; // single volatile read — compare-and-store against it
+        var mood = new MoodInputs(TargetIntensity, TargetNight, TargetTension,
+            TempoSetting, SwingSetting, TargetHour, TargetAmbience, TargetDayNumber,
+            ResolutionTag: seq != _lastResolutionSeq);
+        _lastResolutionSeq = seq;
+        _composer.SetMood(in mood);
         long barLen = _composer.GenerateBar(_queue, _nextBarStart);
         _nextBarStart += Math.Max(barLen, 64);
         _queue.Sort(static (a, b) =>

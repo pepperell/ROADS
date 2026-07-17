@@ -108,15 +108,25 @@ public static class Theory
 
     // ── General MIDI program numbers (0-based) ──
     public const int GmAcousticGrand = 0;
-    public const int GmEPiano1 = 4;       // the Rhodes patch — comping
+    public const int GmEPiano1 = 4;       // the Rhodes patch — default comping
     public const int GmVibraphone = 11;
+    public const int GmDrawbarOrgan = 16; // gospel-blues comping alternate
+    public const int GmHarmonica = 22;    // the Transport Tycoon signature voice
+    public const int GmJazzGuitar = 26;   // clean-electric comping alternate
     public const int GmAcousticBass = 32; // walking bass
     public const int GmFingerBass = 33;   // funk vamp bass
     public const int GmMutedTrumpet = 59;
+    public const int GmBrassSection = 61; // solo-chorus guide-tone backgrounds
+    public const int GmSopranoSax = 64;
     public const int GmAltoSax = 65;
     public const int GmTenorSax = 66;
+    public const int GmClarinet = 71;
     public const int GmFlute = 73;
     public const int GmWarmPad = 89;      // night float bed
+
+    /// <summary>GS drum-kit program on the percussion channel (bank 128): brushes.
+    /// Presence in the loaded soundfont is verified at runtime (GeneralUser GS has it).</summary>
+    public const int GmBrushKit = 40;
 
     // ── GM percussion notes (channel 9) ──
     public const int DrKick = 36;
@@ -131,4 +141,5 @@ public static class Theory
     public const int DrTomHi = 50;
     public const int DrRide = 51;
     public const int DrRideBell = 53;
+    public const int DrShaker = 70;       // maracas — the bossa straight-8th bed
 }
