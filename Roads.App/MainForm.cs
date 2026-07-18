@@ -177,6 +177,10 @@ public class MainForm : Form
         // targets — panels, renderer, autosave, sim — exist by this point).
         ApplySettings();
 
+        // A default.roads beside the exe's working directory auto-loads at startup
+        // (vehicles included, no prompt) — "resume my world" for regular players.
+        TryLoadDefaultMap();
+
         // Centralized vehicle-removal fixup: editor-held vehicle indices follow
         // swap-and-pop moves and drop on bulk clears (see VehicleStore.VehicleRemoving).
         // The vehicle spatial grid holds indices too — it self-heals on the same events
@@ -1003,45 +1007,65 @@ public class MainForm : Form
         };
         if (dlg.ShowDialog() != DialogResult.OK) return;
 
-        bool loadVehicles = false;
-
         try
         {
-            // Peek at file to check for vehicle data before prompting
-            using (var peek = File.OpenRead(dlg.FileName))
-            using (var pr = new BinaryReader(peek))
-            {
-                pr.ReadBytes(4); // magic
-                pr.ReadUInt16(); // version
-                byte flags = pr.ReadByte();
-                bool hasVehicles = (flags & 1) != 0;
-
-                if (hasVehicles)
-                {
-                    var result = MessageBox.Show("This map contains vehicles. Load them?",
-                        "Load Options", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                    loadVehicles = result == DialogResult.Yes;
-                }
-            }
-
-            Persistence.MapSerializer.Load(dlg.FileName, _roadGraph, _vehicles,
-                _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
-                _populationManager, _waterLayer, loadVehicles);
-            _simLoop.RebuildWorldCaches();
-            _sceneRenderer.OnMapReplaced();
-
-            // Start paused after loading
-            _simLoop.Paused = true;
-
-            // Reset editor state (selection, drags, lane mode, pending road anchor)
-            _editorState.ResetToolState();
-            _editorState.ActiveTool = Editor.EditorTool.Select;
+            bool loadVehicles = MapHasVehicles(dlg.FileName)
+                && MessageBox.Show("This map contains vehicles. Load them?",
+                    "Load Options", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+            LoadMapFromFile(dlg.FileName, loadVehicles);
         }
         catch (Exception ex)
         {
             MessageBox.Show($"Load failed: {ex.Message}", "Error",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    /// <summary>Name of the map auto-loaded at startup when present in the working
+    /// directory (beside settings.json and backups/).</summary>
+    private const string DefaultMapFile = "default.roads";
+
+    /// <summary>Startup auto-load of <see cref="DefaultMapFile"/>: silent when the file
+    /// is absent, vehicles restored without prompting when present (the file is the
+    /// user's "resume my world" save). A corrupt file warns and falls back to the
+    /// empty map — startup must never be blocked by a bad default.</summary>
+    private void TryLoadDefaultMap()
+    {
+        if (!File.Exists(DefaultMapFile)) return;
+        try
+        {
+            LoadMapFromFile(DefaultMapFile, MapHasVehicles(DefaultMapFile));
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Could not load {DefaultMapFile}: {ex.Message}\n\nStarting with an empty map.",
+                "Default Map", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    /// <summary>Header peek: whether the map file was saved with vehicle data.</summary>
+    private static bool MapHasVehicles(string path)
+    {
+        using var peek = File.OpenRead(path);
+        using var reader = new BinaryReader(peek);
+        reader.ReadBytes(4); // magic
+        reader.ReadUInt16(); // version
+        return (reader.ReadByte() & 1) != 0;
+    }
+
+    /// <summary>Loads a map file into the live world and resets sim/editor state —
+    /// the shared core of the Load dialog and the default.roads startup path. The app
+    /// is left paused with the Select tool active (the New/Load convention).</summary>
+    private void LoadMapFromFile(string path, bool loadVehicles)
+    {
+        Persistence.MapSerializer.Load(path, _roadGraph, _vehicles,
+            _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
+            _populationManager, _waterLayer, loadVehicles);
+        _simLoop.RebuildWorldCaches();
+        _sceneRenderer.OnMapReplaced();
+        _simLoop.Paused = true;
+        _editorState.ResetToolState();
+        _editorState.ActiveTool = Editor.EditorTool.Select;
     }
 
     /// <summary>
