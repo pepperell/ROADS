@@ -29,6 +29,13 @@ public sealed class MusicProvider : ISampleProvider
 {
     private const int RenderChunk = 1024;
 
+    /// <summary>Fixed makeup gain on the rendered mix. The concave GM volume/velocity
+    /// curves put the band's peaks near -19 dBFS at full settings (measured); this one
+    /// knob restores them to ≈ -5 dBFS without disturbing the internal channel balance
+    /// or the relaxed velocities. Transient stacking is caught by MasterProvider's
+    /// tanh soft clip downstream.</summary>
+    private const float MakeupGain = 2.5f;
+
     private readonly Synthesizer _synth;
     private readonly Composer _composer;
     private readonly List<MidiEvent> _queue = new(512);
@@ -89,6 +96,10 @@ public sealed class MusicProvider : ISampleProvider
         };
         var soundFont = new SoundFont(soundFontPath);
         _synth = new Synthesizer(soundFont, settings);
+        // MeltySynth defaults MasterVolume to 0.5 — sized for dense 30-voice MIDI
+        // files, -6 dB too quiet for our sparse 8-12 voice band. Full volume here;
+        // MakeupGain below provides the rest of the level correction.
+        _synth.MasterVolume = 1.0f;
         _composer = new Composer(sampleRate, seed);
         // Brush-kit availability is a soundfont fact, checked once: percussion presets
         // live in bank 128; without the preset a program change would silently fall
@@ -138,7 +149,7 @@ public sealed class MusicProvider : ISampleProvider
                 int b = offset + done * 2;
                 for (int i = 0; i < n; i++)
                 {
-                    float g = _gain.Next(target, k);
+                    float g = _gain.Next(target, k) * MakeupGain;
                     buffer[b + 2 * i] = _left[i] * g;
                     buffer[b + 2 * i + 1] = _right[i] * g;
                 }
