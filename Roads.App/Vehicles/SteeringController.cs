@@ -18,6 +18,15 @@ public static class SteeringController
     public static float Kd = 0.08f;
     /// <summary>Maximum front-wheel steering angle in radians.</summary>
     public static float MaxSteer = 0.7f;
+    /// <summary>
+    /// Ceiling on the steering loop's plant gain (speed/wheelbase × driver sharpness,
+    /// 1/s per radian of steer) before <see cref="SpeedGainCompensation"/> starts scaling
+    /// the command down — see that method for the stability argument. 6 puts the onset at
+    /// ≈15 m/s (33 mph) for a default sedan, safely below the ≈20 m/s flip-flop boundary.
+    /// Runtime-tunable like Kp/Kd: lower = earlier/softer high-speed steering,
+    /// float.MaxValue restores the uncompensated historical behavior exactly.
+    /// </summary>
+    public static float MaxYawGain = 6f;
     /// <summary>Default target speed in m/s (~22 mph), used when edge has no speed limit.</summary>
     public static float TargetSpeed = 10f;
     /// <summary>Base lookahead distance in meters at zero speed.</summary>
@@ -1079,7 +1088,8 @@ public static class SteeringController
         float latCorrection = Klat * lateralError;
         float latCap = LatCorrectionCapFraction * Kp * sharpness;
         latCorrection = MathF.Max(-latCap, MathF.Min(latCap, latCorrection));
-        float steer = (Kp * sharpness) * headingError + (Kd * sharpness) * errorDerivative - latCorrection;
+        float steer = ((Kp * sharpness) * headingError + (Kd * sharpness) * errorDerivative - latCorrection)
+            * SpeedGainCompensation(store, index);
         steer = MathF.Max(-MaxSteer, MathF.Min(MaxSteer, steer));
         if (store.DiagVehicle == index)
         {
@@ -1343,7 +1353,8 @@ public static class SteeringController
         store.PrevHeadingError[index] = headingError;
 
         float arcSharpness = store.SteeringSharpness[index];
-        float steer = (Kp * arcSharpness) * headingError + (Kd * arcSharpness) * errorDerivative;
+        float steer = ((Kp * arcSharpness) * headingError + (Kd * arcSharpness) * errorDerivative)
+            * SpeedGainCompensation(store, index);
         steer = MathF.Max(-MaxSteer, MathF.Min(MaxSteer, steer));
         store.SteeringAngle[index] = steer;
 
@@ -1890,6 +1901,27 @@ public static class SteeringController
         // window than edges since arcs are short and the vehicle may lag behind.
         var arc = arcCache.GetArc(arcIdx);
         return NearestTOnBezier(arc.P0, arc.P1, arc.P2, arc.P3, px, py, currentT, 0.1f, 0.25f);
+    }
+
+    /// <summary>
+    /// Speed-adaptive gain compensation for the PD steering command. The bicycle model
+    /// yaws at speed/wheelbase rad/s per radian of steer, so the steering loop's plant
+    /// gain grows linearly with speed (and driver sharpness, and inversely with
+    /// wheelbase) while Kp/Kd stay fixed. Discretized at the 30 Hz sim tick, the loop
+    /// crosses into a barely-damped ~15 Hz steering flip-flop once that gain reaches ≈8
+    /// (a default sedan at ≈20 m/s = 45 mph; short-wheelbase motorcycles and
+    /// sharp-steering drivers hit it at city speeds) — the derivative term dominates the
+    /// crossing because its discrete gain is Kd/dt, as large as Kp itself. Scaling the
+    /// WHOLE command by MaxYawGain/gain once the gain exceeds <see cref="MaxYawGain"/>
+    /// makes the closed-loop dynamics speed-, wheelbase-, and sharpness-invariant above
+    /// the ceiling (well-damped by construction) and leaves handling below it untouched.
+    /// Both the edge and arc steering paths apply it just before the MaxSteer clamp.
+    /// </summary>
+    private static float SpeedGainCompensation(VehicleStore store, int index)
+    {
+        float wheelbase = VehicleTypeDimensions.GetWheelbase(store.PreferredVehicle[index]);
+        float gain = store.Speed[index] / wheelbase * store.SteeringSharpness[index];
+        return gain > MaxYawGain ? MaxYawGain / gain : 1f;
     }
 
     /// <summary>Normalizes an angle to the range [-pi, pi].</summary>

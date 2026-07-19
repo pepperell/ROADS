@@ -22,6 +22,12 @@ static class Program
     /// the generative music engine offline via <see cref="Diagnostics.MusicTestHarness"/>:
     /// four mood presets to a WAV (<c>--musicout=&lt;path&gt;</c>, default musictest.wav)
     /// plus an RMS report beside it. Exit code 0 = every phase produced audio.
+    ///
+    /// Pass <c>--steerprobe</c> to run the headless steering-stability harness
+    /// (<see cref="Diagnostics.SteeringProbeHarness"/>): straight-road cruise + lateral
+    /// nudge across a speed/vehicle-type/driver-sharpness case matrix, measuring steering
+    /// sign-flips per second, then exits. Writes steerprobe.log. Run it after any change
+    /// to the PD steering gains, SpeedGainCompensation, lookahead, or bicycle kinematics.
     /// </summary>
     [STAThread]
     static void Main()
@@ -29,6 +35,7 @@ static class Program
         ApplicationConfiguration.Initialize();
 
         int autoBenchFrames = 0;
+        bool steerProbe = false;
         string? simTestMap = null;
         float simHours = 1f;
         string simOut = "simtest_report.log";
@@ -44,6 +51,8 @@ static class Program
             else if (arg.StartsWith("--autobench=", StringComparison.Ordinal)
                      && int.TryParse(arg.AsSpan("--autobench=".Length), out int n) && n > 0)
                 autoBenchFrames = n;
+            else if (arg == "--steerprobe")
+                steerProbe = true;
             else if (arg.StartsWith("--simtest=", StringComparison.Ordinal))
                 simTestMap = arg["--simtest=".Length..];
             else if (arg.StartsWith("--simhours=", StringComparison.Ordinal)
@@ -66,6 +75,11 @@ static class Program
                 musicTestSeconds = ms;
             else if (arg.StartsWith("--musicout=", StringComparison.Ordinal))
                 musicOut = arg["--musicout=".Length..];
+        }
+
+        if (steerProbe)
+        {
+            Environment.Exit(Diagnostics.SteeringProbeHarness.Run("steerprobe.log"));
         }
 
         if (musicTestSeconds > 0f)
