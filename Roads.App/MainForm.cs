@@ -217,7 +217,8 @@ public class MainForm : Form
         _uiRoot.Add(_pauseMenu);
         _titleScreen = new Ui.TitleScreen(TitleNew, TitleLoad, OpenSettings, Close);
         _uiRoot.Add(_titleScreen);
-        _settingsDialog = new Ui.SettingsDialog(() => _settings, ApplyStagedSettings, OnSettingsClosed);
+        _settingsDialog = new Ui.SettingsDialog(() => _settings, ApplyStagedSettings, OnSettingsClosed,
+            PreviewMusicSettings);
         _uiRoot.Add(_settingsDialog);
 
         // Every in-game panel hides while the title screen is up. The gate COMPOSES into
@@ -1454,6 +1455,13 @@ public class MainForm : Form
         Persistence.SettingsStore.Save(_settings);
     }
 
+    /// <summary>Settings-dialog LIVE-PREVIEW path (the Music page's every edit): pushes
+    /// the given record to the AUDIO ENGINE only — cheap, idempotent, never adopts into
+    /// <see cref="_settings"/> and never persists, so the dialog's staged-vs-applied
+    /// dirty check keeps working and Cancel restores by re-previewing the applied
+    /// record. The music engine consumes the change at its next bar boundary.</summary>
+    private void PreviewMusicSettings(Core.AppSettings staged) => _audioEngine.ApplySettings(staged);
+
     /// <summary>Hotkey path (H/M/N/P/G): mutates the applied settings directly, pushes
     /// live, and persists — so quick toggles stay in sync with the dialog and the file.</summary>
     private void MutateSettings(Action<Core.AppSettings> mutate)
@@ -2152,7 +2160,12 @@ public class MainForm : Form
     /// </summary>
     private void OnCanvasMouseWheel(object? sender, MouseEventArgs e)
     {
-        // Wheel zoom bypasses UiRoot, so every modal overlay gates it here.
+        // Scrollable UI panels get first claim on the wheel (topmost hit chain only —
+        // see UiRoot.OnMouseWheel; a modal scrim never lets the wheel reach panels or
+        // the camera underneath it).
+        if (_uiRoot.OnMouseWheel(e.X, e.Y, e.Delta)) return;
+
+        // Camera wheel-zoom is gated while any modal overlay is up.
         if (AnyModalVisible) return;
 
         float zoomFactor = e.Delta > 0 ? 1.15f : 1f / 1.15f;

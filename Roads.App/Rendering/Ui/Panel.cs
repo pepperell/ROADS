@@ -121,8 +121,10 @@ public class Panel
     }
 
     /// <summary>Draws background → content (<see cref="OnDraw"/>) → children (in add order,
-    /// skipping <see cref="ExternallyDrawn"/>) → border. No-op when not effectively visible.</summary>
-    public void Draw(SKCanvas canvas)
+    /// skipping <see cref="ExternallyDrawn"/>) → border. No-op when not effectively visible.
+    /// Virtual so containers can wrap the child pass (<see cref="ScrollablePanel"/> clips
+    /// children to its viewport and draws scrollbars above them).</summary>
+    public virtual void Draw(SKCanvas canvas)
     {
         if (!IsEffectivelyVisible) return;
 
@@ -182,6 +184,12 @@ public class Panel
     /// <summary>Mouse move: while captured, receives every move (even far outside
     /// <see cref="Bounds"/>); otherwise only while hovered.</summary>
     public virtual void OnMouseMove(float x, float y) { }
+
+    /// <summary>Mouse wheel over this panel (routed by <see cref="UiRoot.OnMouseWheel"/>
+    /// up the hit chain). Return true to consume; the default declines so the wheel falls
+    /// through to the owner (camera zoom). <paramref name="delta"/> is the raw WinForms
+    /// wheel delta (±120 per notch).</summary>
+    public virtual bool OnMouseWheel(float x, float y, float delta) => false;
 
     /// <summary>Mouse release delivered to the captured panel just before capture clears.</summary>
     public virtual void OnMouseUp(float x, float y) { }

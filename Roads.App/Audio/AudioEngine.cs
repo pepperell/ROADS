@@ -86,6 +86,33 @@ public sealed class AudioEngine : IDisposable
     private float _musicTension = 1f;
     private int _maxVehicles = 200;
 
+    // ── Music manual-mode mirrors (settings enums pre-mapped to the composer's
+    //    domain here, so the provider/composer never see AppSettings types) ──
+    private bool _musicManual;
+    private float _mIntensity = 0.6f, _mNight, _mTension;
+    private int _mForm, _mKeyPc = 10, _mLead = Theory.GmAltoSax, _mComp = Theory.GmEPiano1;
+    private bool _mBrush;
+    /// <summary>MusicKeyChoice → pitch class (Bb Eb F C Ab).</summary>
+    private static readonly int[] KeyPcMap = { 10, 3, 5, 0, 8 };
+    /// <summary>MusicLeadChoice → GM program.</summary>
+    private static readonly int[] LeadProgramMap =
+    {
+        Theory.GmAltoSax, Theory.GmTenorSax, Theory.GmMutedTrumpet, Theory.GmHarmonica,
+        Theory.GmVibraphone, Theory.GmClarinet, Theory.GmSopranoSax, Theory.GmFlute,
+    };
+    /// <summary>MusicCompChoice → GM program.</summary>
+    private static readonly int[] CompProgramMap = { Theory.GmEPiano1, Theory.GmDrawbarOrgan, Theory.GmJazzGuitar };
+
+    // ── Music mixer mirrors (category index order Comp/Bass/Lead/Pad/Piano/Horns/Drums;
+    //    sub order lead 0–7, comp 8–10, bass 11–12, drum voices 13–19) ──
+    private readonly float[] _mixVol = { 1f, 1f, 1f, 1f, 1f, 1f, 1f };
+    private readonly bool[] _mixMute = new bool[7];
+    private readonly bool[] _mixSolo = new bool[7];
+    private readonly float[] _subVol =
+        { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f };
+    private readonly bool[] _subMute = new bool[20];
+    private readonly bool[] _subSolo = new bool[20];
+
     // ── Per-vehicle event state (index-aligned to VehicleStore, swap-and-pop fixed up) ──
     private float[] _prevBrake = Array.Empty<float>();
     private float[] _screechCooldown = Array.Empty<float>();
@@ -192,17 +219,98 @@ public sealed class AudioEngine : IDisposable
         _musicNight = settings.MusicNightResponse;
         _musicTension = settings.MusicTensionResponse;
         _maxVehicles = Math.Max(1, settings.MaxVehicles);
+
+        _musicManual = settings.MusicManualMode;
+        _mIntensity = Math.Clamp(settings.MusicManualIntensity, 0f, 1f);
+        _mNight = Math.Clamp(settings.MusicManualNight, 0f, 1f);
+        _mTension = Math.Clamp(settings.MusicManualTension, 0f, 1f);
+        _mForm = (int)settings.MusicManualForm;
+        _mKeyPc = MapOr(KeyPcMap, (int)settings.MusicManualKey, 10);
+        _mLead = MapOr(LeadProgramMap, (int)settings.MusicManualLead, Theory.GmAltoSax);
+        _mComp = MapOr(CompProgramMap, (int)settings.MusicManualComp, Theory.GmEPiano1);
+        _mBrush = settings.MusicManualKit == MusicKitChoice.Brush;
+
+        CopyStrip(settings.MixComp, 0, _mixVol, _mixMute, _mixSolo);
+        CopyStrip(settings.MixBass, 1, _mixVol, _mixMute, _mixSolo);
+        CopyStrip(settings.MixLead, 2, _mixVol, _mixMute, _mixSolo);
+        CopyStrip(settings.MixPad, 3, _mixVol, _mixMute, _mixSolo);
+        CopyStrip(settings.MixPiano, 4, _mixVol, _mixMute, _mixSolo);
+        CopyStrip(settings.MixHorns, 5, _mixVol, _mixMute, _mixSolo);
+        CopyStrip(settings.MixDrums, 6, _mixVol, _mixMute, _mixSolo);
+        CopyStrip(settings.MixLeadAlto, 0, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixLeadTenor, 1, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixLeadTrumpet, 2, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixLeadHarmonica, 3, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixLeadVibes, 4, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixLeadClarinet, 5, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixLeadSoprano, 6, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixLeadFlute, 7, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixCompEPiano, 8, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixCompOrgan, 9, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixCompGuitar, 10, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixBassAcoustic, 11, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixBassFinger, 12, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixDrumKick, 13, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixDrumSnare, 14, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixDrumHat, 15, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixDrumRide, 16, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixDrumCrash, 17, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixDrumToms, 18, _subVol, _subMute, _subSolo);
+        CopyStrip(settings.MixDrumShaker, 19, _subVol, _subMute, _subSolo);
+
         PushMusicSettings();
     }
 
-    /// <summary>Pushes the settings-derived music targets (gain, tempo, swing) so a
-    /// toggle takes effect immediately even while the sim is paused.</summary>
+    private static void CopyStrip(MixerStrip s, int i, float[] vol, bool[] mute, bool[] solo)
+    {
+        vol[i] = Math.Clamp(s.Volume, 0f, 1f);
+        mute[i] = s.Mute;
+        solo[i] = s.Solo;
+    }
+
+    /// <summary>Table lookup with an index guard for out-of-range enum values from a
+    /// hand-edited settings.json.</summary>
+    private static int MapOr(int[] table, int index, int fallback)
+        => (uint)index < (uint)table.Length ? table[index] : fallback;
+
+    /// <summary>Pushes every settings-derived music target — gain, tempo, swing, the
+    /// manual-mode pin, and both mixer levels — so a change takes effect (at the next
+    /// bar) even while the sim is paused or on the title screen. In manual mode the
+    /// mood targets are ALSO written here from the manual sliders (UpdateMusicMood
+    /// skips its sim mappings), pinning ambience to 0 for the full band.</summary>
     private void PushMusicSettings()
     {
         if (_music == null) return;
         _music.TargetGain = _soundEnabled && _musicEnabled ? _musicVolume : 0f;
         _music.TempoSetting = _musicTempo;
         _music.SwingSetting = _musicSwing;
+
+        _music.ManualMode = _musicManual;
+        _music.ManualForm = _mForm;
+        _music.ManualKeyPc = _mKeyPc;
+        _music.ManualLeadProgram = _mLead;
+        _music.ManualCompProgram = _mComp;
+        _music.ManualBrushKit = _mBrush;
+        for (int i = 0; i < 7; i++)
+        {
+            _music.MixVolume[i] = _mixVol[i];
+            _music.MixMute[i] = _mixMute[i] ? 1 : 0;
+            _music.MixSolo[i] = _mixSolo[i] ? 1 : 0;
+        }
+        for (int i = 0; i < 20; i++)
+        {
+            _music.SubVolume[i] = _subVol[i];
+            _music.SubMute[i] = _subMute[i] ? 1 : 0;
+            _music.SubSolo[i] = _subSolo[i] ? 1 : 0;
+        }
+
+        if (_musicManual)
+        {
+            _music.TargetIntensity = _mIntensity;
+            _music.TargetNight = _mNight;
+            _music.TargetTension = _mTension;
+            _music.TargetAmbience = 0f;
+        }
     }
 
     /// <summary>
@@ -328,38 +436,49 @@ public sealed class AudioEngine : IDisposable
     /// cooldown so oscillating jams don't machine-gun cadences. The Music settings
     /// sliders scale each response; at zero a mapping is pinned to its neutral value.
     /// The composer consumes these at bar boundaries, so changes always land musically.
+    /// MANUAL mode bypasses everything here: the mood targets come from the manual
+    /// sliders (written by PushMusicSettings), hour/day freeze, ambience pins to 0, and
+    /// the resolution trigger is suppressed (its edge timer resets so no stale cadence
+    /// fires on return to auto).
     /// </summary>
     private void UpdateMusicMood(int driving, int congested, float dark, float zoom, float wallDt)
     {
         if (_music == null) return;
-        float trafficNorm = Math.Clamp(driving / MathF.Max(1f, 0.5f * _maxVehicles), 0f, 1f);
-        // Response slider lerps between a fixed mid-energy band (0) and the full mapping (1).
-        float intensity = Math.Clamp(0.5f + _musicTraffic * (0.15f + 1.05f * trafficNorm - 0.5f), 0f, 1f);
-        float congestionShare = driving > 0 ? (float)congested / driving : 0f;
-        // Below ~15% slow vehicles is normal signal queuing, not a jam; scale by a small
-        // fleet factor so five stopped cars on an empty map don't read as gridlock.
-        float tension = Math.Clamp((congestionShare - 0.15f) / 0.45f, 0f, 1f)
-            * MathF.Min(1f, driving / 25f) * _musicTension;
-
-        _music.TargetIntensity = intensity;
-        _music.TargetNight = dark * _musicNight;
-        _music.TargetTension = tension;
-        _music.TargetHour = (float)_simLoop.Clock.TimeOfDay;
-        _music.TargetDayNumber = _simLoop.Clock.DayNumber;
-        _music.TargetAmbience = 1f - DspUtil.SmoothStep(0.25f, 0.9f, zoom);
-
-        _musicResolutionCooldown = MathF.Max(0f, _musicResolutionCooldown - wallDt);
-        if (tension > 0.5f)
+        if (!_musicManual)
         {
-            _musicTensionHighSecs += wallDt;
-        }
-        else if (tension < 0.2f)
-        {
-            if (_musicTensionHighSecs >= 3f && _musicResolutionCooldown <= 0f)
+            float trafficNorm = Math.Clamp(driving / MathF.Max(1f, 0.5f * _maxVehicles), 0f, 1f);
+            // Response slider lerps between a fixed mid-energy band (0) and the full mapping (1).
+            float intensity = Math.Clamp(0.5f + _musicTraffic * (0.15f + 1.05f * trafficNorm - 0.5f), 0f, 1f);
+            float congestionShare = driving > 0 ? (float)congested / driving : 0f;
+            // Below ~15% slow vehicles is normal signal queuing, not a jam; scale by a small
+            // fleet factor so five stopped cars on an empty map don't read as gridlock.
+            float tension = Math.Clamp((congestionShare - 0.15f) / 0.45f, 0f, 1f)
+                * MathF.Min(1f, driving / 25f) * _musicTension;
+
+            _music.TargetIntensity = intensity;
+            _music.TargetNight = dark * _musicNight;
+            _music.TargetTension = tension;
+            _music.TargetHour = (float)_simLoop.Clock.TimeOfDay;
+            _music.TargetDayNumber = _simLoop.Clock.DayNumber;
+            _music.TargetAmbience = 1f - DspUtil.SmoothStep(0.25f, 0.9f, zoom);
+
+            _musicResolutionCooldown = MathF.Max(0f, _musicResolutionCooldown - wallDt);
+            if (tension > 0.5f)
             {
-                _music.ResolutionSeq++;
-                _musicResolutionCooldown = 45f;
+                _musicTensionHighSecs += wallDt;
             }
+            else if (tension < 0.2f)
+            {
+                if (_musicTensionHighSecs >= 3f && _musicResolutionCooldown <= 0f)
+                {
+                    _music.ResolutionSeq++;
+                    _musicResolutionCooldown = 45f;
+                }
+                _musicTensionHighSecs = 0f;
+            }
+        }
+        else
+        {
             _musicTensionHighSecs = 0f;
         }
 

@@ -16,6 +16,10 @@ namespace Roads.App.Rendering.Ui;
 ///   true; <see cref="OnMouseUp"/> releases capture after notifying the panel.
 /// - Uncaptured moves maintain the single hovered panel (Enter/Leave) and return true when
 ///   the pointer is over any interactive panel, so the caller suppresses map hover logic.
+/// - <see cref="OnMouseWheel"/> offers the wheel to the TOPMOST hit chain only (deepest
+///   panel, then up the parents); a declining chain does NOT fall through to panels
+///   underneath — a modal scrim must never let the wheel scroll panels below it. The
+///   caller applies camera zoom only when this returns false (and no modal is up).
 /// - Stale capture (a modal dialog opened inside Click can swallow the matching mouse-up)
 ///   self-heals two ways: MainForm releases it on the first mouse-move with no button held
 ///   (so hover resumes immediately after the dialog closes), and the next mouse-down
@@ -101,6 +105,23 @@ public class UiRoot
         }
         _hovered?.OnMouseMove(x, y);
         return hit != null;
+    }
+
+    /// <summary>Mouse wheel. True when a panel in the topmost hit chain consumed it
+    /// (see the class doc — no fall-through past the topmost hit panel).</summary>
+    public bool OnMouseWheel(float x, float y, float delta)
+    {
+        for (int i = _panels.Count - 1; i >= 0; i--)
+        {
+            var hit = _panels[i].HitTest(x, y);
+            if (hit == null) continue;
+
+            for (var p = hit; p != null; p = p.Parent)
+                if (p.OnMouseWheel(x, y, delta))
+                    return true;
+            return false;
+        }
+        return false;
     }
 
     /// <summary>Left mouse-up: notifies and releases the captured panel, if any.</summary>

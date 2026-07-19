@@ -23,10 +23,17 @@ public struct MidiEvent
 /// One bar's worth of mood, assembled ON THE PLAYBACK THREAD by MusicProvider.ComposeBar
 /// from its individually-atomic target fields (plus the resolution sequence-counter
 /// comparison) — the struct itself is never shared across threads, so no torn reads.
+/// The Manual* members carry the settings-pinned tune when Manual is set (form as
+/// <c>(int)MusicFormChoice</c> incl. the explicit waltz variant, key as a pitch class,
+/// instruments as GM program numbers, kit as a brush intent) and are ignored otherwise —
+/// all default-inert, so callers that only drive the mood (the offline harness) are
+/// unaffected.
 /// </summary>
 public readonly record struct MoodInputs(
     float Intensity, float Night, float Tension, float TempoBpm, float Swing,
-    float Hour, float Ambience, int DayNumber, bool ResolutionTag);
+    float Hour, float Ambience, int DayNumber, bool ResolutionTag,
+    bool Manual = false, int ManualForm = 0, int ManualKeyPc = 10,
+    int ManualLead = 65, int ManualComp = 4, bool ManualBrush = false);
 
 /// <summary>
 /// The symbolic music generator: a bar-at-a-time jazz composer in the SimCity 2000 /
@@ -60,6 +67,21 @@ public readonly record struct MoodInputs(
 /// selection toward nocturnes; tension pushes vamp interludes and pedal bass; ambience
 /// (camera zoom) fades drums down and pads up; a resolution trigger (jam cleared)
 /// inserts the tag mid-tune and restarts the chorus.
+///
+/// MANUAL MODE — when <see cref="MoodInputs.Manual"/> is set, the settings-pinned tune
+/// replaces <see cref="PickTune"/>: <see cref="BeginManualTune"/> builds a deterministic
+/// TuneDef (explicit form incl. the 3/4 waltz nocturne, key, single lead, comping patch,
+/// drum kit; no count-in; effectively infinite budget). Applied at bar boundaries:
+/// form/key changes restart the chart, instrument changes are plain program changes.
+/// Rotation arming, vamp interludes, and the gear-lift are suppressed while pinned;
+/// clearing Manual arms rotation so auto resumes with a fresh pick.
+///
+/// MIXER — user strips snapshotted per bar via <see cref="SetMixer"/>. Category strips
+/// (one per channel) act through CC7 in <see cref="EmitMixer"/>, the sole CC7 owner
+/// (base level × volume, 0 when muted or un-soloed); per-instrument sub strips act in
+/// <see cref="Note"/> (drums keyed by percussion note, lead/comp/bass by the channel's
+/// current program): sub-muted notes skip the whole on/off pair, otherwise velocity
+/// scales. Solo scope: categories against categories, subs within their category.
 /// </summary>
 public sealed class Composer
 {
@@ -338,6 +360,41 @@ public sealed class Composer
     private int _drumKit = -1;
     private int _lastReverbDepth = -1;
 
+    // ── Mixer (user strips; see SetMixer / EmitMixer / Note) ──
+    /// <summary>MIDI channel per mixer band, index order Comp/Bass/Lead/Pad/Piano/Horns/Drums —
+    /// the same load-bearing order as AppSettings' category strips and the provider arrays.</summary>
+    private static readonly int[] BandChannels = { ChComp, ChBass, ChLead, ChPad, ChPiano, ChHorns, ChDrums };
+    /// <summary>The composer's baked-in CC7 level per band (formerly hard-coded in EmitSetup);
+    /// the user category volume scales these.</summary>
+    private static readonly int[] BandBaseCc7 = { 84, 105, 88, 72, 62, 58, 96 };
+    /// <summary>Sub-strip program keys per melodic category (index offsets: lead 0, comp 8,
+    /// bass 11; drums 13–19 key by note via <see cref="DrumVoiceOf"/>).</summary>
+    private static readonly int[] LeadSubPrograms =
+    {
+        Theory.GmAltoSax, Theory.GmTenorSax, Theory.GmMutedTrumpet, Theory.GmHarmonica,
+        Theory.GmVibraphone, Theory.GmClarinet, Theory.GmSopranoSax, Theory.GmFlute,
+    };
+    private static readonly int[] CompSubPrograms = { Theory.GmEPiano1, Theory.GmDrawbarOrgan, Theory.GmJazzGuitar };
+    private static readonly int[] BassSubPrograms = { Theory.GmAcousticBass, Theory.GmFingerBass };
+
+    private readonly float[] _mixVol = { 1f, 1f, 1f, 1f, 1f, 1f, 1f };
+    private readonly int[] _mixMute = new int[7];
+    private readonly int[] _mixSolo = new int[7];
+    private readonly float[] _subVol = { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f };
+    /// <summary>Per-sub effective mute, precomputed each bar in <see cref="SetMixer"/>:
+    /// Mute || (a sub of the SAME category is soloed && !Solo). Solo scope is the category.</summary>
+    private readonly bool[] _subMuteEff = new bool[20];
+    /// <summary>Last CC7 actually emitted per band (−1 = never) — EmitMixer only sends changes.</summary>
+    private readonly int[] _lastCc7 = { -1, -1, -1, -1, -1, -1, -1 };
+
+    // ── Manual mode (settings-pinned tune; see GenerateBar's manual block) ──
+    private bool _manualMode;        // this bar's snapshot (from SetMood)
+    private bool _manualActive;      // a manual tune is the current tune
+    private int _manualForm, _manualKeyPc, _manualLead, _manualComp;
+    private bool _manualBrush;
+    private int _mForm = -1, _mKeyPc = -1, _mLead = -1, _mComp = -1; // values the manual tune was built from
+    private bool _mBrush;
+
     // ── Part state (voice-leading memory) ──
     private int _prevBassKey = 34;
     private int _prevCompTop = 65;
@@ -376,6 +433,41 @@ public sealed class Composer
         _tempoSetting = Math.Clamp(m.TempoBpm, 60f, 160f);
         _swingSetting = Math.Clamp(m.Swing, 0f, 1f);
         if (m.ResolutionTag) _tagPending = true;
+
+        _manualMode = m.Manual;
+        _manualForm = m.ManualForm;
+        _manualKeyPc = m.ManualKeyPc;
+        _manualLead = m.ManualLead;
+        _manualComp = m.ManualComp;
+        _manualBrush = m.ManualBrush;
+    }
+
+    /// <summary>Snapshots the user mixer strips for this bar (called by the provider at
+    /// the bar boundary, playback thread; element-wise copies of the UI-written arrays).
+    /// Category strips act via CC7 in <see cref="EmitMixer"/>; sub strips act at note
+    /// emission in <see cref="Note"/> via the effective-mute/volume tables computed here.
+    /// Sub index layout: lead 0–7, comp 8–10, bass 11–12, drum voices 13–19.</summary>
+    public void SetMixer(float[] vol, int[] mute, int[] solo, float[] subVol, int[] subMute, int[] subSolo)
+    {
+        for (int i = 0; i < 7; i++)
+        {
+            _mixVol[i] = vol[i];
+            _mixMute[i] = mute[i];
+            _mixSolo[i] = solo[i];
+        }
+
+        // Effective sub mute, solo-scoped per category group.
+        Span<(int Start, int End)> groups = stackalloc[] { (0, 8), (8, 11), (11, 13), (13, 20) };
+        foreach (var (start, end) in groups)
+        {
+            bool anySolo = false;
+            for (int i = start; i < end; i++) anySolo |= subSolo[i] != 0;
+            for (int i = start; i < end; i++)
+            {
+                _subVol[i] = subVol[i];
+                _subMuteEff[i] = subMute[i] != 0 || (anySolo && subSolo[i] == 0);
+            }
+        }
     }
 
     /// <summary>
@@ -387,6 +479,22 @@ public sealed class Composer
     public long GenerateBar(List<MidiEvent> ev, long t0)
     {
         if (!_setupEmitted) { EmitSetup(ev, t0); _setupEmitted = true; }
+        EmitMixer(ev, t0); // before the phase switch: mixer changes land in every phase
+
+        // ── Manual mode: build/refresh the settings-pinned tune at this boundary ──
+        if (_manualMode)
+        {
+            if (!_manualActive || _mForm != _manualForm || _mKeyPc != _manualKeyPc)
+                BeginManualTune(ev, t0);                 // form/key: full chart restart
+            else if (_mLead != _manualLead || _mComp != _manualComp || _mBrush != _manualBrush)
+                ApplyManualInstruments(ev, t0);          // instruments: no restart
+        }
+        else if (_manualActive)
+        {
+            // Leaving manual: let the pinned tune end musically; PickTune then resumes auto.
+            _manualActive = false;
+            _tuneEndArmed = true;
+        }
 
         // ── Phase transitions (evaluated at the bar boundary) ──
         if (_phase == TunePhase.Break && _phaseBarsLeft <= 0)
@@ -405,12 +513,16 @@ public sealed class Composer
 
         var tune = _tune!;
 
-        // ── Arm rotation: budget, day rollover, nightfall on a day tune, dawn on a nocturne ──
+        // ── Arm rotation: budget, day rollover, nightfall on a day tune, dawn on a
+        //    nocturne. A manual tune is pinned — nothing arms it except leaving manual. ──
         if (_phase == TunePhase.Playing)
         {
-            if (_dayNumber != _lastDayNumber) _tuneEndArmed = true;
-            if (tune.Form != MusicForm.Nocturne && _night > 0.6f) _tuneEndArmed = true;
-            if (tune.Form == MusicForm.Nocturne && _night < 0.3f) _tuneEndArmed = true;
+            if (!_manualActive)
+            {
+                if (_dayNumber != _lastDayNumber) _tuneEndArmed = true;
+                if (tune.Form != MusicForm.Nocturne && _night > 0.6f) _tuneEndArmed = true;
+                if (tune.Form == MusicForm.Nocturne && _night < 0.3f) _tuneEndArmed = true;
+            }
             if (_tuneEndArmed && _barInChart == 0 && _tagBarsLeft == 0 && _barsIntoTune > 0)
             {
                 _phase = TunePhase.Ending;
@@ -505,13 +617,22 @@ public sealed class Composer
 
     // ═══════════════════════ Tune lifecycle ═══════════════════════
 
-    /// <summary>Starts the next tune: picks it, hard-sets the tempo (the ±2.5 BPM/bar
-    /// slew would otherwise glide for ~15 bars — the break hides the jump), refreshes
-    /// the per-tune console, and enters CountIn (or straight into Playing for
-    /// nocturnes, which fade in on pads instead of counting off).</summary>
+    /// <summary>Starts the next auto tune: picks it, then <see cref="StartTune"/>.</summary>
     private void BeginTune(List<MidiEvent> ev, long t0)
     {
         PickTune();
+        _manualActive = false;
+        StartTune(ev, t0);
+    }
+
+    /// <summary>Enters the already-chosen <see cref="_tune"/>: hard-sets the tempo (the
+    /// ±2.5 BPM/bar slew would otherwise glide for ~15 bars — the break hides the jump),
+    /// refreshes the per-tune console, resets all chart/chorus counters, and enters
+    /// CountIn (or straight into Playing when the tune skips the count-off — nocturnes
+    /// fade in on pads; manual tunes start immediately). Shared by the auto path
+    /// (<see cref="BeginTune"/>) and <see cref="BeginManualTune"/>.</summary>
+    private void StartTune(List<MidiEvent> ev, long t0)
+    {
         var tune = _tune!;
         _keyCenterPc = tune.KeyCenterPc;
         _gearLift = 0;
@@ -534,6 +655,79 @@ public sealed class Composer
 
         _phase = tune.CountIn ? TunePhase.CountIn : TunePhase.Playing;
         _phaseBarsLeft = 1;
+    }
+
+    /// <summary>Builds and enters the settings-pinned manual tune (no RNG anywhere):
+    /// the manual snapshot maps 1:1 onto a <see cref="TuneDef"/> — single-instrument
+    /// lead palette (the chorus rotation then re-picks it forever), tempo offset 0 so
+    /// the tempo slider is WYSIWYG, no count-in so changes land promptly, and an
+    /// effectively infinite budget (kills budget expiry and the gear-change lift).
+    /// Called at a bar boundary whenever manual mode is (re)entered or the pinned
+    /// form/key changes; overrides any pending Break/Ending/CountIn phase — safe,
+    /// because every emitted note queues its own note-off and TieRank orders
+    /// program/CC → note-offs → note-ons. Syncs the day/form/key history so returning
+    /// to auto neither re-arms spuriously nor re-picks the manual form.</summary>
+    private void BeginManualTune(List<MidiEvent> ev, long t0)
+    {
+        _manualActive = true;
+        _mForm = _manualForm;
+        _mKeyPc = _manualKeyPc;
+        _mLead = _manualLead;
+        _mComp = _manualComp;
+        _mBrush = _manualBrush;
+
+        var (form, chart) = ManualChart(_manualForm);
+        _tune = new TuneDef
+        {
+            Form = form,
+            Chart = chart,
+            KeyCenterPc = _manualKeyPc,
+            TempoOffset = 0f,
+            LeadPalette = new[] { _manualLead },
+            CompProgram = _manualComp,
+            DrumKit = _manualBrush && BrushKitAvailable ? Theory.GmBrushKit : 0,
+            ReverbDepth = form == MusicForm.Nocturne ? 65 : 40,
+            CountIn = false,
+            BudgetBars = int.MaxValue / 2,
+        };
+        _lastDayNumber = _dayNumber;
+        _prevForm = form;
+        _prevKeyCenter = _manualKeyPc;
+        TunesStarted++;
+        CurrentTuneName = $"{chart.Name}@{_manualKeyPc}!manual";
+        StartTune(ev, t0);
+    }
+
+    /// <summary>Maps a <c>(int)MusicFormChoice</c> to form + chart — deterministic, with
+    /// the 3/4 waltz nocturne addressable directly and a safe fallback for out-of-range
+    /// values from a hand-edited settings.json.</summary>
+    private static (MusicForm Form, ChartDef Chart) ManualChart(int formChoice) => formChoice switch
+    {
+        1 => (MusicForm.MinorBlues, MinorBluesChart),
+        2 => (MusicForm.Aaba, AabaChart),
+        3 => (MusicForm.Bossa, BossaChart),
+        4 => (MusicForm.Vamp, VampChart),
+        5 => (MusicForm.Nocturne, NocturneChart),
+        6 => (MusicForm.Nocturne, WaltzNocturneChart),
+        _ => (MusicForm.Blues, BluesChart),
+    };
+
+    /// <summary>Manual instrument change without a chart restart: refreshes the pinned
+    /// tune's palette/patches and emits the program changes at this bar boundary
+    /// (guarded by the console caches, so only actual changes hit the wire).</summary>
+    private void ApplyManualInstruments(List<MidiEvent> ev, long t0)
+    {
+        _mLead = _manualLead;
+        _mComp = _manualComp;
+        _mBrush = _manualBrush;
+        var tune = _tune!;
+        tune.LeadPalette = new[] { _manualLead };
+        tune.CompProgram = _manualComp;
+        tune.DrumKit = _manualBrush && BrushKitAvailable ? Theory.GmBrushKit : 0;
+
+        if (_manualLead != _leadProgram) { _leadProgram = _manualLead; Program(ev, t0, ChLead, _manualLead); }
+        if (tune.CompProgram != _compProgram) { _compProgram = tune.CompProgram; Program(ev, t0, ChComp, tune.CompProgram); }
+        if (tune.DrumKit != _drumKit) { _drumKit = tune.DrumKit; Program(ev, t0, ChDrums, tune.DrumKit); }
     }
 
     /// <summary>The single place hour-of-day, night, and repetition-avoidance weighting
@@ -701,8 +895,9 @@ public sealed class Composer
             _mainRun = 0;
             SetChart(tune.Chart);
         }
-        else if (!first && interludeEligible && (_tension > 0.55f || _mainRun >= 3))
+        else if (!first && interludeEligible && !_manualActive && (_tension > 0.55f || _mainRun >= 3))
         {
+            // Manual tunes never drop into the vamp — the pinned chart is the audition.
             _inInterlude = true;
             SetChart(VampChart);
         }
@@ -752,23 +947,77 @@ public sealed class Composer
 
     // ═══════════════════════ Console setup ═══════════════════════
 
-    /// <summary>One-time console state — volumes, pans, chorus sends, and the fixed
-    /// bass/pad/piano/horn programs. Reverb (CC91) deliberately does NOT live here:
-    /// EmitTuneSetup owns it per tune (single-owner rule).</summary>
+    /// <summary>One-time console state — pans, chorus sends, and the fixed
+    /// bass/pad/piano/horn programs. Two single-owner rules: reverb (CC91) lives in
+    /// EmitTuneSetup (per tune), and channel volume (CC7) lives in <see cref="EmitMixer"/>
+    /// (per bar, base level × user mixer) — neither is emitted here.</summary>
     private void EmitSetup(List<MidiEvent> ev, long t)
     {
         Program(ev, t, ChPad, Theory.GmWarmPad);
         Program(ev, t, ChPiano, Theory.GmAcousticGrand);
         Program(ev, t, ChHorns, Theory.GmBrassSection);
 
-        Cc(ev, t, ChComp, 7, 84); Cc(ev, t, ChComp, 10, 52); Cc(ev, t, ChComp, 93, 30);
-        Cc(ev, t, ChBass, 7, 105); Cc(ev, t, ChBass, 10, 64);
-        Cc(ev, t, ChLead, 7, 88); Cc(ev, t, ChLead, 10, 76);
-        Cc(ev, t, ChPad, 7, 72); Cc(ev, t, ChPad, 10, 64); Cc(ev, t, ChPad, 93, 40);
-        Cc(ev, t, ChPiano, 7, 62); Cc(ev, t, ChPiano, 10, 40);
-        Cc(ev, t, ChHorns, 7, 58); Cc(ev, t, ChHorns, 10, 58);
-        Cc(ev, t, ChDrums, 7, 96);
+        Cc(ev, t, ChComp, 10, 52); Cc(ev, t, ChComp, 93, 30);
+        Cc(ev, t, ChBass, 10, 64);
+        Cc(ev, t, ChLead, 10, 76);
+        Cc(ev, t, ChPad, 10, 64); Cc(ev, t, ChPad, 93, 40);
+        Cc(ev, t, ChPiano, 10, 40);
+        Cc(ev, t, ChHorns, 10, 58);
     }
+
+    /// <summary>The sole CC7 owner: emits each band's effective channel volume —
+    /// base level × user category volume, or 0 when the category is muted (Mute, or
+    /// another category is soloed and this one is not). Runs at every bar boundary in
+    /// every phase and both modes, but only actual changes hit the wire (first call
+    /// emits the full console — the caches start at −1). Silencing via CC7 keeps
+    /// note-offs flowing, so mute/solo can never hang a note.</summary>
+    private void EmitMixer(List<MidiEvent> ev, long t)
+    {
+        bool anySolo = false;
+        for (int i = 0; i < 7; i++) anySolo |= _mixSolo[i] != 0;
+        for (int i = 0; i < 7; i++)
+        {
+            bool muted = _mixMute[i] != 0 || (anySolo && _mixSolo[i] == 0);
+            int eff = muted ? 0 : Math.Clamp((int)MathF.Round(BandBaseCc7[i] * _mixVol[i]), 0, 127);
+            if (eff == _lastCc7[i]) continue;
+            _lastCc7[i] = eff;
+            Cc(ev, t, BandChannels[i], 7, eff);
+        }
+    }
+
+    /// <summary>Sub-strip (per-instrument) mixer index for a note, or −1 when the note
+    /// has no sub strip: drums resolve by percussion note, the melodic categories by
+    /// their channel's CURRENT program. Layout: lead 0–7, comp 8–10, bass 11–12,
+    /// drum voices 13–19.</summary>
+    private int SubIndexFor(int channel, int key) => channel switch
+    {
+        ChLead => IndexIn(LeadSubPrograms, _leadProgram, 0),
+        ChComp => IndexIn(CompSubPrograms, _compProgram, 8),
+        ChBass => IndexIn(BassSubPrograms, _bassProgram, 11),
+        ChDrums => DrumVoiceOf(key),
+        _ => -1,
+    };
+
+    private static int IndexIn(int[] programs, int program, int offset)
+    {
+        for (int i = 0; i < programs.Length; i++)
+            if (programs[i] == program) return offset + i;
+        return -1;
+    }
+
+    /// <summary>Groups the percussion notes into the seven drum-voice sub strips
+    /// (Kick / Snare / Hat / Ride / Crash / Toms / Shaker), offset to the sub layout.</summary>
+    private static int DrumVoiceOf(int note) => note switch
+    {
+        Theory.DrKick => 13,
+        Theory.DrSideStick or Theory.DrSnare => 14,
+        Theory.DrHatClosed or Theory.DrHatPedal or Theory.DrHatOpen => 15,
+        Theory.DrRide or Theory.DrRideBell => 16,
+        Theory.DrCrash => 17,
+        Theory.DrTomLow or Theory.DrTomMid or Theory.DrTomHi => 18,
+        Theory.DrShaker => 19,
+        _ => -1,
+    };
 
     /// <summary>Per-tune console refresh: comping program, drum kit, and the reverb
     /// room fanned out per channel from the tune's depth. Guarded by cached-last-value
@@ -1285,10 +1534,20 @@ public sealed class Composer
         return rootPc + octave * 12 + scale[idx];
     }
 
-    /// <summary>Emits a note-on/note-off pair with ±4 ms timing humanization.</summary>
+    /// <summary>Emits a note-on/note-off pair with ±4 ms timing humanization. The
+    /// per-instrument sub-mixer is applied here — the single funnel every generator's
+    /// notes pass through: a sub-muted note skips the WHOLE pair (never a hanging on;
+    /// already-sounding notes finish via their previously queued offs), otherwise the
+    /// velocity scales by the sub volume.</summary>
     private void Note(List<MidiEvent> ev, int channel, int key, int vel, long start, long dur)
     {
         if (key is < 0 or > 127) return;
+        int sub = SubIndexFor(channel, key);
+        if (sub >= 0)
+        {
+            if (_subMuteEff[sub]) return;
+            vel = Math.Max(1, (int)MathF.Round(vel * _subVol[sub]));
+        }
         start += (long)((_rng.NextDouble() - 0.5) * 0.008 * _sampleRate);
         if (start < 0) start = 0;
         if (dur < 64) dur = 64;

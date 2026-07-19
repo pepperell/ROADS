@@ -16,8 +16,10 @@ namespace Roads.App.Audio.Music;
 /// playhead reaches the end of the composed material it asks the composer for one more
 /// bar. Note-offs that overhang a bar merge with the next bar's events on the re-sort.
 /// The composer therefore runs entirely on the playback thread; the UI thread only
-/// writes the Target* floats (32-bit float writes are atomic; bar-boundary reads and
-/// the gain slew erase staleness — the same idiom as the rest of the audio graph).
+/// writes the Target*/Manual*/Mix*/Sub* fields (32-bit scalar and array-element writes
+/// are atomic; bar-boundary reads and the gain slew erase staleness — the same idiom as
+/// the rest of the audio graph). ComposeBar snapshots them all: the mood + manual
+/// fields into MoodInputs, the mixer arrays via Composer.SetMixer.
 ///
 /// While faded fully out the timeline freezes (no composing, no rendering — zeros only),
 /// so a disabled music setting costs nothing; on re-enable the band resumes mid-phrase.
@@ -70,6 +72,31 @@ public sealed class MusicProvider : ISampleProvider
     public float TempoSetting = 96f;
     /// <summary>Swing feel setting 0–1 (0 = straight 8ths, 1 = full triplet swing).</summary>
     public float SwingSetting = 0.6f;
+
+    // ── Manual-mode targets (same atomic contract; pre-mapped to the composer's
+    //    domain by AudioEngine — form as (int)MusicFormChoice, key as a pitch class,
+    //    instruments as GM programs — so this layer never sees settings enums) ──
+    /// <summary>False = auto-compose (historical behavior); true = the Manual* fields pin the tune.</summary>
+    public bool ManualMode;
+    public int ManualForm;
+    public int ManualKeyPc = 10;
+    public int ManualLeadProgram = Theory.GmAltoSax;
+    public int ManualCompProgram = Theory.GmEPiano1;
+    /// <summary>Brush-kit intent; the composer resolves it against BrushKitAvailable.</summary>
+    public bool ManualBrushKit;
+
+    // ── Mixer targets, snapshotted per bar into the composer. Category index order
+    //    Comp/Bass/Lead/Pad/Piano/Horns/Drums; sub order lead 0–7, comp 8–10,
+    //    bass 11–12, drum voices 13–19 (Kick/Snare/Hat/Ride/Crash/Toms/Shaker).
+    //    Volumes MUST initialize to 1s — zeros would silence the band (and the
+    //    offline harness, which never touches these). ──
+    public readonly float[] MixVolume = { 1f, 1f, 1f, 1f, 1f, 1f, 1f };
+    public readonly int[] MixMute = new int[7];
+    public readonly int[] MixSolo = new int[7];
+    public readonly float[] SubVolume =
+        { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f };
+    public readonly int[] SubMute = new int[20];
+    public readonly int[] SubSolo = new int[20];
 
     /// <summary>Jam-cleared one-shot: the UI increments; the playback thread fires the
     /// resolution tag when the count changes (the OneShotVoice.TriggerSeq idiom — a bool
@@ -179,8 +206,12 @@ public sealed class MusicProvider : ISampleProvider
         int seq = ResolutionSeq; // single volatile read — compare-and-store against it
         var mood = new MoodInputs(TargetIntensity, TargetNight, TargetTension,
             TempoSetting, SwingSetting, TargetHour, TargetAmbience, TargetDayNumber,
-            ResolutionTag: seq != _lastResolutionSeq);
+            ResolutionTag: seq != _lastResolutionSeq,
+            Manual: ManualMode, ManualForm: ManualForm, ManualKeyPc: ManualKeyPc,
+            ManualLead: ManualLeadProgram, ManualComp: ManualCompProgram,
+            ManualBrush: ManualBrushKit);
         _lastResolutionSeq = seq;
+        _composer.SetMixer(MixVolume, MixMute, MixSolo, SubVolume, SubMute, SubSolo);
         _composer.SetMood(in mood);
         long barLen = _composer.GenerateBar(_queue, _nextBarStart);
         _nextBarStart += Math.Max(barLen, 64);

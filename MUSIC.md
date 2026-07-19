@@ -257,9 +257,51 @@ music is muted are discarded.
 
 **Settings → Music** (persisted in `settings.json`): enable, volume, tempo center,
 swing feel, and the three response strengths (traffic → energy, night → mellow,
-congestion → tension). At zero, a mapping pins to its neutral value.
+congestion → tension). At zero, a mapping pins to its neutral value. The whole page is
+LIVE: every control previews through the audio engine as it changes (landing at the
+next bar), Apply/OK persist, Cancel/Escape re-preview the applied record to restore.
 
-## 9. Diagnostics & verification
+## 9. Manual mode & the mixer
+
+**Manual mode** (Settings → Music → Mode → Manual) replaces the game-state coupling
+with a settings-pinned band, so every combination can be auditioned without building a
+traffic scenario:
+
+- Mood comes from the manual Energy/Night/Tension sliders; ambience pins to 0 (full
+  band regardless of zoom), the hour/day inputs freeze, and the resolution trigger is
+  suppressed (its edge timer resets, so no stale cadence fires on return to auto).
+- The tune is pinned: explicit form (all six, plus the 3/4 waltz nocturne addressable
+  directly), key (Bb/Eb/F/C/Ab), a single lead instrument (the full 8-voice pool),
+  comping patch, and drum kit (brushes fall back to standard when the soundfont lacks
+  the GS patch). The manual `TuneDef` is deterministic — no RNG: tempo offset 0 (the
+  tempo slider is WYSIWYG), no count-in, effectively infinite budget. Rotation arming,
+  vamp interludes, and the gear-lift are suppressed; the chorus life (head/solo roles,
+  trading fours, lead crash) continues, so a pinned tune still arranges itself.
+- Change semantics, applied at the next bar boundary: form or key → the chart restarts;
+  lead/comping/kit → plain program changes with no restart. Toggling back to Auto arms
+  a rotation — the pinned tune plays its 2-bar ending, breaks, and `PickTune` resumes.
+
+**The mixer** (both modes, all tune phases) is two-level:
+
+| Level | Acts via | Keyed by |
+|---|---|---|
+| Category strips (Comp 0, Bass 1, Lead 2, Pad 3, Piano 4, Horns 5, Drums 9) | CC7 = base level × volume, 0 when muted | MIDI channel |
+| Sub-strips (8 leads, 3 comps, 2 basses, 7 drum voices: Kick/Snare/Hat/Ride/Crash/Toms/Shaker) | note emission: velocity × volume; muted notes skip the whole on/off pair | drums by percussion note; melodic subs by the channel's current program |
+
+Mute/solo semantics: audible = `!Mute && (nothing soloed || Solo)`, with solo scoped to
+its level — category solos compete with categories, sub solos with subs of the same
+category (solo Hat + Kick → only those drum voices; other categories unaffected).
+`Composer.EmitMixer` is the **sole CC7 owner** (the base levels moved out of
+`EmitSetup`); it runs at every bar boundary and emits only changes. Silencing via CC7
+keeps note-offs flowing and sub-mutes skip whole pairs, so no path can hang a note.
+
+**Threading**: the manual and mixer fields join the provider's atomic-target contract —
+the UI thread writes 32-bit fields/array elements; `ComposeBar` snapshots them at the
+bar boundary (`MoodInputs` + `Composer.SetMixer`). Expect up to ~2 bars of perceived
+latency (one bar is composed ahead); that quantization is the musical contract, not a
+defect.
+
+## 10. Diagnostics & verification
 
 `ROADS.exe --musictest[=seconds] [--musicout=path]` renders the engine offline
 through the exact live code path: five mood phases (morning-rush, midday-calm,
@@ -270,10 +312,10 @@ actually rotated (`TunesStarted ≥ 2`). Exit 0 = every phase produced audio. Fi
 seed — reruns are byte-comparable; in the app the seed varies per launch so each
 session opens with a different tune.
 
-## 10. Invariants
+## 11. Invariants
 
 The load-bearing ordering/threading contracts (compose-on-playhead, MIDI tie-rank,
-CC91 single ownership, form-persists-per-tune, ritardando isolation, trigger
+CC91 and CC7 single ownership, form-persists-per-tune, ritardando isolation, trigger
 discard-when-frozen, the pause-duck bypass, and the SimRandom prohibition) are
 catalogued in [HIDDEN_DEPENDENCIES.md §8](HIDDEN_DEPENDENCIES.md). Read that before
 modifying the sequencer or adding new mood inputs.
