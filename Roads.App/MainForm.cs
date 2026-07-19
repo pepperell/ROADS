@@ -1047,14 +1047,17 @@ public class MainForm : Form
     }
 
     /// <summary>Title-screen New: loads the embedded default-map template (vehicles
-    /// included when it has them, no prompt). The quiet-save target stays null so the
-    /// first Ctrl+S prompts — the template is baked into the assembly and is never a
-    /// silent overwrite target.</summary>
+    /// included when it has them, no prompt) and starts RUNNING at 1x — a new game plays
+    /// immediately, unlike Load which follows the paused-editor convention. The quiet-save
+    /// target stays null so the first Ctrl+S prompts — the template is baked into the
+    /// assembly and is never a silent overwrite target.</summary>
     private void TitleNew()
     {
         LoadDefaultMap();
         _currentMapPath = null;
         _currentMapIncludeVehicles = false;
+        _simLoop.TimeScaleExponent = 0;
+        _simLoop.Paused = false; // the loader left it paused
         EnterGame();
     }
 
@@ -1319,8 +1322,9 @@ public class MainForm : Form
     }
 
     /// <summary>Post-load staging shared by the file and embedded-resource loaders:
-    /// rebuild the world caches and renderer scenery, pause, Select tool (the New/Load
-    /// convention — title entry unpauses afterwards itself).</summary>
+    /// rebuild the world caches and renderer scenery, pause, Select tool. Load keeps the
+    /// pause (the paused-editor convention); TitleNew and title entry unpause afterwards
+    /// themselves.</summary>
     private void FinishMapLoad()
     {
         _simLoop.RebuildWorldCaches();
