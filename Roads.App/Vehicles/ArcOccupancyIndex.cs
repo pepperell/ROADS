@@ -17,6 +17,10 @@ namespace Roads.App.Vehicles;
 /// single choke-point.</item>
 /// <item>In the lane-change phase, <c>CurrentArc</c> is stable (only steering writes it), so a single
 /// <see cref="Rebuild"/> snapshot at the start of each public entry point is sufficient.</item>
+/// <item>Outside both passes, <c>CurrentArc</c> is also written directly by
+/// <c>GraphChangeHandler</c> (defunct-edge reseat) and <c>SimulationLoop.RemapVehicleArcs</c>
+/// (arc-index remap after an arc-cache rebuild). Those writes bypass Enter/Exit safely
+/// because every pass begins with a fresh <see cref="Rebuild"/> snapshot.</item>
 /// </list>
 /// Only Driving vehicles with a non-negative arc are indexed, matching the original scans' guards.
 /// </summary>

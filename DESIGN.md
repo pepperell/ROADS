@@ -780,7 +780,6 @@ Roads/
 │   │
 │   └── Persistence/
 │       ├── MapSerializer.cs      # Save/Load binary
-│       ├── MapJsonSerializer.cs  # JSON export
 │       └── AutoSave.cs           # Timed auto-save
 │
 └── Roads.Tests/                  # Unit test project

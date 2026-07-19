@@ -17,6 +17,13 @@ public class IntersectionArcCache
     private int _arcCount;
     private int _cachedVersion = -1;
 
+    /// <summary>Identity keys of the previous generation's arcs, captured at the top of
+    /// <see cref="Rebuild"/> so <see cref="RemapFromPrevious"/> can translate arc indices
+    /// held across exactly one rebuild (e.g. a mid-arc vehicle's CurrentArc).</summary>
+    private (int inEdge, int outEdge, byte inLane, byte outLane)[] _prevArcKeys
+        = Array.Empty<(int, int, byte, byte)>();
+    private int _prevArcCount;
+
     /// <summary>Lookup: (incomingEdge, outgoingEdge, inLane, outLane) → arc index.</summary>
     private readonly Dictionary<(int, int, byte, byte), int> _lookup = new();
 
@@ -52,11 +59,31 @@ public class IntersectionArcCache
     }
 
     /// <summary>
-    /// Returns the arc struct at the given index.
+    /// Returns the arc struct at the given index. Arc indices are positional and valid
+    /// for one cache generation only — holders that survive a rebuild must translate
+    /// theirs via <see cref="RemapFromPrevious"/> (SimulationLoop does this for vehicles).
     /// </summary>
     public IntersectionArc GetArc(int arcIndex)
     {
+        System.Diagnostics.Debug.Assert((uint)arcIndex < (uint)_arcCount,
+            "Stale or out-of-range arc index — arc indices reshuffle every rebuild; remap via RemapFromPrevious.");
         return _arcs[arcIndex];
+    }
+
+    /// <summary>
+    /// Translates an arc index captured before the most recent rebuild into the current
+    /// generation's numbering, or -1 when that arc no longer exists (its turn was removed
+    /// by a lane-count, lane-restriction, or topology change). Identity is the
+    /// (incomingEdge, outgoingEdge, incomingLane, outgoingLane) tuple — node and edge
+    /// indices are stable across rebuilds (defunct-in-place, never compacted), so a
+    /// surviving arc keeps its identity even though its flat index moved. Valid for
+    /// EXACTLY one generation: callers must remap immediately after every rebuild.
+    /// </summary>
+    public int RemapFromPrevious(int previousArcIndex)
+    {
+        if ((uint)previousArcIndex >= (uint)_prevArcCount) return -1;
+        var k = _prevArcKeys[previousArcIndex];
+        return GetArcIndex(k.inEdge, k.outEdge, k.inLane, k.outLane);
     }
 
     /// <summary>
@@ -113,17 +140,31 @@ public class IntersectionArcCache
 
     /// <summary>
     /// Rebuilds the arc cache if the graph has changed since the last rebuild.
-    /// Must be called after StopLineCache has been rebuilt.
+    /// Must be called after StopLineCache has been rebuilt. Returns true when a rebuild
+    /// ran — arc indices reshuffle on every rebuild, so the caller must then remap every
+    /// arc index held outside the cache (see <see cref="RemapFromPrevious"/>).
     /// </summary>
-    public void RebuildIfNeeded(RoadGraph graph, StopLineCache stopLines)
+    public bool RebuildIfNeeded(RoadGraph graph, StopLineCache stopLines)
     {
-        if (_cachedVersion == graph.Version) return;
+        if (_cachedVersion == graph.Version) return false;
         Rebuild(graph, stopLines);
         _cachedVersion = graph.Version;
+        return true;
     }
 
     private void Rebuild(RoadGraph graph, StopLineCache stopLines)
     {
+        // Capture the outgoing generation's arc identities before overwriting anything,
+        // so indices held across this rebuild can be translated by RemapFromPrevious.
+        if (_prevArcKeys.Length < _arcCount)
+            _prevArcKeys = new (int, int, byte, byte)[_arcCount];
+        for (int i = 0; i < _arcCount; i++)
+        {
+            var a = _arcs[i];
+            _prevArcKeys[i] = (a.IncomingEdge, a.OutgoingEdge, a.IncomingLane, a.OutgoingLane);
+        }
+        _prevArcCount = _arcCount;
+
         _lookup.Clear();
         _reachableFromLane.Clear();
         _arcCount = 0;

@@ -8,7 +8,35 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>ROADS</AssemblyName>
+    <!-- Version scheme: Major.Minor.Patch set here; the fourth part is an
+         auto-incrementing build number (see the IncrementBuildNumber target). -->
+    <VersionPrefix3>0.1.0</VersionPrefix3>
   </PropertyGroup>
+
+  <!-- Auto-incrementing build number: buildnumber.txt (beside this project, tracked in
+       git so the count survives clones) holds the last build's number; every build reads
+       it, adds one, writes it back, and stamps Assembly/File/Info versions as
+       $(VersionPrefix3).$(BuildNumber). Runs before the assembly-info generators so the
+       binary always carries the fresh number; the TitleScreen reads it back at runtime
+       via Assembly.GetName().Version. Note every build invocation increments (dotnet run
+       after dotnet build counts twice) — build numbers are unique and ascending, not
+       consecutive. -->
+  <Target Name="IncrementBuildNumber" BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo">
+    <ReadLinesFromFile File="$(MSBuildProjectDirectory)/buildnumber.txt"
+                       Condition="Exists('$(MSBuildProjectDirectory)/buildnumber.txt')">
+      <Output TaskParameter="Lines" PropertyName="LastBuildNumber" />
+    </ReadLinesFromFile>
+    <PropertyGroup>
+      <LastBuildNumber Condition="'$(LastBuildNumber)' == ''">0</LastBuildNumber>
+      <BuildNumber>$([MSBuild]::Add($(LastBuildNumber), 1))</BuildNumber>
+      <Version>$(VersionPrefix3).$(BuildNumber)</Version>
+      <AssemblyVersion>$(VersionPrefix3).$(BuildNumber)</AssemblyVersion>
+      <FileVersion>$(VersionPrefix3).$(BuildNumber)</FileVersion>
+      <InformationalVersion>$(VersionPrefix3).$(BuildNumber)</InformationalVersion>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(MSBuildProjectDirectory)/buildnumber.txt"
+                      Lines="$(BuildNumber)" Overwrite="true" />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="MeltySynth" Version="2.4.1" />

@@ -133,7 +133,6 @@ ROADS/
     │
     ├── Persistence/
     │   ├── MapSerializer.cs          # Binary .roads save/load (graph, signals, vehicles)
-    │   ├── MapJsonSerializer.cs      # Human-readable JSON export (parallel walk order)
     │   ├── AutoSaveManager.cs        # Timestamped rotating backups
     │   └── SettingsStore.cs          # settings.json load/save
     │

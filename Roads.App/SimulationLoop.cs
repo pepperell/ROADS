@@ -278,8 +278,12 @@ public class SimulationLoop
     /// (which read stop-line tangents). No normalize step reads what a later step
     /// writes, so a single pass converges (verified by a debug-only second pass).
     /// Phase 2 (rebuild) is a pure projection of the settled graph into caches —
-    /// asserted mutation-free in debug builds. After this method returns, every cache
-    /// is current with graph.Version; no follow-up cascade occurs on the next call.
+    /// asserted graph-mutation-free in debug builds. One vehicle-state fix-up rides
+    /// along: when the arc cache rebuilt, <see cref="RemapVehicleArcs"/> translates
+    /// mid-arc vehicles' CurrentArc into the new arc numbering (arc indices reshuffle
+    /// every rebuild); the graph itself stays untouched. After this method returns,
+    /// every cache is current with graph.Version and every CurrentArc is a valid
+    /// current-generation index; no follow-up cascade occurs on the next call.
     /// Safe to call every frame: each step early-outs in O(1) when the graph version
     /// and its dirty flag are unchanged. Does not rebuild the vehicle spatial grid
     /// (position-based, rebuilt per simulation step) and does not call the signal
@@ -309,12 +313,44 @@ public class SimulationLoop
         // Phase 2 — Pure rebuilds at the settled version.
         int settled = _graph.Version;
         _stopLineCache.RebuildIfNeeded(_graph);
-        _intersectionArcs.RebuildIfNeeded(_graph, _stopLineCache);
+        if (_intersectionArcs.RebuildIfNeeded(_graph, _stopLineCache))
+            RemapVehicleArcs();
         _edgeSpatialGrid.RebuildIfNeeded(_graph);
         _trafficSignals.RebuildIfNeeded(_graph);
         _stopSigns.RebuildIfNeeded(_graph);
         _yieldSigns.RebuildIfNeeded(_graph);
         Debug.Assert(_graph.Version == settled,
             "Rebuild phase mutated the graph — RebuildIfNeeded steps must be pure reads.");
+    }
+
+    /// <summary>
+    /// Translates every mid-arc vehicle's CurrentArc from the previous arc-cache
+    /// generation into the numbering the rebuild just produced. Arc indices are
+    /// positional and reshuffle on every rebuild, so a vehicle that kept a pre-rebuild
+    /// index would silently steer along a DIFFERENT arc's geometry and be mis-bucketed
+    /// by the arc-occupancy index (waving crossing traffic through its real junction).
+    /// A vehicle whose arc no longer exists (its turn was removed mid-traverse by a
+    /// lane-count, lane-restriction, or topology change) drops back to edge mode:
+    /// CurrentEdge is still the arc's incoming edge, so the next steering update
+    /// re-projects it and re-enters the junction through the normal arc-acquisition
+    /// gates. Writing CurrentArc directly (not via SteeringController.SetArc) is safe
+    /// here because this runs outside the lane-change/steering passes, each of which
+    /// starts from a fresh ArcOccupancyIndex.Rebuild snapshot — the same precedent as
+    /// GraphChangeHandler's defunct-edge reseat.
+    /// </summary>
+    private void RemapVehicleArcs()
+    {
+        for (int i = 0; i < _vehicles.Count; i++)
+        {
+            int arc = _vehicles.CurrentArc[i];
+            if (arc < 0) continue;
+            int remapped = _intersectionArcs.RemapFromPrevious(arc);
+            _vehicles.CurrentArc[i] = remapped;
+            if (remapped < 0)
+            {
+                _vehicles.ArcProgress[i] = 0f;
+                _vehicles.PrevHeadingError[i] = 0f;
+            }
+        }
     }
 }

@@ -1138,25 +1138,13 @@ public class MainForm : Form
         _editorState.ActiveTool = Editor.EditorTool.Select;
     }
 
-    /// <summary>Serializer dispatch shared by quiet Save and Save As: a <c>.json</c> path
-    /// writes a human-readable snapshot via <see cref="Persistence.MapJsonSerializer"/>;
-    /// any other extension uses the binary <see cref="Persistence.MapSerializer"/> format.</summary>
+    /// <summary>Writes the current world to <paramref name="path"/> in the binary
+    /// <see cref="Persistence.MapSerializer"/> format — shared by quiet Save and Save As.</summary>
     private void WriteMap(string path, bool includeVehicles)
     {
-        bool asJson = System.IO.Path.GetExtension(path)
-            .Equals(".json", StringComparison.OrdinalIgnoreCase);
-        if (asJson)
-        {
-            Persistence.MapJsonSerializer.Save(path, _roadGraph, _vehicles,
-                _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
-                _populationManager, _waterLayer, includeVehicles);
-        }
-        else
-        {
-            Persistence.MapSerializer.Save(path, _roadGraph, _vehicles,
-                _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
-                _populationManager, _waterLayer, includeVehicles);
-        }
+        Persistence.MapSerializer.Save(path, _roadGraph, _vehicles,
+            _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
+            _populationManager, _waterLayer, includeVehicles);
     }
 
     /// <summary>
@@ -1197,7 +1185,7 @@ public class MainForm : Form
         using var dlg = new SaveFileDialog
         {
             Title = "Save Map",
-            Filter = "ROADS Map (*.roads)|*.roads|JSON (*.json)|*.json",
+            Filter = "ROADS Map (*.roads)|*.roads",
             DefaultExt = "roads"
         };
         if (dlg.ShowDialog() != DialogResult.OK)
@@ -1252,6 +1240,8 @@ public class MainForm : Form
         }
         catch (Exception ex)
         {
+            // MapSerializer.Load is all-or-nothing: on failure the previous world is
+            // intact, so the existing quiet-save target still matches it — keep both.
             MessageBox.Show($"Load failed: {ex.Message}", "Error",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
             return false;
