@@ -7,9 +7,9 @@ static class Program
 {
     /// <summary>
     /// Application entry point. Pass <c>--autobench</c> (or <c>--autobench=N</c>) to run an
-    /// automated 10K-vehicle benchmark: the app builds the stress scene, runs N frames
-    /// (default 100), appends per-frame metrics to <c>benchmark.log</c> over the final frames,
-    /// then exits. Used for headless optimization iteration.
+    /// automated 10K-vehicle benchmark: the app skips the title screen, builds the stress
+    /// scene, runs N frames (default 100), appends per-frame metrics to <c>benchmark.log</c>
+    /// over the final frames, then exits. Used for headless optimization iteration.
     ///
     /// Pass <c>--simtest=&lt;map&gt;</c> to run the headless <see cref="Diagnostics.SimTestHarness"/>
     /// instead of the GUI: <c>--simhours=&lt;h&gt;</c> sim duration (default 1),

@@ -14,6 +14,8 @@ namespace Roads.App.Core;
 public sealed record AppSettings
 {
     // ── Graphics ──
+    /// <summary>Borderless fullscreen (true) vs. a normal sizable window (false).</summary>
+    public bool Fullscreen { get; set; }
     /// <summary>Draw the faint 100 m alignment grid over the terrain.</summary>
     public bool ShowGrid { get; set; } = true;
     /// <summary>Congestion heat-map overlay (also toggled by the H key).</summary>

@@ -242,7 +242,22 @@ public static class MapSerializer
         PopulationManager population, WaterLayer water, bool loadVehicles)
     {
         using var fs = File.OpenRead(path);
-        using var r = new BinaryReader(fs);
+        return Load(fs, graph, vehicles, camera, clock, stopSigns, yieldSigns, signals,
+            population, water, loadVehicles);
+    }
+
+    /// <summary>
+    /// Stream-based core of the path overload above — also the direct entry for the maps
+    /// embedded in the assembly (the title backdrop and New template), which never exist
+    /// on disk. Consumes and disposes the stream. Returns true if the data contained
+    /// vehicles.
+    /// </summary>
+    public static bool Load(Stream stream, RoadGraph graph, VehicleStore vehicles,
+        Camera camera, SimulationClock clock,
+        StopSignSystem stopSigns, YieldSignSystem yieldSigns, TrafficSignalSystem signals,
+        PopulationManager population, WaterLayer water, bool loadVehicles)
+    {
+        using var r = new BinaryReader(stream);
 
         // Header
         var magic = r.ReadBytes(4);

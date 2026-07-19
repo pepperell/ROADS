@@ -14,7 +14,9 @@ namespace Roads.App.Persistence;
 ///
 /// Save-while-paused: backups are written regardless of the simulation's paused state.
 /// The map state is equally valid when paused and the user may pause for extended review
-/// periods, so withholding backups during a pause would defeat the purpose.
+/// periods, so withholding backups during a pause would defeat the purpose. Suppressed on
+/// the title screen, however: MainForm gates the <see cref="MaybeSave"/> call while the
+/// menu.roads backdrop sim runs, so idling on the title never generates backups.
 ///
 /// IO robustness: any exception during backup is caught and written to
 /// <c>autosave_error.log</c>, then silently discarded.  A failed backup never crashes

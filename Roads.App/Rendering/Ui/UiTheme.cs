@@ -16,6 +16,8 @@ public static class UiTheme
     public static readonly SKFont Font12 = new() { Size = 12 };
     public static readonly SKFont Font13 = new() { Size = 13 };
     public static readonly SKFont Font14 = new() { Size = 14 };
+    /// <summary>Large bold font for the full-screen menu buttons (title screen / pause menu).</summary>
+    public static readonly SKFont FontMenu = new(SKTypeface.FromFamilyName(null, SKFontStyle.Bold), 20);
 
     // Common chrome colors.
     public static readonly SKColor PanelBackground = new(30, 32, 38, 220);

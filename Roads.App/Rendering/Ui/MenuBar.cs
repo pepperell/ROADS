@@ -4,23 +4,25 @@ using Roads.App.Editor;
 namespace Roads.App.Rendering.Ui;
 
 /// <summary>Identifies a UI action triggered by an action button (not a tool toggle).
-/// New/Save/Load/Settings are raised by the <see cref="MenuBar"/>; Pause/SpeedDown/SpeedUp
-/// by the <see cref="ClockPanel"/>'s transport buttons. All route to the same owner
-/// callback (MainForm holds the dialogs and the sim loop).</summary>
-public enum UIAction { New, Save, Load, Settings, Pause, SpeedDown, SpeedUp }
+/// Menu (opens the in-game pause menu) is raised by the <see cref="MenuBar"/>;
+/// Pause/SpeedDown/SpeedUp by the <see cref="ClockPanel"/>'s transport buttons. All route
+/// to the same owner callback (MainForm holds the menus, dialogs, and the sim loop).</summary>
+public enum UIAction { Menu, Pause, SpeedDown, SpeedUp }
 
 /// <summary>
-/// The top-left menu bar: four action <see cref="Button"/>s (New / Save / Load / Settings)
-/// at the far left, then five editor-tool toggle buttons (Select / Road / Dest Pt /
-/// Signal / Water). The Node / Delete / Update Seg tools live on the
-/// <see cref="RoadSubmenu"/> opened by the Road button, the Change Type / Control Type /
-/// Rotate tools on the <see cref="SignalSubmenu"/> opened by the Signal button, and the
-/// water brush modes/sizes on the <see cref="WaterSubmenu"/> — not here. Tool buttons set
+/// The top-left menu bar: a single Menu action <see cref="Button"/> at the far left
+/// (opens the pause menu — Save / Save As / Settings / Return to Title / Exit live
+/// there), then five editor-tool toggle buttons (Select / Road / Dest Pt / Signal /
+/// Water). The Node / Delete / Update Seg tools live on the <see cref="RoadSubmenu"/>
+/// opened by the Road button, the Change Type / Control Type / Rotate tools on the
+/// <see cref="SignalSubmenu"/> opened by the Signal button, and the water brush
+/// modes/sizes on the <see cref="WaterSubmenu"/> — not here. Tool buttons set
 /// <see cref="EditorState.ActiveTool"/> directly (resetting transient tool state first)
 /// and highlight via live IsActive closures; actions are routed to the owner through the
 /// callback given at construction. Sits flush under the top edge (the row freed by the
 /// retired status bar): 70×30 buttons at y=14 from x=10, 4 px spacing, a 16 px gap
 /// between the action and tool groups, on a rounded background strip that consumes clicks.
+/// Hidden entirely while the title screen is up (MainForm gates VisibleWhen by app mode).
 /// </summary>
 public class MenuBar : Panel
 {
@@ -30,7 +32,7 @@ public class MenuBar : Panel
     private const float ToolbarX = 10f;
     private const float ToolbarY = 14f;
     private const float GroupGap = 16f;
-    private const int ActionCount = 4;
+    private const int ActionCount = 1;
 
     /// <summary>Left edge (canvas px) of the first tool button (after the action group).</summary>
     private static float ToolStartX
@@ -49,10 +51,7 @@ public class MenuBar : Panel
     {
         var actions = new[]
         {
-            (label: "New", action: UIAction.New),
-            (label: "Save", action: UIAction.Save),
-            (label: "Load", action: UIAction.Load),
-            (label: "Settings", action: UIAction.Settings),
+            (label: "Menu", action: UIAction.Menu),
         };
 
         for (int i = 0; i < actions.Length; i++)
@@ -105,7 +104,7 @@ public class MenuBar : Panel
 
     protected override void LayoutChildren(float canvasWidth, float canvasHeight)
     {
-        // Children are the 4 action buttons then the 4 tool buttons, in add order.
+        // Children are the Menu action button then the 5 tool buttons, in add order.
         // Offsets are panel-relative: the panel's left edge sits at ToolbarX - 6.
         for (int i = 0; i < Children.Count; i++)
         {

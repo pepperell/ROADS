@@ -11,10 +11,17 @@ using Ui = Roads.App.Rendering.Ui;
 namespace Roads.App;
 
 /// <summary>
-/// Main application window that orchestrates the road editor, traffic simulation, and rendering.
-/// Hosts a SkiaSharp canvas for rendering, a toolbar for tool selection, and a slider panel
-/// for tuning steering parameters. Runs the simulation at a 30 Hz fixed timestep, with
-/// rendering driven by a ~60 FPS WinForms timer.
+/// Main application window that orchestrates the road editor, traffic simulation, and
+/// rendering on a SkiaSharp canvas. The simulation runs at a 30 Hz fixed timestep with
+/// rendering driven by a ~60 FPS WinForms timer. Two top-level modes (see
+/// <see cref="_mode"/>): the app opens on the title screen — the embedded menu map
+/// running unpaused at 1x as a live backdrop behind the TitleScreen scrim, every in-game
+/// panel hidden and editor input swallowed — and enters the editor through its New/Load buttons
+/// (<c>--autobench</c> bypasses the title entirely). In-game, the menu bar's Menu button
+/// or an idle Escape opens the pause menu (Save / Save As / Settings / Return to Title /
+/// Exit). The ExternallyDrawn modal stack is painted by OnPaintSurface bottom→top as
+/// pause menu, title screen, settings dialog — matching their UiRoot add order, so
+/// hit-testing and paint z agree and Settings always opens in front.
 /// </summary>
 public class MainForm : Form
 {
@@ -50,6 +57,32 @@ public class MainForm : Form
     private readonly Ui.PerformanceHudPanel _hudPanel;
     private readonly Ui.LegendPanel _legendPanel = new();
     private readonly Ui.SettingsDialog _settingsDialog;
+    private readonly Ui.TitleScreen _titleScreen;
+    private readonly Ui.PauseMenu _pauseMenu;
+
+    private enum AppMode { Title, InGame }
+
+    /// <summary>Current top-level mode. Title: the menu map runs unpaused at 1x as a live
+    /// backdrop behind the <see cref="Ui.TitleScreen"/> scrim — every in-game panel is
+    /// hidden (VisibleWhen gates composed in the ctor), all editor input is swallowed,
+    /// and autosave is suppressed. InGame: the normal editor. Flipped ONLY by
+    /// <see cref="EnterTitleMode"/> / <see cref="EnterGame"/> (and the autobench ctor
+    /// bypass); <c>_titleScreen.Visible</c> mirrors it.</summary>
+    private AppMode _mode = AppMode.Title;
+
+    /// <summary>True while any full-screen modal overlay (settings dialog, title screen,
+    /// pause menu) is up — the shared gate for wheel zoom and middle/right mouse, which
+    /// bypass UiRoot (left clicks are consumed by the topmost scrim there).</summary>
+    private bool AnyModalVisible => _settingsDialog.Visible || _titleScreen.Visible || _pauseMenu.Visible;
+
+    /// <summary>Quiet-save target: path of the currently loaded/saved map, or null when
+    /// the session has no file yet (fresh New — the New template and title backdrop are
+    /// embedded resources with no path at all). Set ONLY by a successful Load or Save As,
+    /// so Ctrl+S can never silently overwrite anything the user didn't pick.</summary>
+    private string? _currentMapPath;
+    /// <summary>Whether quiet Save writes vehicles: the Save As prompt answer, or whether
+    /// vehicles were loaded with the current map.</summary>
+    private bool _currentMapIncludeVehicles;
 
     /// <summary>Last-APPLIED application settings — the values the live systems currently
     /// run with, mirrored in settings.json. Mutated only by <see cref="ApplyStagedSettings"/>
@@ -58,8 +91,17 @@ public class MainForm : Form
     private Core.AppSettings _settings;
 
     /// <summary>Pause state captured when the Settings dialog opened, restored on close —
-    /// so closing Settings never un-pauses a sim the user had manually paused.</summary>
+    /// so closing Settings never un-pauses a sim the user had manually paused. Used only
+    /// in-game: on the title screen Settings neither pauses nor restores (the backdrop
+    /// sim keeps running), and the mode cannot change while the dialog is open, so
+    /// capture and restore always agree on the branch. When opened from the pause menu
+    /// this captures the menu's forced pause (true) and restores it, leaving the menu
+    /// paused behind — the pre-menu state stays safely in <see cref="_menuWasPaused"/>.</summary>
     private bool _settingsWasPaused;
+    /// <summary>Pause state captured when the pause menu opened, restored by Return to
+    /// Game / Escape (the Settings idiom). Deliberately NOT restored when leaving to the
+    /// title — <see cref="EnterTitleMode"/> overrides pause outright.</summary>
+    private bool _menuWasPaused;
     /// <summary>Frame-timing telemetry; <see cref="PerfTelemetry.Sample"/> runs once per
     /// paint regardless of HUD visibility (single consumer of the pathfind accumulators).</summary>
     private readonly PerfTelemetry _perfTelemetry = new();
@@ -135,13 +177,19 @@ public class MainForm : Form
         _audioEngine = new Audio.AudioEngine(_vehicles, _roadGraph, _trafficSignals, _simLoop, _camera);
 
         // Retained-mode UI tree (bottom→top add order = draw order; input hits topmost first).
-        _uiRoot.Add(new Ui.MenuBar(_editorState, OnUiAction));
-        _uiRoot.Add(new Ui.PoiSubmenu(_editorState));
-        _uiRoot.Add(new Ui.RoadSubmenu(_editorState));
-        _uiRoot.Add(new Ui.SignalSubmenu(_editorState));
-        _uiRoot.Add(new Ui.WaterSubmenu(_editorState));
+        var menuBar = new Ui.MenuBar(_editorState, OnUiAction);
+        var poiSubmenu = new Ui.PoiSubmenu(_editorState);
+        var roadSubmenu = new Ui.RoadSubmenu(_editorState);
+        var signalSubmenu = new Ui.SignalSubmenu(_editorState);
+        var waterSubmenu = new Ui.WaterSubmenu(_editorState);
+        var clockPanel = new Ui.ClockPanel(_simLoop, OnUiAction);
+        _uiRoot.Add(menuBar);
+        _uiRoot.Add(poiSubmenu);
+        _uiRoot.Add(roadSubmenu);
+        _uiRoot.Add(signalSubmenu);
+        _uiRoot.Add(waterSubmenu);
         _uiRoot.Add(_legendPanel);
-        _uiRoot.Add(new Ui.ClockPanel(_simLoop, OnUiAction));
+        _uiRoot.Add(clockPanel);
 
         // Bottom-left stack (second column, right of the shortcut legend): HUD at the very
         // bottom, statistics above it, then vehicle info, selection info on top — positioned
@@ -160,11 +208,32 @@ public class MainForm : Form
         _minimapPanel = new Ui.MinimapPanel(_camera, _roadGraph, _waterLayer);
         _uiRoot.Add(_minimapPanel);
 
-        // Settings dialog last: topmost hit-testing (its scrim must swallow every click).
-        // It is ExternallyDrawn — painted by OnPaintSurface after the perf HUD, which is
-        // itself drawn after the whole UI pass and would otherwise cover the dialog.
+        // Modal stack, bottom→top: pause menu, title screen, then the settings dialog
+        // LAST (topmost hit-testing — Settings opens in front of either menu, and each
+        // menu's scrim swallows every click aimed below it). All three are ExternallyDrawn
+        // and painted by OnPaintSurface after the perf HUD in this same order.
+        _pauseMenu = new Ui.PauseMenu(ClosePauseMenu, SaveMap, SaveMapAs, OpenSettings,
+            ReturnToTitle, ExitToDesktop);
+        _uiRoot.Add(_pauseMenu);
+        _titleScreen = new Ui.TitleScreen(TitleNew, TitleLoad, OpenSettings, Close);
+        _uiRoot.Add(_titleScreen);
         _settingsDialog = new Ui.SettingsDialog(() => _settings, ApplyStagedSettings, OnSettingsClosed);
         _uiRoot.Add(_settingsDialog);
+
+        // Every in-game panel hides while the title screen is up. The gate COMPOSES into
+        // each panel's own VisibleWhen (submenus gate on their active tool) rather than
+        // replacing it. The HUD needs its own gate even though it sits in the bottom-left
+        // stack: OnPaintSurface draws it directly, bypassing parent visibility.
+        GateToInGame(menuBar);
+        GateToInGame(poiSubmenu);
+        GateToInGame(roadSubmenu);
+        GateToInGame(signalSubmenu);
+        GateToInGame(waterSubmenu);
+        GateToInGame(_legendPanel);
+        GateToInGame(clockPanel);
+        GateToInGame(bottomLeftStack);
+        GateToInGame(_minimapPanel);
+        GateToInGame(_hudPanel);
 
         _sceneRenderer = new SceneRenderer(_roadRenderer, _vehicleRenderer, _laneRestrictionTool, _uiRoot, _waterLayer);
         // AutoSaveManager shares the same object references used by SaveMap() so the
@@ -177,9 +246,18 @@ public class MainForm : Form
         // targets — panels, renderer, autosave, sim — exist by this point).
         ApplySettings();
 
-        // A default.roads beside the exe's working directory auto-loads at startup
-        // (vehicles included, no prompt) — "resume my world" for regular players.
-        TryLoadDefaultMap();
+        // Normal startup lands on the title screen (the embedded menu map running as a
+        // live backdrop); autobench bypasses it straight into the game so the stress
+        // scene and telemetry behave exactly as a normal in-game session.
+        if (_autoBenchFrames > 0)
+        {
+            _mode = AppMode.InGame;
+            LoadDefaultMap();
+        }
+        else
+        {
+            EnterTitleMode();
+        }
 
         // Centralized vehicle-removal fixup: editor-held vehicle indices follow
         // swap-and-pop moves and drop on bulk clears (see VehicleStore.VehicleRemoving).
@@ -232,10 +310,14 @@ public class MainForm : Form
 
         // Accumulate wall time and trigger a backup when the interval elapses.
         // The auto-save clock is independent of simulation time and pause state
-        // so that backups run on a predictable wall-clock cadence.
+        // so that backups run on a predictable wall-clock cadence. Suppressed on the
+        // title screen (the stopwatch still restarts, so title wall-time is DISCARDED
+        // rather than accumulated into the first in-game tick) — the menu.roads
+        // backdrop must never generate backups.
         double tickWall = _autoSaveClock.Elapsed.TotalSeconds;
         _autoSaveClock.Restart();
-        _autoSave.MaybeSave(tickWall);
+        if (_mode == AppMode.InGame)
+            _autoSave.MaybeSave(tickWall);
 
         UpdateCursor();
         _canvas.Invalidate();
@@ -616,13 +698,25 @@ public class MainForm : Form
     /// </summary>
     private void OnCanvasKeyDown(object? sender, KeyEventArgs e)
     {
-        // Modal Settings dialog: Escape cancels it; every other shortcut is swallowed
-        // while it is open. Must run before ANY other key handling (including the
-        // universal Escape -> CancelActiveTool below).
+        // Modal overlays, topmost first — each swallows every key while open. Must run
+        // before ANY other key handling (including the universal Escape chain below).
+        // Settings sits above both menus; the title screen has no Escape action at all.
         if (_settingsDialog.Visible)
         {
             if (e.KeyCode == Keys.Escape)
                 _settingsDialog.Cancel();
+            e.Handled = true;
+            return;
+        }
+        if (_titleScreen.Visible)
+        {
+            e.Handled = true;
+            return;
+        }
+        if (_pauseMenu.Visible)
+        {
+            if (e.KeyCode == Keys.Escape)
+                ClosePauseMenu();
             e.Handled = true;
             return;
         }
@@ -765,10 +859,11 @@ public class MainForm : Form
 
         // Escape = universal cancel (same as right-click): aborts the in-progress tool
         // operation (road chain, lane-restrict mode, selection) one step per press;
-        // with nothing left to cancel it switches back to the Select tool.
+        // with nothing left to cancel it opens the pause menu (the game convention).
         if (e.KeyCode == Keys.Escape)
         {
-            CancelActiveTool();
+            if (!CancelActiveTool())
+                OpenPauseMenu();
             e.Handled = true;
         }
 
@@ -906,15 +1001,113 @@ public class MainForm : Form
         }
     }
 
-    /// <summary>
-    /// Clears all map data and resets the editor to a blank state, as if the app just opened.
-    /// </summary>
-    private void NewMap()
+    /// <summary>Composes "only while in-game" into the panel's <see cref="Ui.Panel.VisibleWhen"/>,
+    /// preserving any gate the panel already owns (e.g. a submenu's active-tool check), so
+    /// every in-game panel vanishes while the title screen is up. Ctor-only.</summary>
+    private void GateToInGame(Ui.Panel panel)
     {
-        var result = MessageBox.Show("Create a new map? All unsaved changes will be lost.",
-            "New Map", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
-        if (result != DialogResult.OK) return;
+        var own = panel.VisibleWhen;
+        panel.VisibleWhen = own == null
+            ? () => _mode == AppMode.InGame
+            : () => _mode == AppMode.InGame && own();
+    }
 
+    /// <summary>Enters (or returns to) the title screen: loads the embedded menu
+    /// backdrop map and runs it unpaused at 1x behind the <see cref="Ui.TitleScreen"/>
+    /// scrim. Corrupt backdrop data silently falls back to an empty world — the title
+    /// must never be blocked by a bad backdrop. Clears the quiet-save target so a session
+    /// started from here begins file-less; deliberately does NOT restore the pause-menu
+    /// capture (leaving the game discards it).</summary>
+    private void EnterTitleMode()
+    {
+        _mode = AppMode.Title;
+        _pauseMenu.Close();
+        _isPanning = false;
+        _currentMapPath = null;
+        _currentMapIncludeVehicles = false;
+        try
+        {
+            LoadMapFromResource(MenuMapResource);
+        }
+        catch
+        {
+            ResetWorldToEmpty();
+        }
+        _simLoop.TimeScaleExponent = 0;
+        _simLoop.Paused = false; // the loader/reset left it paused
+        _titleScreen.Open();
+    }
+
+    /// <summary>Leaves the title screen for the editor. The caller has already staged the
+    /// world (paused, Select tool) via the New/Load paths.</summary>
+    private void EnterGame()
+    {
+        _mode = AppMode.InGame;
+        _titleScreen.Close();
+    }
+
+    /// <summary>Title-screen New: loads the embedded default-map template (vehicles
+    /// included when it has them, no prompt). The quiet-save target stays null so the
+    /// first Ctrl+S prompts — the template is baked into the assembly and is never a
+    /// silent overwrite target.</summary>
+    private void TitleNew()
+    {
+        LoadDefaultMap();
+        _currentMapPath = null;
+        _currentMapIncludeVehicles = false;
+        EnterGame();
+    }
+
+    /// <summary>Title-screen Load: the in-game Load flow; entering the game only on a
+    /// completed load (cancel or failure stays on the running title).</summary>
+    private void TitleLoad()
+    {
+        if (LoadMap()) EnterGame();
+    }
+
+    /// <summary>Opens the pause menu (Menu button, or Escape with nothing to cancel):
+    /// captures the pause state for <see cref="ClosePauseMenu"/> and pauses.</summary>
+    private void OpenPauseMenu()
+    {
+        _menuWasPaused = _simLoop.Paused;
+        _simLoop.Paused = true;
+        _isPanning = false;
+        _pauseMenu.Open();
+    }
+
+    /// <summary>Return to Game / Escape: closes the pause menu and restores the pause
+    /// state captured by <see cref="OpenPauseMenu"/>.</summary>
+    private void ClosePauseMenu()
+    {
+        _pauseMenu.Close();
+        _simLoop.Paused = _menuWasPaused;
+    }
+
+    /// <summary>Pause-menu Return to Title, after an unsaved-changes confirmation.</summary>
+    private void ReturnToTitle()
+    {
+        if (MessageBox.Show("Return to title? Unsaved changes will be lost.",
+            "Return to Title", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK)
+            return;
+        EnterTitleMode();
+    }
+
+    /// <summary>Pause-menu Exit to Desktop, after an unsaved-changes confirmation.</summary>
+    private void ExitToDesktop()
+    {
+        if (MessageBox.Show("Exit to desktop? Unsaved changes will be lost.",
+            "Exit", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK)
+            return;
+        Close();
+    }
+
+    /// <summary>
+    /// Clears all map data and resets the editor to a blank state: empty world, camera
+    /// home, 08:00, paused, Select tool. The corrupt-data fallback of the embedded-map
+    /// loaders (title backdrop, New template). Does not touch the quiet-save target.
+    /// </summary>
+    private void ResetWorldToEmpty()
+    {
         _vehicles.ClearAll();
         _roadGraph.LoadFromData(new List<World.RoadNode>(), new List<World.RoadEdge>());
         _waterLayer.Clear();
@@ -941,12 +1134,58 @@ public class MainForm : Form
         _editorState.ActiveTool = Editor.EditorTool.Select;
     }
 
+    /// <summary>Serializer dispatch shared by quiet Save and Save As: a <c>.json</c> path
+    /// writes a human-readable snapshot via <see cref="Persistence.MapJsonSerializer"/>;
+    /// any other extension uses the binary <see cref="Persistence.MapSerializer"/> format.</summary>
+    private void WriteMap(string path, bool includeVehicles)
+    {
+        bool asJson = System.IO.Path.GetExtension(path)
+            .Equals(".json", StringComparison.OrdinalIgnoreCase);
+        if (asJson)
+        {
+            Persistence.MapJsonSerializer.Save(path, _roadGraph, _vehicles,
+                _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
+                _populationManager, _waterLayer, includeVehicles);
+        }
+        else
+        {
+            Persistence.MapSerializer.Save(path, _roadGraph, _vehicles,
+                _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
+                _populationManager, _waterLayer, includeVehicles);
+        }
+    }
+
     /// <summary>
-    /// Prompts for a file path and saves the current map. Asks whether to include vehicles.
-    /// A <c>.json</c> file name writes a human-readable snapshot via <see cref="Persistence.MapJsonSerializer"/>;
-    /// any other extension uses the binary <see cref="Persistence.MapSerializer"/> format.
+    /// Quiet save (Ctrl+S, pause-menu Save): writes the current map file with the
+    /// remembered include-vehicles choice, no dialogs. A session with no file yet (fresh
+    /// New) falls back to <see cref="SaveMapAs"/>. No pause juggling: the write is
+    /// synchronous on the UI thread with no dialogs, so the sim cannot tick mid-write.
     /// </summary>
     private void SaveMap()
+    {
+        if (_currentMapPath == null)
+        {
+            SaveMapAs();
+            return;
+        }
+        try
+        {
+            WriteMap(_currentMapPath, _currentMapIncludeVehicles);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Save failed: {ex.Message}", "Error",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    /// <summary>
+    /// Prompts for a file path and saves the current map, asking whether to include
+    /// vehicles; on success the chosen path and answer become the quiet-save target
+    /// (untouched on cancel or failure). Pauses for the dialogs' lifetime, restoring the
+    /// prior state after.
+    /// </summary>
+    private void SaveMapAs()
     {
         bool wasPaused = _simLoop.Paused;
         _simLoop.Paused = true;
@@ -969,20 +1208,9 @@ public class MainForm : Form
 
         try
         {
-            bool asJson = System.IO.Path.GetExtension(dlg.FileName)
-                .Equals(".json", StringComparison.OrdinalIgnoreCase);
-            if (asJson)
-            {
-                Persistence.MapJsonSerializer.Save(dlg.FileName, _roadGraph, _vehicles,
-                    _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
-                    _populationManager, _waterLayer, includeVehicles);
-            }
-            else
-            {
-                Persistence.MapSerializer.Save(dlg.FileName, _roadGraph, _vehicles,
-                    _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
-                    _populationManager, _waterLayer, includeVehicles);
-            }
+            WriteMap(dlg.FileName, includeVehicles);
+            _currentMapPath = dlg.FileName;
+            _currentMapIncludeVehicles = includeVehicles;
         }
         catch (Exception ex)
         {
@@ -994,10 +1222,11 @@ public class MainForm : Form
     }
 
     /// <summary>
-    /// Prompts for a file path and loads a map. If the file contains vehicles,
-    /// asks whether to load them.
+    /// Prompts for a file path and loads a map (asking whether to load vehicles when the
+    /// file has them); on success the file becomes the quiet-save target. Returns whether
+    /// a map was actually loaded — the title-screen Load enters the game only on true.
     /// </summary>
-    private void LoadMap()
+    private bool LoadMap()
     {
         using var dlg = new OpenFileDialog
         {
@@ -1005,7 +1234,7 @@ public class MainForm : Form
             Filter = "ROADS Map (*.roads)|*.roads",
             DefaultExt = "roads"
         };
-        if (dlg.ShowDialog() != DialogResult.OK) return;
+        if (dlg.ShowDialog() != DialogResult.OK) return false;
 
         try
         {
@@ -1013,32 +1242,42 @@ public class MainForm : Form
                 && MessageBox.Show("This map contains vehicles. Load them?",
                     "Load Options", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
             LoadMapFromFile(dlg.FileName, loadVehicles);
+            _currentMapPath = dlg.FileName;
+            _currentMapIncludeVehicles = loadVehicles;
+            return true;
         }
         catch (Exception ex)
         {
             MessageBox.Show($"Load failed: {ex.Message}", "Error",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return false;
         }
     }
 
-    /// <summary>Name of the map auto-loaded at startup when present in the working
-    /// directory (beside settings.json and backups/).</summary>
-    private const string DefaultMapFile = "default.roads";
+    /// <summary>Manifest name of the embedded New-game template map (see the csproj
+    /// EmbeddedResource items — the repo-root <c>default.roads</c> baked into the
+    /// assembly at build time, so it always exists and is never a user-editable file).</summary>
+    private const string DefaultMapResource = "Roads.App.default.roads";
+    /// <summary>Manifest name of the embedded map run unpaused as the title screen's
+    /// live backdrop (the repo-root <c>menu.roads</c> baked into the assembly). Never
+    /// becomes the quiet-save target.</summary>
+    private const string MenuMapResource = "Roads.App.menu.roads";
 
-    /// <summary>Startup auto-load of <see cref="DefaultMapFile"/>: silent when the file
-    /// is absent, vehicles restored without prompting when present (the file is the
-    /// user's "resume my world" save). A corrupt file warns and falls back to the
-    /// empty map — startup must never be blocked by a bad default.</summary>
-    private void TryLoadDefaultMap()
+    /// <summary>Loads the embedded default-map template (title-screen New, and the
+    /// autobench bypass at startup): vehicles restored when the template has them, no
+    /// prompt. Corrupt data warns and falls back to an EMPTY map — entering the game
+    /// must never be blocked, and the previous world (e.g. the title backdrop) must not
+    /// bleed through. Never touches the quiet-save target.</summary>
+    private void LoadDefaultMap()
     {
-        if (!File.Exists(DefaultMapFile)) return;
         try
         {
-            LoadMapFromFile(DefaultMapFile, MapHasVehicles(DefaultMapFile));
+            LoadMapFromResource(DefaultMapResource);
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Could not load {DefaultMapFile}: {ex.Message}\n\nStarting with an empty map.",
+            ResetWorldToEmpty();
+            MessageBox.Show($"Could not load the default map: {ex.Message}\n\nStarting with an empty map.",
                 "Default Map", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
@@ -1054,13 +1293,36 @@ public class MainForm : Form
     }
 
     /// <summary>Loads a map file into the live world and resets sim/editor state —
-    /// the shared core of the Load dialog and the default.roads startup path. The app
-    /// is left paused with the Select tool active (the New/Load convention).</summary>
+    /// the core of the Load dialog path. The app is left paused with the Select tool
+    /// active (the New/Load convention).</summary>
     private void LoadMapFromFile(string path, bool loadVehicles)
     {
         Persistence.MapSerializer.Load(path, _roadGraph, _vehicles,
             _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
             _populationManager, _waterLayer, loadVehicles);
+        FinishMapLoad();
+    }
+
+    /// <summary>Loads one of the maps embedded in the assembly (the title backdrop and
+    /// the New template) into the live world — the resource-stream twin of
+    /// <see cref="LoadMapFromFile"/>, always restoring vehicles when the data has them.
+    /// The build guarantees the resource exists; corrupt data throws to the caller's
+    /// empty-world fallback.</summary>
+    private void LoadMapFromResource(string resourceName)
+    {
+        using var stream = typeof(MainForm).Assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException($"Missing embedded map resource '{resourceName}'.");
+        Persistence.MapSerializer.Load(stream, _roadGraph, _vehicles,
+            _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
+            _populationManager, _waterLayer, loadVehicles: true);
+        FinishMapLoad();
+    }
+
+    /// <summary>Post-load staging shared by the file and embedded-resource loaders:
+    /// rebuild the world caches and renderer scenery, pause, Select tool (the New/Load
+    /// convention — title entry unpauses afterwards itself).</summary>
+    private void FinishMapLoad()
+    {
         _simLoop.RebuildWorldCaches();
         _sceneRenderer.OnMapReplaced();
         _simLoop.Paused = true;
@@ -1086,25 +1348,26 @@ public class MainForm : Form
         // other overlay — and skips itself when hidden.
         _perfTelemetry.Sample();
         _hudPanel.Draw(canvas);
-        // The modal Settings dialog is ExternallyDrawn and painted after the HUD so it
-        // sits above every overlay (no-op while hidden).
+        // The ExternallyDrawn modal stack paints after the HUD, bottom→top matching the
+        // UiRoot hit-test order: pause menu, title screen, then the Settings dialog above
+        // everything (each is a no-op while hidden; the title and pause menus are never
+        // visible together).
+        _pauseMenu.Draw(canvas);
+        _titleScreen.Draw(canvas);
         _settingsDialog.Draw(canvas);
     }
 
     /// <summary>
-    /// Handles UI action buttons: New/Save/Load from the menu bar, Pause/speed from the
-    /// clock panel's transport row. Tool buttons set EditorState directly inside
-    /// <see cref="Ui.MenuBar"/>; only actions that need MainForm's dialogs and sim-loop
-    /// access route through here.
+    /// Handles UI action buttons: Menu from the menu bar (opens the pause menu, whose
+    /// buttons then call MainForm directly), Pause/speed from the clock panel's transport
+    /// row. Tool buttons set EditorState directly inside <see cref="Ui.MenuBar"/>; only
+    /// actions that need MainForm's menus and sim-loop access route through here.
     /// </summary>
     private void OnUiAction(Ui.UIAction action)
     {
         switch (action)
         {
-            case Ui.UIAction.New: NewMap(); break;
-            case Ui.UIAction.Save: SaveMap(); break;
-            case Ui.UIAction.Load: LoadMap(); break;
-            case Ui.UIAction.Settings: OpenSettings(); break;
+            case Ui.UIAction.Menu: OpenPauseMenu(); break;
             case Ui.UIAction.Pause:
                 _simLoop.Paused = !_simLoop.Paused;
                 break;
@@ -1125,6 +1388,7 @@ public class MainForm : Form
     /// </summary>
     private void ApplySettings()
     {
+        ApplyDisplayMode(_settings.Fullscreen);
         _sceneRenderer.GridEnabled = _settings.ShowGrid;
         _sceneRenderer.HeatMapEnabled = _settings.HeatMapEnabled;
         _hudPanel.Visible = _settings.ShowPerformanceHud;
@@ -1151,6 +1415,32 @@ public class MainForm : Form
         _audioEngine.ApplySettings(_settings);
     }
 
+    /// <summary>
+    /// Switches the top-level window between borderless fullscreen and a normal sizable
+    /// window. No-ops when already in the requested mode — <see cref="ApplySettings"/>
+    /// runs on every settings mutation, and re-assigning WindowState/FormBorderStyle
+    /// would flicker. Entering fullscreen drops a maximized window to Normal first: a
+    /// window that loses its border while maximized keeps its stale working-area size
+    /// and would leave the taskbar visible. Leaving fullscreen restores the previous
+    /// windowed bounds via the form's own RestoreBounds.
+    /// </summary>
+    private void ApplyDisplayMode(bool fullscreen)
+    {
+        bool isFullscreen = FormBorderStyle == FormBorderStyle.None;
+        if (fullscreen == isFullscreen) return;
+        if (fullscreen)
+        {
+            if (WindowState == FormWindowState.Maximized) WindowState = FormWindowState.Normal;
+            FormBorderStyle = FormBorderStyle.None;
+            WindowState = FormWindowState.Maximized;
+        }
+        else
+        {
+            FormBorderStyle = FormBorderStyle.Sizable;
+            WindowState = FormWindowState.Normal;
+        }
+    }
+
     /// <summary>Settings-dialog Apply/OK path: adopts the staged record as applied,
     /// pushes it live, and persists it.</summary>
     private void ApplyStagedSettings(Core.AppSettings staged)
@@ -1169,21 +1459,27 @@ public class MainForm : Form
         Persistence.SettingsStore.Save(_settings);
     }
 
-    /// <summary>Opens the Settings dialog: pauses the simulation for the dialog's
-    /// lifetime, remembering the prior state (the SaveMap idiom) so closing restores
-    /// a user-chosen pause rather than force-resuming.</summary>
+    /// <summary>Opens the Settings dialog. In-game it pauses the simulation for the
+    /// dialog's lifetime, remembering the prior state (the SaveMapAs idiom) so closing
+    /// restores a user-chosen pause rather than force-resuming; from the title screen it
+    /// neither pauses nor captures — the backdrop sim keeps running behind the dialog's
+    /// scrim (see <see cref="_settingsWasPaused"/> for why the branch is safe).</summary>
     private void OpenSettings()
     {
-        _settingsWasPaused = _simLoop.Paused;
-        _simLoop.Paused = true;
+        if (_mode == AppMode.InGame)
+        {
+            _settingsWasPaused = _simLoop.Paused;
+            _simLoop.Paused = true;
+        }
         _settingsDialog.Open();
     }
 
     /// <summary>Dialog-closed callback (OK, Cancel, or Escape): restores the pause state
-    /// captured by <see cref="OpenSettings"/>.</summary>
+    /// captured by <see cref="OpenSettings"/> — in-game only, mirroring the open path.</summary>
     private void OnSettingsClosed()
     {
-        _simLoop.Paused = _settingsWasPaused;
+        if (_mode == AppMode.InGame)
+            _simLoop.Paused = _settingsWasPaused;
     }
 
     /// <summary>
@@ -1196,10 +1492,10 @@ public class MainForm : Form
     {
         _canvas.Focus();
 
-        // While the Settings dialog is open only LEFT clicks proceed (the dialog's scrim
-        // consumes them via UiRoot) — middle-pan and right-click cancel bypass UiRoot
-        // entirely and must be gated here.
-        if (_settingsDialog.Visible && e.Button != MouseButtons.Left)
+        // While any modal overlay (settings / title / pause menu) is open only LEFT
+        // clicks proceed (the topmost scrim consumes them via UiRoot) — middle-pan and
+        // right-click cancel bypass UiRoot entirely and must be gated here.
+        if (AnyModalVisible && e.Button != MouseButtons.Left)
             return;
 
         if (e.Button == MouseButtons.Middle)
@@ -1353,35 +1649,37 @@ public class MainForm : Form
     /// <summary>
     /// Shared right-click / ESC "cancel" semantics, one step per invocation: aborts the
     /// in-progress road chain, then an in-progress water stroke or pending stream chain,
-    /// then exits lane-restrict mode, then clears any selection; with nothing left to
-    /// cancel, switches the active tool back to Select.
+    /// then exits lane-restrict mode, then clears any selection, then switches a
+    /// non-Select tool back to Select. Returns whether anything was cancelled — false
+    /// means the editor was already idle on Select, which is Escape's cue to open the
+    /// pause menu (right-click discards the result).
     /// </summary>
-    private void CancelActiveTool()
+    private bool CancelActiveTool()
     {
         if (_editorState.IsDrawingRoad)
         {
             _roadTool.OnCancel(_editorState);
-            return;
+            return true;
         }
         if (_editorState.IsPaintingWater)
         {
             // Abort an in-progress brush/erase stroke (Esc mid-drag).
             _editorState.IsPaintingWater = false;
             _editorState.WaterLastDabPos = null;
-            return;
+            return true;
         }
         if (_editorState.WaterStreamAnchor is not null)
         {
             // Drop the pending stream chain; a second cancel then falls through to Select.
             _editorState.WaterStreamAnchor = null;
             _editorState.WaterStreamPrevDir = null;
-            return;
+            return true;
         }
         if (_editorState.LaneRestrictionMode)
         {
             _editorState.LaneRestrictionMode = false;
             _editorState.LaneRestrictionEdge = -1;
-            return;
+            return true;
         }
         if (_editorState.SelectedNode >= 0 || _editorState.SelectedEdge >= 0
             || _editorState.SelectedVehicle >= 0)
@@ -1389,10 +1687,15 @@ public class MainForm : Form
             _editorState.SelectedNode = -1;
             _editorState.SelectedEdge = -1;
             _editorState.SelectedVehicle = -1;
-            return;
+            return true;
         }
-        _editorState.ResetToolState();
-        _editorState.ActiveTool = EditorTool.Select;
+        if (_editorState.ActiveTool != EditorTool.Select)
+        {
+            _editorState.ResetToolState();
+            _editorState.ActiveTool = EditorTool.Select;
+            return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -1845,8 +2148,8 @@ public class MainForm : Form
     /// </summary>
     private void OnCanvasMouseWheel(object? sender, MouseEventArgs e)
     {
-        // Wheel zoom bypasses UiRoot, so the modal Settings dialog gates it here.
-        if (_settingsDialog.Visible) return;
+        // Wheel zoom bypasses UiRoot, so every modal overlay gates it here.
+        if (AnyModalVisible) return;
 
         float zoomFactor = e.Delta > 0 ? 1.15f : 1f / 1.15f;
         _camera.ZoomAt(zoomFactor, e.X, e.Y, _canvas.Width, _canvas.Height);

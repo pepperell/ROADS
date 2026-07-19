@@ -25,4 +25,14 @@
     <None Update="Assets\GeneralUser-GS.LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Title-screen backdrop map and the New-game template, baked into the assembly
+         (loaded via MainForm.LoadMapFromResource) so the shipped app carries canonical,
+         uneditable copies — and a missing source file fails the build. The repo-root
+         files stay the editable dev source: update one by saving it from the app, then
+         rebuild to re-embed. -->
+    <EmbeddedResource Include="..\menu.roads" Link="Assets\menu.roads" LogicalName="Roads.App.menu.roads" />
+    <EmbeddedResource Include="..\default.roads" Link="Assets\default.roads" LogicalName="Roads.App.default.roads" />
+  </ItemGroup>
+
 </Project>

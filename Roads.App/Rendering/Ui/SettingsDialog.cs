@@ -6,9 +6,10 @@ namespace Roads.App.Rendering.Ui;
 /// <summary>
 /// The modal Settings dialog: a full-canvas translucent scrim (this panel itself — it
 /// consumes every left click so nothing behind it receives input; middle/right/wheel are
-/// gated in MainForm, which also pauses the simulation while the dialog is open) with a
-/// centered window of tabbed pages (Graphics / Simulation / Driving / Audio / Music /
-/// Debug) built from the standard retained-mode controls.
+/// gated in MainForm, which also pauses the simulation while the dialog is open in-game —
+/// opened from the title screen the backdrop sim keeps running) with a centered window of
+/// tabbed pages (Graphics / Simulation / Driving / Audio / Music / Debug) built from the
+/// standard retained-mode controls.
 ///
 /// Edits go to a STAGED copy of <see cref="AppSettings"/> taken on <see cref="Open"/>;
 /// nothing touches the live systems until Apply/OK. The Apply button's IsEnabled closure
@@ -17,9 +18,11 @@ namespace Roads.App.Rendering.Ui;
 /// everything matches — no change events needed. OK applies (if dirty) and closes;
 /// Cancel (button or Escape, routed by MainForm) discards the staged copy and closes.
 ///
-/// Must be added to the <see cref="UiRoot"/> LAST (topmost hit-testing) and, because it
-/// is <see cref="Panel.ExternallyDrawn"/>, painted by MainForm.OnPaintSurface AFTER the
-/// performance HUD so it draws above every other overlay.
+/// Must be added to the <see cref="UiRoot"/> LAST (topmost hit-testing — above the title
+/// screen and pause menu, so Settings opens in front of either with its scrim dimming
+/// them) and, because it is <see cref="Panel.ExternallyDrawn"/>, painted by
+/// MainForm.OnPaintSurface AFTER the performance HUD and both menus so it draws above
+/// every other overlay.
 /// </summary>
 public class SettingsDialog : Panel
 {
@@ -93,17 +96,19 @@ public class SettingsDialog : Panel
         BuildTabRow();
 
         var graphics = AddPage(Tab.Graphics);
-        AddCheckRow(graphics, 0, "Show alignment grid",
+        AddCheckRow(graphics, 0, "Fullscreen (borderless)",
+            () => _staged.Fullscreen, v => _staged.Fullscreen = v);
+        AddCheckRow(graphics, 1, "Show alignment grid",
             () => _staged.ShowGrid, v => _staged.ShowGrid = v);
-        AddCheckRow(graphics, 1, "Congestion heat-map",
+        AddCheckRow(graphics, 2, "Congestion heat-map",
             () => _staged.HeatMapEnabled, v => _staged.HeatMapEnabled = v);
-        AddCheckRow(graphics, 2, "Performance HUD",
+        AddCheckRow(graphics, 3, "Performance HUD",
             () => _staged.ShowPerformanceHud, v => _staged.ShowPerformanceHud = v);
-        AddCheckRow(graphics, 3, "Minimap",
+        AddCheckRow(graphics, 4, "Minimap",
             () => _staged.ShowMinimap, v => _staged.ShowMinimap = v);
-        AddCheckRow(graphics, 4, "Statistics panel",
+        AddCheckRow(graphics, 5, "Statistics panel",
             () => _staged.ShowStatistics, v => _staged.ShowStatistics = v);
-        AddCheckRow(graphics, 5, "Shortcut legend",
+        AddCheckRow(graphics, 6, "Shortcut legend",
             () => _staged.ShowLegend, v => _staged.ShowLegend = v);
 
         var simulation = AddPage(Tab.Simulation);
@@ -177,7 +182,8 @@ public class SettingsDialog : Panel
     }
 
     /// <summary>Stages a fresh copy of the applied settings and shows the dialog.
-    /// The owner pauses the simulation BEFORE calling this.</summary>
+    /// When opened in-game the owner pauses the simulation BEFORE calling this; from the
+    /// title screen it deliberately does not (the backdrop keeps running).</summary>
     public void Open()
     {
         _staged = _getApplied() with { };
