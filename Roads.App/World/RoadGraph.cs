@@ -850,8 +850,15 @@ public class RoadGraph
         return _reverseEdgeCache[edgeIndex];
     }
 
+    /// <summary>Upper clamp for per-edge lane counts. Also bounds the orphan sweep in
+    /// <see cref="PruneLaneRestrictionsForLaneCount"/> — keep the two in sync by using
+    /// this constant for both.</summary>
+    private const byte MaxLaneCount = 4;
+
     /// <summary>
-    /// Sets the lane count for an edge, clamped to [1, 4].
+    /// Sets the lane count for an edge and its reverse, clamped to [1, 4], and prunes
+    /// lane restrictions that the new count invalidates (see
+    /// <see cref="PruneLaneRestrictionsForLaneCount"/>).
     /// </summary>
     /// <param name="edgeIndex">Index of the edge to modify.</param>
     /// <param name="laneCount">Desired lane count (clamped to 1–4).</param>
@@ -860,9 +867,10 @@ public class RoadGraph
         if (edgeIndex < 0 || edgeIndex >= _edges.Count) return;
         var edge = _edges[edgeIndex];
         if (edge.FromNode < 0) return;
-        byte clamped = Math.Clamp(laneCount, (byte)1, (byte)4);
+        byte clamped = Math.Clamp(laneCount, (byte)1, MaxLaneCount);
         edge.LaneCount = clamped;
         _edges[edgeIndex] = edge;
+        PruneLaneRestrictionsForLaneCount(edgeIndex, clamped);
         // Also update the reverse (opposite direction) edge
         int reverse = FindReverseEdge(edgeIndex);
         if (reverse >= 0)
@@ -870,8 +878,45 @@ public class RoadGraph
             var rev = _edges[reverse];
             rev.LaneCount = clamped;
             _edges[reverse] = rev;
+            PruneLaneRestrictionsForLaneCount(reverse, clamped);
         }
         Version++;
+    }
+
+    /// <summary>
+    /// Reconciles <see cref="_laneRestrictions"/> with a lane count that was just set on
+    /// <paramref name="edgeIndex"/>. Two inconsistencies are possible after a shrink, and
+    /// both are removed here (the sweep runs to <see cref="MaxLaneCount"/> rather than the
+    /// old count, so orphans carried in by pre-fix save files are cleaned up too):
+    /// keys for removed in-lanes — unreachable by every other cleanup path (they all
+    /// iterate lanes below the CURRENT count) and resurrecting if lanes are later
+    /// re-added — and (thisEdge, outLane) pairs in ANY set that target a removed lane,
+    /// which the arc cache silently filters. A set left EMPTY by that pair-pruning
+    /// reverts to auto (key removed): an empty set generates ZERO arcs for its in-lane,
+    /// and on a user-customized node auto-defaults never heal it, so the vehicle would
+    /// hold at the stop line forever. Sets the user emptied deliberately (no pair removed
+    /// here) are left alone. <see cref="_userLaneRestrictionNodes"/> is intentionally
+    /// untouched, matching <see cref="ClearLaneRestrictions"/>: a keyless lane already
+    /// behaves as geometry-default at arc generation regardless of the node marker.
+    /// Callers bump <see cref="Version"/>.
+    /// </summary>
+    private void PruneLaneRestrictionsForLaneCount(int edgeIndex, byte newCount)
+    {
+        // Keys for in-lanes at/above the new count.
+        for (byte lane = newCount; lane < MaxLaneCount; lane++)
+            _laneRestrictions.Remove((edgeIndex, lane));
+
+        // Pairs targeting out-lanes of this edge at/above the new count, in every set.
+        List<(int, byte)>? emptied = null;
+        foreach (var kvp in _laneRestrictions)
+        {
+            int removed = kvp.Value.RemoveWhere(p => p.outEdge == edgeIndex && p.outLane >= newCount);
+            if (removed > 0 && kvp.Value.Count == 0)
+                (emptied ??= new List<(int, byte)>()).Add(kvp.Key);
+        }
+        if (emptied != null)
+            foreach (var key in emptied)
+                _laneRestrictions.Remove(key);
     }
 
     /// <summary>
@@ -893,7 +938,9 @@ public class RoadGraph
         Version++;
     }
 
-    /// <summary>Sets or clears <see cref="EdgeFlags.SharedLane"/> on one edge, forcing 1 lane when set.</summary>
+    /// <summary>Sets or clears <see cref="EdgeFlags.SharedLane"/> on one edge, forcing 1 lane
+    /// when set — a lane-count shrink, so the same restriction pruning as
+    /// <see cref="SetLaneCount"/> applies.</summary>
     private void ApplySharedLaneFlag(int edgeIndex, bool shared)
     {
         var e = _edges[edgeIndex];
@@ -907,6 +954,38 @@ public class RoadGraph
             e.Flags &= ~EdgeFlags.SharedLane;
         }
         _edges[edgeIndex] = e;
+        if (shared)
+            PruneLaneRestrictionsForLaneCount(edgeIndex, 1);
+    }
+
+    /// <summary>Version at which <see cref="MaxSpeedLimit"/> was last computed.</summary>
+    private int _maxSpeedLimitVersion = -1;
+    private float _maxSpeedLimit = 13.4f;
+
+    /// <summary>
+    /// Highest speed limit (m/s) among active edges, lazily recomputed when the graph
+    /// version changes; 13.4 (the residential default) on an empty graph. Pure derived
+    /// state — never bumps the version, so it is safe to read from cache-rebuild phases.
+    /// Used by the Pathfinder's A* heuristic, which must divide straight-line distance
+    /// by the TRUE maximum speed to stay admissible: dividing by anything smaller
+    /// overestimates remaining travel time and yields suboptimal routes (fast bypasses
+    /// losing to shorter slow streets).
+    /// </summary>
+    public float MaxSpeedLimit
+    {
+        get
+        {
+            if (_maxSpeedLimitVersion != Version)
+            {
+                float max = 0f;
+                for (int i = 0; i < _edges.Count; i++)
+                    if (_edges[i].FromNode >= 0 && _edges[i].SpeedLimit > max)
+                        max = _edges[i].SpeedLimit;
+                _maxSpeedLimit = max > 0.1f ? max : 13.4f;
+                _maxSpeedLimitVersion = Version;
+            }
+            return _maxSpeedLimit;
+        }
     }
 
     /// <summary>

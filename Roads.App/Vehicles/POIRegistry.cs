@@ -1,4 +1,5 @@
 using System.Numerics;
+using Roads.App.Core;
 using Roads.App.World;
 
 namespace Roads.App.Vehicles;
@@ -151,7 +152,7 @@ public class POIRegistry
             int nodeIdx = nodes[i];
             if (GetOccupancy(nodeIdx) >= GetCapacity(nodeIdx, type)) continue;
             seen++;
-            if (Random.Shared.Next(seen) == 0) chosen = nodeIdx; // 1/seen chance to replace
+            if (SimRandom.Next(seen) == 0) chosen = nodeIdx; // 1/seen chance to replace
         }
         return chosen;
     }

@@ -1,4 +1,5 @@
 using System.Numerics;
+using Roads.App.Core;
 using Roads.App.World;
 
 namespace Roads.App.Vehicles;
@@ -66,7 +67,7 @@ public class VehicleSpawner
         int startEdge = -1;
         for (int a = 0; a < 100; a++)
         {
-            int idx = Random.Shared.Next(_graph.Edges.Count);
+            int idx = SimRandom.Next(_graph.Edges.Count);
             if (_graph.Edges[idx].FromNode >= 0) { startEdge = idx; break; }
         }
         if (startEdge < 0) return;
@@ -180,7 +181,7 @@ public class VehicleSpawner
         for (int attempt = 0; attempt < 50; attempt++)
         {
             if (_destNodeCache.Count == 0) break;
-            int candidate = _destNodeCache[Random.Shared.Next(_destNodeCache.Count)];
+            int candidate = _destNodeCache[SimRandom.Next(_destNodeCache.Count)];
             if (candidate == startNode) continue;
             var p = Pathfinder.FindPath(_graph, startNode, candidate, currentEdge);
             if (p != null && p.Count > 0) { destNode = candidate; return p; }
@@ -213,7 +214,7 @@ public class VehicleSpawner
         for (int attempt = 0; attempt < 50; attempt++)
         {
             if (_destNodeCache.Count == 0) break;
-            int dn = _destNodeCache[Random.Shared.Next(_destNodeCache.Count)];
+            int dn = _destNodeCache[SimRandom.Next(_destNodeCache.Count)];
 
             // Try forward direction
             List<int>? fwdFull = null;
@@ -344,8 +345,8 @@ public class VehicleSpawner
         while (spawned < count && totalAttempts < totalAttemptBudget)
         {
             // Pick a random active edge and start param.
-            int startEdge = activeEdges[Random.Shared.Next(activeEdges.Count)];
-            float t = 0.1f + Random.Shared.NextSingle() * 0.8f; // [0.1, 0.9]
+            int startEdge = activeEdges[SimRandom.Next(activeEdges.Count)];
+            float t = 0.1f + SimRandom.NextSingle() * 0.8f; // [0.1, 0.9]
 
             // Try up to maxAttemptsPerSlot different destination nodes for this slot.
             List<int>? full = null;
@@ -355,7 +356,7 @@ public class VehicleSpawner
             for (int attempt = 0; attempt < maxAttemptsPerSlot; attempt++)
             {
                 totalAttempts++;
-                int candidateDest = activeNodes[Random.Shared.Next(activeNodes.Count)];
+                int candidateDest = activeNodes[SimRandom.Next(activeNodes.Count)];
 
                 if (candidateDest == edgeToNode)
                 {

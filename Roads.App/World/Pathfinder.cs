@@ -85,6 +85,10 @@ public static class Pathfinder
         }
 
         var endPos = graph.Nodes[endNode].Position;
+        // Admissibility: the heuristic divides straight-line distance by the graph's
+        // actual maximum speed limit (version-cached), so it never overestimates the
+        // remaining travel time regardless of how fast the fastest road is.
+        float invMaxSpeed = 1f / graph.MaxSpeedLimit;
 
         // Reuse scratch buffers
         var gScore = _gScore ??= new Dictionary<int, float>();
@@ -117,7 +121,7 @@ public static class Pathfinder
             float cost = edge.Length / speed;
 
             gScore[edgeIdx] = cost;
-            open.Enqueue(edgeIdx, cost + Heuristic(graph.Nodes[toNode].Position, endPos));
+            open.Enqueue(edgeIdx, cost + Heuristic(graph.Nodes[toNode].Position, endPos, invMaxSpeed));
         }
 
         while (open.Count > 0)
@@ -163,7 +167,7 @@ public static class Pathfinder
                 {
                     gScore[neighborEdge] = tentativeG;
                     cameFrom[neighborEdge] = currentEdge;
-                    float fScore = tentativeG + Heuristic(graph.Nodes[neighborToNode].Position, endPos);
+                    float fScore = tentativeG + Heuristic(graph.Nodes[neighborToNode].Position, endPos, invMaxSpeed);
                     open.Enqueue(neighborEdge, fScore);
                 }
             }
@@ -244,10 +248,12 @@ public static class Pathfinder
         return (bestArc, bestOutEdge, bestPath);
     }
 
-    /// <summary>Admissible A* heuristic: Euclidean distance / max plausible speed (30 m/s).</summary>
-    private static float Heuristic(Vector2 from, Vector2 to)
+    /// <summary>Admissible A* heuristic: Euclidean distance at the graph's current maximum
+    /// speed limit (passed as its reciprocal, computed once per search from
+    /// <see cref="RoadGraph.MaxSpeedLimit"/>) — never overestimates remaining travel time.</summary>
+    private static float Heuristic(Vector2 from, Vector2 to, float invMaxSpeed)
     {
-        return Vector2.Distance(from, to) / 30f;
+        return Vector2.Distance(from, to) * invMaxSpeed;
     }
 
     /// <summary>Traces back through the cameFrom map to build the edge-index path.</summary>

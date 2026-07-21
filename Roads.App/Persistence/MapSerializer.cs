@@ -22,16 +22,46 @@ public static class MapSerializer
     private const ushort FormatVersion = 3;
 
     /// <summary>
-    /// Saves the current map state to a binary file.
+    /// Saves the current map state to a binary file. Crash-safe: the bytes are written to
+    /// a temporary sibling file, flushed to disk, and only then moved over the target — a
+    /// disk-full error, crash, or power loss mid-write therefore never destroys the
+    /// existing save (the worst case is a leftover <c>*.tmp</c> beside it, deleted
+    /// best-effort and overwritten by the next save). No separate <c>.bak</c> is kept:
+    /// AutoSaveManager's rotating backups already cover historical copies.
     /// </summary>
     public static void Save(string path, RoadGraph graph, VehicleStore vehicles,
         Camera camera, SimulationClock clock,
         StopSignSystem stopSigns, YieldSignSystem yieldSigns, TrafficSignalSystem signals,
         PopulationManager population, WaterLayer water, bool includeVehicles)
     {
-        using var fs = File.Create(path);
-        using var w = new BinaryWriter(fs);
+        string tmpPath = path + ".tmp";
+        try
+        {
+            using (var fs = File.Create(tmpPath))
+            using (var w = new BinaryWriter(fs))
+            {
+                WriteMapData(w, graph, vehicles, camera, clock, stopSigns, yieldSigns,
+                    signals, population, water, includeVehicles);
+                w.Flush();
+                fs.Flush(flushToDisk: true); // durable before the move commits it
+            }
+            File.Move(tmpPath, path, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(tmpPath); } catch { /* best-effort cleanup */ }
+            throw;
+        }
+    }
 
+    /// <summary>Writes the complete map payload (header + sections 1–8) to
+    /// <paramref name="w"/> — the format core wrapped by <see cref="Save"/>'s
+    /// crash-safe temp-file-then-move commit.</summary>
+    private static void WriteMapData(BinaryWriter w, RoadGraph graph, VehicleStore vehicles,
+        Camera camera, SimulationClock clock,
+        StopSignSystem stopSigns, YieldSignSystem yieldSigns, TrafficSignalSystem signals,
+        PopulationManager population, WaterLayer water, bool includeVehicles)
+    {
         // Header
         w.Write(Magic);
         w.Write(FormatVersion);
@@ -112,7 +142,7 @@ public static class MapSerializer
         // Persist only DURABLE per-vehicle fields. Derived/transient fields (Throttle,
         // Brake, PrevHeadingError, DistToRoadSq, LaneChangeCooldown, DesiredLane,
         // MergeUrgency, MergeSpeedBias, SmoothedThrottle, SmoothedBrake, ResidentId,
-        // State) are deliberately NOT written — Load re-initializes them. This Save loop,
+        // State, ClearingArc) are deliberately NOT written — Load re-initializes them. This Save loop,
         // ReadVehicle + the commit copy loop in Load, and the load-skip branch must stay
         // in sync and in the same field order. See the field-sync checklist at the top
         // of VehicleStore (step 5).
@@ -332,7 +362,13 @@ public static class MapSerializer
         }
 
         // Section 3 — Lane Restrictions. Edge indices above the edge count are corrupt;
-        // negatives are tolerated (the commit-phase setter guards them).
+        // negatives are tolerated (the commit-phase setter guards them). Entries that
+        // reference lanes at/above their edge's lane count are HEALED rather than
+        // rejected: pre-fix saves could carry orphans from lane-count shrinks (see
+        // RoadGraph.PruneLaneRestrictionsForLaneCount). Dropped: keys whose in-lane no
+        // longer exists, pairs targeting a removed out-lane, and any set left empty by
+        // that pair-filtering (an empty set means zero arcs for the lane; auto/geometry
+        // defaults are the safe interpretation). Sets saved empty stay empty as saved.
         int restrictionCount = ReadCount(r, "lane restriction");
         var restrictions = new List<(int inEdge, byte inLane, HashSet<(int outEdge, byte outLane)> pairs)>(
             PreallocCapacity(restrictionCount));
@@ -342,16 +378,20 @@ public static class MapSerializer
             byte inLane = r.ReadByte();
             int pairCount = ReadCount(r, "lane restriction pair");
             var pairs = new HashSet<(int, byte)>(PreallocCapacity(pairCount));
+            int droppedPairs = 0;
             for (int j = 0; j < pairCount; j++)
             {
                 int outEdge = r.ReadInt32();
                 byte outLane = r.ReadByte();
                 if (outEdge >= edgeCount)
                     throw new InvalidDataException($"Corrupt save: lane restriction {i} references an edge out of range.");
+                if (outEdge >= 0 && outLane >= edges[outEdge].LaneCount) { droppedPairs++; continue; }
                 pairs.Add((outEdge, outLane));
             }
             if (inEdge >= edgeCount)
                 throw new InvalidDataException($"Corrupt save: lane restriction {i} references an edge out of range.");
+            if (inEdge >= 0 && inLane >= edges[inEdge].LaneCount) continue; // orphaned key
+            if (droppedPairs > 0 && pairs.Count == 0) continue;             // emptied by heal
             restrictions.Add((inEdge, inLane, pairs));
         }
 
@@ -528,6 +568,7 @@ public static class MapSerializer
                 // Initialize derived fields
                 vehicles.CurrentArc[i] = -1;
                 vehicles.ArcProgress[i] = 0f;
+                vehicles.ClearingArc[i] = -1;
                 vehicles.Throttle[i] = 0f;
                 vehicles.Brake[i] = 0f;
                 vehicles.PrevHeadingError[i] = 0f;

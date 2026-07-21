@@ -5,9 +5,11 @@ using SkiaSharp;
 namespace Roads.App.Rendering;
 
 /// <summary>
-/// WinForms control that renders via SkiaSharp. Creates an offscreen SKSurface each frame,
-/// invokes the PaintSurface event for drawing, then blits the result to the GDI+ Graphics
-/// context using a raw pixel copy. Caches the GDI+ Bitmap across frames to reduce allocations.
+/// WinForms control that renders via SkiaSharp. Each paint wraps the cached GDI+ bitmap's
+/// locked pixel memory in an SKSurface (a small native wrapper — the pixel buffer belongs
+/// to the bitmap), invokes the PaintSurface event to draw into it, then blits the bitmap
+/// to the GDI+ Graphics context. The bitmap is cached across frames and reallocated only
+/// on resize, so a paint performs no full-frame allocation and no pixel copy.
 /// </summary>
 public class SkiaCanvas : Control
 {
@@ -32,16 +34,6 @@ public class SkiaCanvas : Control
         int height = Height;
         if (width <= 0 || height <= 0) return;
 
-        var info = new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
-        using var surface = SKSurface.Create(info);
-        if (surface == null) return;
-
-        var canvas = surface.Canvas;
-        PaintSurface?.Invoke(this, canvas, info);
-
-        using var image = surface.Snapshot();
-        using var pixmap = image.PeekPixels();
-
         // Reuse the cached bitmap if size hasn't changed; otherwise allocate a new one
         if (_cachedBitmap == null || _cachedWidth != width || _cachedHeight != height)
         {
@@ -51,17 +43,27 @@ public class SkiaCanvas : Control
             _cachedHeight = height;
         }
 
-        var bits = _cachedBitmap.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
-
-        var srcPtr = pixmap.GetPixels();
-        int byteCount = width * height * 4;
-
-        unsafe
+        // Draw straight into the bitmap's pixel memory: SKSurface.Create with an external
+        // pointer allocates only a tiny native wrapper — the pixels are the bitmap's — so
+        // there is no per-frame surface allocation and no Snapshot/PeekPixels/MemoryCopy.
+        // (The previous per-paint SKSurface.Create(info) + snapshot + full-frame copy cost
+        // ~15 MB of native alloc/free per frame at 1440p.) Bgra8888/Premul matches
+        // Format32bppPArgb byte-for-byte; bits.Stride is passed so any GDI+ row padding
+        // is respected.
+        var bits = _cachedBitmap.LockBits(new Rectangle(0, 0, width, height),
+            ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
+        try
         {
-            Buffer.MemoryCopy(srcPtr.ToPointer(), bits.Scan0.ToPointer(), byteCount, byteCount);
+            var info = new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
+            using var surface = SKSurface.Create(info, bits.Scan0, bits.Stride);
+            if (surface == null) return;
+            PaintSurface?.Invoke(this, surface.Canvas, info);
+        }
+        finally
+        {
+            _cachedBitmap.UnlockBits(bits);
         }
 
-        _cachedBitmap.UnlockBits(bits);
         e.Graphics.DrawImageUnscaled(_cachedBitmap, 0, 0);
     }
 

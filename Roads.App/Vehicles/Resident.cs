@@ -67,6 +67,14 @@ public class Resident
     public ResidentActivity Activity;
     /// <summary>Index in VehicleStore when driving, or -1 when dormant.</summary>
     public int VehicleIndex = -1;
+
+    /// <summary>True while this resident sits in PopulationManager's departure queue
+    /// (departure deferred by the vehicle cap) — the membership dedup that keeps the
+    /// queue bounded: the departure scan re-enqueues due dormant residents every tick
+    /// otherwise. MUST stay in lockstep with the queue (set on enqueue, cleared on
+    /// dequeue, mass-cleared via ClearDepartureQueue) — a set flag with no queue entry
+    /// would block the resident's departure forever. Transient; never serialized.</summary>
+    public bool DepartureQueued;
     /// <summary>Node index of the POI the resident is currently at, or -1 if driving.</summary>
     public int CurrentPOINode;
 

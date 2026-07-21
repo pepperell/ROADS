@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
+using Roads.App.Core;
 using Roads.App.World;
 
 namespace Roads.App.Vehicles;
@@ -315,7 +316,7 @@ public class PopulationManager
             _vehicles.Remove(i);
         _residents.Clear();
         _vehicleToResident.Clear();
-        _departureQueue.Clear();
+        ClearDepartureQueue();
         _poiRegistry.ClearOccupancy();
     }
 
@@ -333,7 +334,7 @@ public class PopulationManager
         _residents.Clear();
         _residents.AddRange(residents);
         _vehicleToResident.Clear();
-        _departureQueue.Clear();
+        ClearDepartureQueue();
         _poiRegistry.ClearOccupancy();
 
         // The resident list is authoritative for vehicle ownership: reset all vehicle links,
@@ -416,20 +417,9 @@ public class PopulationManager
             }
         }
 
-        // Re-index IDs after removal
-        for (int i = 0; i < _residents.Count; i++)
-            _residents[i].Id = i;
-
-        // Fix vehicleToResident mapping
-        _vehicleToResident.Clear();
-        for (int i = 0; i < _residents.Count; i++)
-        {
-            if (IsDriving(_residents[i].Activity) && _residents[i].VehicleIndex >= 0)
-            {
-                _vehicleToResident[_residents[i].VehicleIndex] = i;
-                _vehicles.ResidentId[_residents[i].VehicleIndex] = i;
-            }
-        }
+        // Re-index IDs and rebuild the vehicle↔resident lookups after removals (also
+        // empties the departure queue, whose index entries just shifted).
+        ReindexResidents();
 
         // Check for new home nodes that don't have residents yet
         var homeNodes = _poiRegistry.GetNodesOfType(POIType.Home);
@@ -569,7 +559,7 @@ public class PopulationManager
         // Fisher–Yates shuffle — the "randomized reassignment order for fairness".
         for (int i = _jobSeekers.Count - 1; i > 0; i--)
         {
-            int j = Random.Shared.Next(i + 1);
+            int j = SimRandom.Next(i + 1);
             (_jobSeekers[i], _jobSeekers[j]) = (_jobSeekers[j], _jobSeekers[i]);
         }
 
@@ -1217,8 +1207,11 @@ public class PopulationManager
     /// <summary>
     /// Re-indexes resident IDs to their list positions and rebuilds the vehicle↔resident lookups
     /// (the <c>_vehicleToResident</c> dict and <c>VehicleStore.ResidentId</c> back-pointers) so all
-    /// three stay consistent after a structural change to <see cref="_residents"/>. Mirrors the
-    /// fixup block in <see cref="UpdateForGraphChange"/>.
+    /// three stay consistent after a structural change to <see cref="_residents"/> — the single
+    /// implementation used by <see cref="RemoveResidentAt"/> and <see cref="UpdateForGraphChange"/>.
+    /// Also empties the departure queue: its entries are list indices, which just shifted, so
+    /// keeping them would alias different residents (still-due residents re-enqueue on the next
+    /// departure scan — lossless).
     /// </summary>
     private void ReindexResidents()
     {
@@ -1234,6 +1227,23 @@ public class PopulationManager
                 _vehicles.ResidentId[_residents[i].VehicleIndex] = i;
             }
         }
+
+        ClearDepartureQueue();
+    }
+
+    /// <summary>
+    /// Empties the departure queue and clears every resident's
+    /// <see cref="Resident.DepartureQueued"/> flag. The two MUST move together: a set flag
+    /// with no queue entry would block that resident's departure forever (the departure
+    /// scan only enqueues unflagged residents). Called wherever queued indices could go
+    /// stale — resident-list reindexing and population replacement. Lossless: still-due
+    /// dormant residents re-enqueue on the next <see cref="ProcessDepartures"/> scan.
+    /// </summary>
+    private void ClearDepartureQueue()
+    {
+        _departureQueue.Clear();
+        for (int i = 0; i < _residents.Count; i++)
+            _residents[i].DepartureQueued = false;
     }
 
     private void OnDayRollover(double timeOfDay)
@@ -1335,13 +1345,18 @@ public class PopulationManager
         if (budget <= 0) return 0;
         int spawnsThisTick = 0;
 
-        // Process departure queue first (residents who were deferred)
+        // Process departure queue first (residents who were deferred). Queue entries are
+        // list indices kept valid by ClearDepartureQueue at every reindex/replace, so an
+        // entry can never alias a different resident; the flag is cleared on dequeue
+        // whether or not the spawn succeeds (a still-due resident re-enqueues via the
+        // scan below).
         while (_departureQueue.Count > 0 && spawnsThisTick < budget
             && _vehicles.Count < _maxActiveVehicles)
         {
             int resId = _departureQueue.Dequeue();
-            if (resId >= _residents.Count) continue;
+            if ((uint)resId >= (uint)_residents.Count) continue;
             var r = _residents[resId];
+            r.DepartureQueued = false;
             if (r.Activity != ResidentActivity.Dormant) continue;
             if (TrySpawnResident(r))
                 spawnsThisTick++;
@@ -1357,10 +1372,16 @@ public class PopulationManager
             float depTime = r.Schedule[r.ScheduleIndex].DepartureTime;
             if (timeOfDay < depTime) continue;
 
-            // Time to depart
+            // Time to depart. At the vehicle cap, defer FIFO — at most one queue entry
+            // per resident (DepartureQueued dedup), so the queue is bounded by the
+            // resident count instead of growing every tick the cap holds.
             if (_vehicles.Count >= _maxActiveVehicles)
             {
-                _departureQueue.Enqueue(r.Id);
+                if (!r.DepartureQueued)
+                {
+                    r.DepartureQueued = true;
+                    _departureQueue.Enqueue(r.Id);
+                }
                 continue;
             }
 
@@ -1525,12 +1546,12 @@ public class PopulationManager
         // despawn at a distinct exit-capable node (the CanPassThrough gate guaranteed a valid pair).
         if (_entryNodesBuffer.Count == 0 || _exitNodesBuffer.Count == 0) return false;
 
-        int spawn = _entryNodesBuffer[Random.Shared.Next(_entryNodesBuffer.Count)];
+        int spawn = _entryNodesBuffer[SimRandom.Next(_entryNodesBuffer.Count)];
 
         // Pick an exit target distinct from the spawn node, scanning from a random offset. The only
         // way to find none is an exit set of exactly {spawn}, which the gate already excluded.
         int n = _exitNodesBuffer.Count;
-        int start = Random.Shared.Next(n);
+        int start = SimRandom.Next(n);
         int target = -1;
         for (int k = 0; k < n; k++)
         {
@@ -1606,7 +1627,7 @@ public class PopulationManager
         Vector2 spawnPos;
         if (enterAtSpeed)
         {
-            lane = (byte)Random.Shared.Next(Math.Max(1, (int)startEdgeData.LaneCount));
+            lane = (byte)SimRandom.Next(Math.Max(1, (int)startEdgeData.LaneCount));
             float baseSpeed = startEdgeData.SpeedLimit > 0f ? startEdgeData.SpeedLimit : SteeringController.TargetSpeed;
             entrySpeed = baseSpeed * t.SpeedBias;
             spawnPos = GeometryUtil.OffsetRight(_graph, startEdge, startT,
@@ -1757,7 +1778,7 @@ public class PopulationManager
     {
         _residents.Clear();
         _vehicleToResident.Clear();
-        _departureQueue.Clear();
+        ClearDepartureQueue();
         _poiRegistry.ClearOccupancy();
         ScheduleModeEnabled = false;
     }

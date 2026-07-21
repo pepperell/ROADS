@@ -72,6 +72,15 @@ public class VehicleStore
     public int[] CurrentArc = Array.Empty<int>();
     /// <summary>Parametric progress (0–1) along the current intersection arc.</summary>
     public float[] ArcProgress = Array.Empty<float>();
+    /// <summary>Arc whose junction this vehicle's body has not yet physically cleared after
+    /// leaving arc-steering mode (or crossing without it), or -1. Only set while
+    /// <see cref="CurrentArc"/> is -1 for that junction. While set, the vehicle stays in the
+    /// steering pass's arc-occupancy index so junction conflict gates keep blocking crossing
+    /// traffic until the rear bumper leaves the throat — long vehicles complete short arcs
+    /// steering-wise while their body still spans the junction. Written only by
+    /// SteeringController (ExitArcToClearing / EnterClearing / ReleaseClearedJunctions);
+    /// transient — reset to -1 on load, remapped on arc-cache rebuilds.</summary>
+    public int[] ClearingArc = Array.Empty<int>();
 
     // ── Path data ──
 
@@ -230,6 +239,7 @@ public class VehicleStore
         DistToRoadSq[i] = 0f;
         CurrentArc[i] = -1;
         ArcProgress[i] = 0f;
+        ClearingArc[i] = -1;
         Path[i] = null;
         PathIndex[i] = 0;
         DestinationNode[i] = -1;
@@ -322,6 +332,7 @@ public class VehicleStore
             DistToRoadSq[index] = DistToRoadSq[last];
             CurrentArc[index] = CurrentArc[last];
             ArcProgress[index] = ArcProgress[last];
+            ClearingArc[index] = ClearingArc[last];
             Path[index] = Path[last];
             PathIndex[index] = PathIndex[last];
             DestinationNode[index] = DestinationNode[last];
@@ -409,6 +420,7 @@ public class VehicleStore
         Array.Resize(ref DistToRoadSq, newCapacity);
         Array.Resize(ref CurrentArc, newCapacity);
         Array.Resize(ref ArcProgress, newCapacity);
+        Array.Resize(ref ClearingArc, newCapacity);
         Array.Resize(ref Path, newCapacity);
         Array.Resize(ref PathIndex, newCapacity);
         Array.Resize(ref DestinationNode, newCapacity);

@@ -269,15 +269,24 @@ public class TrafficSignalSystem
             var node = graph.Nodes[n];
             bool isLight = !float.IsNaN(node.Position.X)
                 && node.Flags.HasFlag(NodeFlags.TrafficLight);
+            // Read the previous light flag BEFORE writing the new one: when the arrays
+            // were not resized above, oldIsTrafficLight ALIASES _isTrafficLight, so a
+            // read after the write would classify every light as pre-existing — the
+            // new-light randomization below would be dead code and every light added
+            // after the first rebuild would start at a stale phase/timer (map-wide
+            // lockstep). (When resized, oldIsTrafficLight is the detached old array
+            // and the ordering is irrelevant.)
+            bool wasLight = n < oldIsTrafficLight.Length && oldIsTrafficLight[n];
             _isTrafficLight[n] = isLight;
             if (!isLight) continue;
 
             _isActuated[n] = node.Flags.HasFlag(NodeFlags.ActuatedSignal);
             if (_isActuated[n]) _actuatedCount++;
 
-            // Preserve phase state for existing lights; start new lights at a random point
-            // within a random green so neighboring signals don't run in lockstep.
-            if (n < oldIsTrafficLight.Length && oldIsTrafficLight[n])
+            // Preserve phase state for existing lights; start new lights (including a
+            // node re-lit after losing its light) at a random point within a random
+            // green so neighboring signals don't run in lockstep.
+            if (wasLight)
             {
                 _nodePhase[n] = oldPhase[n];
                 _nodeTimeInPhase[n] = oldTimeInPhase[n];

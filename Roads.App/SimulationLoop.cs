@@ -343,14 +343,22 @@ public class SimulationLoop
         for (int i = 0; i < _vehicles.Count; i++)
         {
             int arc = _vehicles.CurrentArc[i];
-            if (arc < 0) continue;
-            int remapped = _intersectionArcs.RemapFromPrevious(arc);
-            _vehicles.CurrentArc[i] = remapped;
-            if (remapped < 0)
+            if (arc >= 0)
             {
-                _vehicles.ArcProgress[i] = 0f;
-                _vehicles.PrevHeadingError[i] = 0f;
+                int remapped = _intersectionArcs.RemapFromPrevious(arc);
+                _vehicles.CurrentArc[i] = remapped;
+                if (remapped < 0)
+                {
+                    _vehicles.ArcProgress[i] = 0f;
+                    _vehicles.PrevHeadingError[i] = 0f;
+                }
             }
+
+            // ClearingArc (junction-occupancy hold after arc exit) indexes the same
+            // cache and remaps identically; a vanished arc simply ends the hold.
+            int clearing = _vehicles.ClearingArc[i];
+            if (clearing >= 0)
+                _vehicles.ClearingArc[i] = _intersectionArcs.RemapFromPrevious(clearing);
         }
     }
 }

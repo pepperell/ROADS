@@ -1,3 +1,4 @@
+using Roads.App.Core;
 using Roads.App.World;
 
 namespace Roads.App.Vehicles;
@@ -34,7 +35,7 @@ public static class ScheduleGenerator
                 {
                     entries.Add(new ScheduleEntry { DepartureTime = Jitter(8.0f, 0.5f), Destination = POIType.Work });
                     // 20% chance of midday shop errand — a quick local run, so NEAREST shop.
-                    if (Random.Shared.NextDouble() < 0.20)
+                    if (SimRandom.NextDouble() < 0.20)
                     {
                         entries.Add(new ScheduleEntry { DepartureTime = Jitter(12.0f, 0.3f), Destination = POIType.Shop, NearestPOI = true });
                         entries.Add(new ScheduleEntry { DepartureTime = Jitter(12.5f, 0.2f), Destination = POIType.Work });
@@ -54,7 +55,7 @@ public static class ScheduleGenerator
                     entries.Add(new ScheduleEntry { DepartureTime = Jitter(8.5f, 0.5f), Destination = POIType.Work });
                     entries.Add(new ScheduleEntry { DepartureTime = Jitter(17.5f, 0.5f), Destination = POIType.Home });
                     // 30% chance of evening leisure
-                    if (Random.Shared.NextDouble() < 0.30)
+                    if (SimRandom.NextDouble() < 0.30)
                     {
                         entries[^1] = new ScheduleEntry { DepartureTime = entries[^1].DepartureTime, Destination = POIType.Leisure };
                         entries.Add(new ScheduleEntry { DepartureTime = Jitter(21.0f, 0.5f), Destination = POIType.Home });
@@ -83,7 +84,7 @@ public static class ScheduleGenerator
             case DriverArchetype.SundayDriver:
                 entries.Add(new ScheduleEntry { DepartureTime = Jitter(10.0f, 0.5f), Destination = POIType.Leisure });
                 // 40% chance of shop trip
-                if (Random.Shared.NextDouble() < 0.40)
+                if (SimRandom.NextDouble() < 0.40)
                 {
                     entries.Add(new ScheduleEntry { DepartureTime = Jitter(13.0f, 0.5f), Destination = POIType.Shop });
                     entries.Add(new ScheduleEntry { DepartureTime = Jitter(15.0f, 0.5f), Destination = POIType.Home });
@@ -125,8 +126,8 @@ public static class ScheduleGenerator
     /// </summary>
     private static float Jitter(float baseTime, float stddevHours)
     {
-        float u1 = 1f - (float)Random.Shared.NextDouble();
-        float u2 = (float)Random.Shared.NextDouble();
+        float u1 = 1f - (float)SimRandom.NextDouble();
+        float u2 = (float)SimRandom.NextDouble();
         float z = MathF.Sqrt(-2f * MathF.Log(u1)) * MathF.Cos(2f * MathF.PI * u2);
         return baseTime + stddevHours * z;
     }

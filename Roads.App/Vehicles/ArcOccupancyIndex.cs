@@ -2,8 +2,10 @@ namespace Roads.App.Vehicles;
 
 /// <summary>
 /// Per-pass index mapping each intersection-arc index to the vehicle indices currently
-/// traversing it (i.e. <c>VehicleStore.CurrentArc[v] == arc</c>). Replaces O(n) full-vehicle
-/// scans for arc-conflict checks with O(occupants-of-relevant-arcs) lookups.
+/// occupying its junction: vehicles traversing the arc (<c>CurrentArc[v] == arc</c>) AND
+/// vehicles whose steering has moved on but whose body has not yet physically cleared the
+/// junction (<c>ClearingArc[v] == arc</c> — long vehicles on short arcs). Replaces O(n)
+/// full-vehicle scans for arc-conflict checks with O(occupants-of-relevant-arcs) lookups.
 ///
 /// Reused across ticks — no per-tick allocation. Only buckets that received entries since the
 /// last <see cref="Rebuild"/>/<see cref="Clear"/> are cleared (tracked in <c>_touched</c>).
@@ -60,7 +62,9 @@ public sealed class ArcOccupancyIndex
     }
 
     /// <summary>
-    /// Clears prior contents and buckets every Driving vehicle whose <c>CurrentArc &gt;= 0</c>.
+    /// Clears prior contents and buckets every Driving vehicle whose <c>CurrentArc &gt;= 0</c>
+    /// or <c>ClearingArc &gt;= 0</c> (both can be set at once only when the vehicle entered a
+    /// new arc while its rear still cleared the previous junction — it then occupies both).
     /// <paramref name="arcCount"/> (from <c>IntersectionArcCache.ArcCount</c>) sizes the bucket array.
     /// </summary>
     public void Rebuild(VehicleStore store, int arcCount)
@@ -74,6 +78,9 @@ public sealed class ArcOccupancyIndex
             int arc = store.CurrentArc[i];
             if ((uint)arc < (uint)_buckets.Length)
                 AddInternal(arc, i);
+            int clearing = store.ClearingArc[i];
+            if ((uint)clearing < (uint)_buckets.Length && clearing != arc)
+                AddInternal(clearing, i);
         }
     }
 

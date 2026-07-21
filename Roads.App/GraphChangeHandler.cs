@@ -115,6 +115,7 @@ public class GraphChangeHandler
             _vehicles.PrevHeadingError[i] = 0f;
             _vehicles.CurrentArc[i] = -1;
             _vehicles.ArcProgress[i] = 0f;
+            _vehicles.ClearingArc[i] = -1;
 
             var newPath = _spawner.FindNewPath(newEdge, newT);
             if (newPath == null)

@@ -160,6 +160,9 @@ public static class SteeringController
     /// EVERY CurrentArc write during the steering pass must route through here — otherwise the
     /// occupancy index goes stale and scan #1 misses a conflict (→ vehicles cross at intersections).
     /// <paramref name="newArc"/> = -1 means the vehicle has left all arcs (back on an edge).
+    /// The ONE sanctioned exception is <see cref="ExitArcToClearing"/>, which writes CurrentArc
+    /// = -1 directly precisely so the occupancy entry is KEPT (re-keyed as ClearingArc) while
+    /// the vehicle's body finishes crossing the junction.
     /// </summary>
     private static void SetArc(VehicleStore store, int index, int newArc)
     {
@@ -167,6 +170,62 @@ public static class SteeringController
         if (old >= 0) _arcOccupancy.Exit(old, index);
         store.CurrentArc[index] = newArc;
         if (newArc >= 0) _arcOccupancy.Enter(newArc, index);
+    }
+
+    /// <summary>
+    /// Transitions a vehicle out of arc-steering mode while its body still spans the
+    /// junction: CurrentArc goes to -1 (steering continues on the outgoing edge) but the
+    /// arc-occupancy entry is KEPT, re-keyed to <see cref="VehicleStore.ClearingArc"/>, so
+    /// the conflict/merge/shared-lane gates go on blocking crossing traffic until
+    /// <see cref="ReleaseClearedJunctions"/> sees the rear bumper leave the throat. Arc
+    /// completion fires at remainingDist &lt; halfLen, so at this moment the rear is always
+    /// still inside the junction — the clearing phase is entered unconditionally.
+    /// ArcProgress is pinned to 1 so same-arc followers pace behind the clearing body as a
+    /// leader at the arc end (and lane-change arrival checks read zero remaining distance).
+    /// </summary>
+    private static void ExitArcToClearing(VehicleStore store, int index)
+    {
+        store.ClearingArc[index] = store.CurrentArc[index];
+        store.CurrentArc[index] = -1; // direct write: the occupancy entry must survive
+        store.ArcProgress[index] = 1f;
+    }
+
+    /// <summary>
+    /// Registers a vehicle that is crossing a junction WITHOUT arc steering — the arc
+    /// existed but was skipped as too short for arc mode — as clearing that arc, so the
+    /// junction is protected while its body crosses (it was never in the occupancy index,
+    /// hence the explicit Enter). Released by <see cref="ReleaseClearedJunctions"/>.
+    /// </summary>
+    private static void EnterClearing(VehicleStore store, int index, int arcIdx)
+    {
+        store.ClearingArc[index] = arcIdx;
+        store.ArcProgress[index] = 1f;
+        _arcOccupancy.Enter(arcIdx, index);
+    }
+
+    /// <summary>
+    /// Releases a vehicle's clearing-arc registration once its rear bumper has left the
+    /// junction: the occupancy entry kept by <see cref="ExitArcToClearing"/> (or created by
+    /// <see cref="EnterClearing"/>) is dropped when the vehicle's center is more than half
+    /// its body length past the arc's exit point. Pure distance from the exit point is used
+    /// rather than progress along the outgoing edge, so the check survives the vehicle
+    /// transferring onto a further edge while still short of clearing (ultra-short outgoing
+    /// stubs) — and a vehicle that STOPS in the throat correctly stays registered. Runs for
+    /// every vehicle at the top of its per-pass update.
+    /// </summary>
+    private static void ReleaseClearedJunctions(VehicleStore store, int index, IntersectionArcCache arcCache)
+    {
+        int clearing = store.ClearingArc[index];
+        if (clearing < 0) return;
+        var arc = arcCache.GetArc(clearing);
+        float dx = store.PosX[index] - arc.P3.X;
+        float dy = store.PosY[index] - arc.P3.Y;
+        float clearDist = HalfLen(store, index) + 0.5f;
+        if (dx * dx + dy * dy >= clearDist * clearDist)
+        {
+            _arcOccupancy.Exit(clearing, index);
+            store.ClearingArc[index] = -1;
+        }
     }
 
     /// <summary>
@@ -190,29 +249,71 @@ public static class SteeringController
     }
 
     /// <summary>
-    /// True if the single-lane two-way segment whose oncoming direction is <paramref name="reverseEdge"/>
-    /// currently has a vehicle travelling that opposite direction — either already on that edge, or
-    /// committed to entering it via an intersection arc at its start node. Used to gate entry onto a
-    /// <see cref="EdgeFlags.SharedLane"/> edge so two vehicles never meet head-on on the one shared lane.
-    /// The arc-occupancy check (kept live mid-pass via <see cref="SetArc"/>) also resolves the symmetric
-    /// both-ends-at-once case: whoever commits to its arc first is seen by the other, which then waits.
+    /// True when entry onto <paramref name="sharedEdge"/> (a single-lane two-way
+    /// <see cref="EdgeFlags.SharedLane"/> segment) must wait, so two vehicles never meet
+    /// head-on on the one shared lane. Blocking traffic: a vehicle travelling the opposite
+    /// direction — already on the reverse edge, or committed to entering it via an
+    /// intersection arc at its start node (that arc-occupancy check is kept live mid-pass
+    /// via <see cref="SetArc"/>, so in the symmetric both-ends-at-once case whoever commits
+    /// first is seen by the other, which then waits). Same-direction following is fine on an
+    /// ordinary shared segment — normal car-following handles spacing — but on a DEAD-END
+    /// STUB (see <see cref="IsDeadEndStub"/>) same-direction occupancy blocks too: every
+    /// entrant must U-turn at the stub's end and return on the same lane, so a queued
+    /// follower and the returning leader would end up nose-to-nose with no way past. One
+    /// vehicle at a time is the stub's true capacity.
+    /// <paramref name="selfIndex"/> is excluded from every check: a dead-end U-turn is the
+    /// one transition whose "oncoming" direction is the vehicle's OWN current edge, and
+    /// counting itself would block the pivot forever.
     /// </summary>
-    private static bool OncomingOnSharedLane(VehicleStore store, RoadGraph graph, IntersectionArcCache arcCache, int reverseEdge)
+    private static bool SharedLaneBlocked(VehicleStore store, RoadGraph graph,
+        IntersectionArcCache arcCache, int sharedEdge, int selfIndex)
     {
-        // A vehicle physically on the oncoming direction.
-        if ((uint)reverseEdge < (uint)_edgeOccupancy.Length && _edgeOccupancy[reverseEdge] > 0)
-            return true;
+        int rev = graph.FindReverseEdge(sharedEdge);
+        if (rev < 0) return false; // no opposite direction exists
 
-        // A vehicle committed to entering the oncoming direction (on an arc exiting onto it). Arcs
-        // feeding reverseEdge live in its FromNode's bucket.
-        int rFromNode = graph.Edges[reverseEdge].FromNode;
-        if (rFromNode < 0) return false;
-        foreach (int arc in arcCache.GetArcsAtNode(rFromNode))
+        // A vehicle physically on the oncoming direction (self excluded — on a U-turn the
+        // vehicle itself is still counted on that edge until the transfer completes).
+        bool selfOnRev = store.CurrentEdge[selfIndex] == rev && store.CurrentArc[selfIndex] < 0;
+        int revOccupancy = (uint)rev < (uint)_edgeOccupancy.Length ? _edgeOccupancy[rev] : 0;
+        if (revOccupancy > (selfOnRev ? 1 : 0)) return true;
+
+        // A vehicle committed to entering the oncoming direction (on an arc exiting onto
+        // it). Arcs feeding rev live in its FromNode's bucket.
+        int rFromNode = graph.Edges[rev].FromNode;
+        if (rFromNode >= 0)
         {
-            if (arcCache.GetArc(arc).OutgoingEdge == reverseEdge && _arcOccupancy.OccupantCount(arc) > 0)
-                return true;
+            foreach (int arc in arcCache.GetArcsAtNode(rFromNode))
+            {
+                if (arcCache.GetArc(arc).OutgoingEdge != rev) continue;
+                int occ = _arcOccupancy.OccupantCount(arc);
+                for (int k = 0; k < occ; k++)
+                    if (_arcOccupancy.OccupantAt(arc, k) != selfIndex) return true;
+            }
+        }
+
+        // Dead-end stub: block on ANY occupant, either direction (one vehicle at a time).
+        if (IsDeadEndStub(graph, sharedEdge, rev))
+        {
+            bool selfOnShared = store.CurrentEdge[selfIndex] == sharedEdge && store.CurrentArc[selfIndex] < 0;
+            int sharedOccupancy = (uint)sharedEdge < (uint)_edgeOccupancy.Length ? _edgeOccupancy[sharedEdge] : 0;
+            if (sharedOccupancy > (selfOnShared ? 1 : 0)) return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// True when <paramref name="sharedEdge"/> ends at a dead end: the only active outgoing
+    /// edge at its ToNode is <paramref name="rev"/> (its own reverse), so every vehicle
+    /// entering the edge must U-turn there and come back on the same shared lane.
+    /// (Adjacency lists contain only active edges, so no defunct filtering is needed.)
+    /// </summary>
+    private static bool IsDeadEndStub(RoadGraph graph, int sharedEdge, int rev)
+    {
+        int toNode = graph.Edges[sharedEdge].ToNode;
+        if (toNode < 0) return false;
+        foreach (int outEdge in graph.GetOutgoingEdges(toNode))
+            if (outEdge != rev) return false; // another way out — not a stub
+        return true;
     }
 
     // ── Merge safety ────────────────────────────────────────────────────
@@ -745,21 +846,18 @@ public static class SteeringController
                         return TransitionResult.Returned;
                     }
 
-                    // Single-lane two-way (shared-lane) gate: don't enter a one-lane shared segment
-                    // while a vehicle is travelling the OPPOSITE direction on it (already on the edge,
-                    // or committed to entering it from the far end). Same-direction following is fine —
-                    // normal car-following handles spacing. Prevents a head-on on the one shared lane.
-                    if ((graph.Edges[arc.OutgoingEdge].Flags & EdgeFlags.SharedLane) != 0)
+                    // Single-lane two-way (shared-lane) gate: don't enter a one-lane shared
+                    // segment while blocking traffic holds it — an oncoming vehicle, or any
+                    // occupant at all when the segment is a dead-end stub (one vehicle at a
+                    // time; see SharedLaneBlocked). Prevents a head-on on the one shared lane.
+                    if ((graph.Edges[arc.OutgoingEdge].Flags & EdgeFlags.SharedLane) != 0
+                        && SharedLaneBlocked(store, graph, arcCache, arc.OutgoingEdge, index))
                     {
-                        int rev = graph.FindReverseEdge(arc.OutgoingEdge);
-                        if (rev >= 0 && OncomingOnSharedLane(store, graph, arcCache, rev))
-                        {
-                            store.EdgeProgress[index] = stopAtT;
-                            store.Throttle[index] = 0f;
-                            store.Brake[index] = 1.0f;
-                            store.Speed[index] = 0f;
-                            return TransitionResult.Returned;
-                        }
+                        store.EdgeProgress[index] = stopAtT;
+                        store.Throttle[index] = 0f;
+                        store.Brake[index] = 1.0f;
+                        store.Speed[index] = 0f;
+                        return TransitionResult.Returned;
                     }
 
                     // Merge gate: don't enter a merge arc (one sharing its outgoing edge with another arc)
@@ -835,12 +933,38 @@ public static class SteeringController
                 return TransitionResult.Returned;
             }
 
+            // Shared-lane gate for direct transfers (no arc, or arc too short): same rule
+            // as the arc-entry gate above, including the dead-end-stub extension. The
+            // critical case is the dead-end U-turn pivot below — U-turn arcs are never
+            // generated (see IntersectionArcCache.GenerateLaneArcs), so WITHOUT this gate
+            // a U-turner pivots onto the one shared lane while an inbound vehicle occupies
+            // it, and the pair meets head-on invisibly (oncoming headings fail the threat
+            // scan's alignment filter). SharedLaneBlocked's self-exclusion matters here:
+            // on a U-turn the oncoming direction IS the vehicle's own current edge, and
+            // its stub rule keeps a follower from entering behind a future U-turner —
+            // the wedge this hold would otherwise create.
+            if ((nextEdgeData.Flags & EdgeFlags.SharedLane) != 0
+                && SharedLaneBlocked(store, graph, arcCache, nextEdge, index))
+            {
+                store.EdgeProgress[index] = stopAtT;
+                store.Throttle[index] = 0f;
+                store.Brake[index] = 1.0f;
+                store.Speed[index] = 0f;
+                return TransitionResult.Returned;
+            }
+
             // Direct edge-to-edge transition (no arc or arc too short)
             TransferToNextEdge(store, index, graph, stopLines,
                 ref edgeIdx, ref edge, ref edgeLength, ref progress, ref rawProgress,
                 ref baseSpeedLimit, ref targetSpeed, ref stopT, ref halfVehT, ref stopAtT,
                 nextEdge, nextEdgeData, speed, vx, vy,
                 prevEdge, prevProgress, prevPathIdx, ref pathIdx, path);
+
+            // The arc existed but was skipped as too short for arc mode — the body still
+            // crosses the junction, so register it as clearing so the conflict gates see
+            // it (it never entered the occupancy index via SetArc).
+            if (arcIdx >= 0)
+                EnterClearing(store, index, arcIdx);
         }
         else if (progress >= transitionT)
         {
@@ -1242,8 +1366,9 @@ public static class SteeringController
             int nextEdge = arc.OutgoingEdge;
             if (nextEdge < 0 || nextEdge >= graph.Edges.Count || graph.Edges[nextEdge].FromNode < 0)
             {
-                SetArc(store, index, -1);
-                store.ArcProgress[index] = 0f;
+                // Body is stopped in the junction — keep it registered (clearing) so
+                // crossing traffic waits; GraphChangeHandler/reroute untangles it.
+                ExitArcToClearing(store, index);
                 store.Path[index] = null;
                 store.PathIndex[index] = 0;
                 store.Speed[index] = 0f;
@@ -1282,8 +1407,10 @@ public static class SteeringController
                 float nextLength = nextEdgeData.Length;
                 if (nextLength < 0.01f) nextLength = 0.01f;
 
-                SetArc(store, index, -1);
-                store.ArcProgress[index] = 0f;
+                // Steering moves to the outgoing edge, but the body still spans the
+                // junction (completion fires at remainingDist < halfLen) — stay
+                // registered as clearing until the rear bumper leaves the throat.
+                ExitArcToClearing(store, index);
                 store.CurrentEdge[index] = nextEdge;
                 float nextStartT = stopLines.GetStopTAtFromNode(nextEdge);
                 store.EdgeProgress[index] = nextStartT;
@@ -1764,6 +1891,11 @@ public static class SteeringController
 
         for (int i = 0; i < store.Count; i++)
         {
+            // Release the clearing-arc registration once the body has left its junction
+            // (kept since arc exit so the conflict gates saw the crossing body — see
+            // ExitArcToClearing / EnterClearing).
+            ReleaseClearedJunctions(store, i, arcCache);
+
             // Check if any active conflict has resolved (no blocking event for cooldown period)
             CheckConflictResolved(store, i);
 

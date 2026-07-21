@@ -10,6 +10,7 @@ nsys_*
 *.mp3
 *.wav
 .claude/
+web/
 
 # Map exports (JSON snapshots written via Save) — keep generated maps out of the repo.
 # Placed before the .vscode/.axoCover negations below so those config files still apply.
