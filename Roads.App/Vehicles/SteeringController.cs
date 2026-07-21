@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using Roads.App;
 using Roads.App.World;
 
@@ -2066,7 +2067,9 @@ public static class SteeringController
 
     /// <summary>
     /// Master flag to enable/disable diagnostic file logging (diag.log, skip_debug.log, arc_conflict.log).
-    /// When false, LogSkip, LogDiag, and LogArcConflict are no-ops and no file handles are opened.
+    /// When false, LogSkip, LogDiag, and LogArcConflict are no-ops and no file handles are opened;
+    /// interpolated call-site arguments are not even formatted (the <see cref="DiagLogHandler"/> /
+    /// <see cref="DebugLogHandler"/> overloads short-circuit before any Append runs).
     /// </summary>
     public static bool DebugLoggingEnabled { get; set; }
 
@@ -2193,11 +2196,41 @@ public static class SteeringController
         _skipWriter.WriteLine(msg);
     }
 
-    /// <summary>Logs per-frame diagnostic data for a tracked vehicle.</summary>
+    /// <summary>Interpolated-string overload: the compiler binds <c>$"..."</c> arguments
+    /// here, and <see cref="DebugLogHandler"/> short-circuits so nothing is formatted or
+    /// allocated while <see cref="DebugLoggingEnabled"/> is off.</summary>
+    private static void LogSkip(ref DebugLogHandler msg)
+    {
+        if (!msg.Enabled) return;
+        _skipWriter ??= new StreamWriter("skip_debug.log", append: false) { AutoFlush = true };
+        _skipWriter.WriteLine(msg.ToStringAndClear());
+    }
+
+    /// <summary>Logs per-frame diagnostic data for a tracked vehicle. Constant event tags
+    /// bind here; interpolated ones bind to the <see cref="DiagLogHandler"/> overload.</summary>
     internal static void LogDiag(VehicleStore store, int index, string evt)
     {
         if (!DebugLoggingEnabled) return;
         if (store.DiagVehicle != index) return;
+        WriteDiagLine(store, index, evt);
+    }
+
+    /// <summary>Interpolated-string overload of <see cref="LogDiag(VehicleStore,int,string)"/>:
+    /// when the gate fails, the interpolation's arguments are never formatted or evaluated
+    /// (see <see cref="DiagLogHandler"/>) — required at the per-vehicle-per-tick call sites
+    /// (TICK_EDGE/TICK_ARC), which otherwise allocate ~300K strings/s at 10K vehicles with
+    /// logging off.</summary>
+    internal static void LogDiag(VehicleStore store, int index,
+        [InterpolatedStringHandlerArgument("store", "index")] ref DiagLogHandler evt)
+    {
+        if (!evt.Enabled) return;
+        WriteDiagLine(store, index, evt.ToStringAndClear());
+    }
+
+    /// <summary>Shared diag.log writer: standard per-vehicle state prefix + event text.
+    /// Callers gate first — this method unconditionally opens/writes.</summary>
+    private static void WriteDiagLine(VehicleStore store, int index, string evt)
+    {
         _diagWriter ??= new StreamWriter("diag.log", append: true) { AutoFlush = true };
         _diagWriter.WriteLine(
             $"V{index} pos=({store.PosX[index]:F2},{store.PosY[index]:F2}) " +
@@ -2218,6 +2251,17 @@ public static class SteeringController
                $"edge={store.CurrentEdge[index]} edgeProg={store.EdgeProgress[index]:F4} " +
                $"arc={store.CurrentArc[index]} arcProg={store.ArcProgress[index]:F4} " +
                $"lane={store.CurrentLane[index]}->{store.TargetLane[index]}";
+    }
+
+    /// <summary>Interpolated-string overload of
+    /// <see cref="LogArcConflict(VehicleStore,int,string,int)"/>: the event text is never
+    /// formatted while <see cref="DebugLoggingEnabled"/> is off — blocked-gate call sites
+    /// fire every tick per held vehicle during a jam (see <see cref="DebugLogHandler"/>).</summary>
+    private static void LogArcConflict(VehicleStore store, int index,
+        ref DebugLogHandler evt, int blockerIndex = -1)
+    {
+        if (!evt.Enabled) return;
+        LogArcConflict(store, index, evt.ToStringAndClear(), blockerIndex);
     }
 
     /// <summary>

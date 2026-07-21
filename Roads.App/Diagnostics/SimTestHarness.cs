@@ -41,6 +41,15 @@ namespace Roads.App.Diagnostics;
 /// are surfaced in the report's ANOMALIES section. NOTE: once an assertion fires, the run has
 /// pressed past a state the GUI would never have reached, so jam results AFTER the first captured
 /// assertion are not guaranteed GUI-equivalent and should be treated with suspicion.
+///
+/// VEHICLE CAP: the population cap defaults to settings.json's MaxVehicles — the SAME cap the
+/// GUI session runs — so GUI-scale jams reproduce in soaks instead of being silently capped
+/// away; <c>--simcap=&lt;n&gt;</c> overrides it for a specific run (recorded in the report).
+///
+/// EXIT CODES (distinct, so callers can tell "failures found" from "couldn't run"): 0 = clean,
+/// 1 = jam clusters / off-lane vehicles found, 2 = map file missing, 3 = the run crashed. Every
+/// path — including a crash — writes the report ending in the sentinel line, because a WinExe
+/// has no console to die loudly on.
 /// </summary>
 public static class SimTestHarness
 {
@@ -57,19 +66,59 @@ public static class SimTestHarness
 
     private static StringBuilder? _reportAnomalies;
 
+    // Process exit codes — distinct so callers can tell "failures found" from "couldn't run".
+    /// <summary>Run completed; zero jam clusters and zero off-lane vehicles.</summary>
+    public const int ExitClean = 0;
+    /// <summary>Run completed; at least one jam cluster or off-lane vehicle.</summary>
+    public const int ExitFailuresFound = 1;
+    /// <summary>Map file did not exist; nothing was simulated.</summary>
+    public const int ExitMapMissing = 2;
+    /// <summary>The run threw; the exception text is in the report.</summary>
+    public const int ExitCrashed = 3;
+
     /// <summary>
-    /// Runs the headless harness. Returns the process exit code: 0 if zero jam clusters were
-    /// found, 1 if any. Writes the report to <paramref name="outPath"/>. <paramref name="seed"/>
-    /// seeds <see cref="SimRandom"/> so the run is reproducible — two calls with the same map,
-    /// hours and seed produce identical results.
+    /// Runs the headless harness. Returns a process exit code (see the Exit* constants):
+    /// 0 clean, 1 jam clusters / off-lane vehicles found, 2 map missing, 3 crashed. Writes
+    /// the report to <paramref name="outPath"/> in every case — including a crash — always
+    /// ending with the sentinel line, so the run can never die silently.
+    /// <paramref name="seed"/> seeds <see cref="SimRandom"/> so the run is reproducible —
+    /// two calls with the same map, hours and seed produce identical results.
     /// <paramref name="loadVehicles"/> loads the map's saved vehicles instead of starting from
     /// fresh traffic — use it to replay a live jam captured with an in-app save.
     /// <paramref name="diagVehicle"/> (&gt;= 0) streams that vehicle's per-tick steering/physics
     /// diagnostics to diag.log for the whole run.
+    /// <paramref name="maxVehicles"/> caps the live population; &lt;= 0 (the default) reads
+    /// settings.json's MaxVehicles so the soak runs the same cap as the GUI session.
     /// </summary>
     public static int Run(string mapFile, float hours, string outPath, int seed = 12345,
-        bool loadVehicles = false, int diagVehicle = -1)
+        bool loadVehicles = false, int diagVehicle = -1, int maxVehicles = 0)
     {
+        try
+        {
+            return RunCore(mapFile, hours, outPath, seed, loadVehicles, diagVehicle, maxVehicles);
+        }
+        catch (Exception ex)
+        {
+            // A diagnostic harness must never die silently (WinExe has no console): write the
+            // crash into the report — sentinel included, so the file still reads as finished
+            // rather than truncated — and return the distinct crash code.
+            try
+            {
+                File.WriteAllText(outPath, $"SIMTEST CRASHED: {ex}\n=== SIMTEST COMPLETE ===\n");
+            }
+            catch { }
+            return ExitCrashed;
+        }
+    }
+
+    private static int RunCore(string mapFile, float hours, string outPath, int seed,
+        bool loadVehicles, int diagVehicle, int maxVehicles)
+    {
+        // Default the population cap to the GUI's: the value the user's settings.json applies
+        // to a GUI session (SettingsStore.Load is fault-tolerant — missing/corrupt file yields
+        // the same defaults the GUI would run with).
+        if (maxVehicles <= 0) maxVehicles = SettingsStore.Load().MaxVehicles;
+
         // Make the run REPRODUCIBLE: seed the simulation RNG before ANY load/spawn/step so every
         // spawn/destination/reroute/personality/schedule/lane/region/signal draw is identical
         // across invocations. Must happen first — POIRegistry/population draws can occur during
@@ -103,7 +152,7 @@ public static class SimTestHarness
         var water = new WaterLayer();
 
         var spawner = new VehicleSpawner(graph, vehicles, vehicleGrid);
-        var population = new PopulationManager(graph, vehicles, vehicleGrid, poiRegistry, SimulationLoop.MaxVehicles);
+        var population = new PopulationManager(graph, vehicles, vehicleGrid, poiRegistry, maxVehicles);
         var gch = new GraphChangeHandler(graph, editorState, vehicles, edgeSpatialGrid, spawner);
         var sim = new SimulationLoop(graph, vehicles, vehicleGrid, stopLineCache, intersectionArcs,
             edgeSpatialGrid, trafficSignals, stopSigns, yieldSigns, spawner, population, editorState, gch);
@@ -132,7 +181,7 @@ public static class SimTestHarness
         {
             File.WriteAllText(outPath,
                 $"SIMTEST ERROR: map file not found: {path}\n=== SIMTEST COMPLETE ===\n");
-            return 1;
+            return ExitMapMissing;
         }
 
         MapSerializer.Load(path, graph, vehicles, camera, sim.Clock, stopSigns, yieldSigns,
@@ -188,11 +237,11 @@ public static class SimTestHarness
             YieldSigns = yieldSigns,
         };
 
-        int failureCount = WriteReport(outPath, deps, mapFile, hours, clockStart, dayStart,
-            clockEnd, dayEnd, sw.Elapsed.TotalSeconds, totalSpawned, totalRemoved, peakLive,
-            vehicles.Count, stuckSubsteps);
+        int failureCount = WriteReport(outPath, deps, mapFile, hours, seed, maxVehicles,
+            clockStart, dayStart, clockEnd, dayEnd, sw.Elapsed.TotalSeconds, totalSpawned,
+            totalRemoved, peakLive, vehicles.Count, stuckSubsteps);
 
-        return failureCount > 0 ? 1 : 0;
+        return failureCount > 0 ? ExitFailuresFound : ExitClean;
     }
 
     /// <summary>
@@ -200,6 +249,7 @@ public static class SimTestHarness
     /// (jam clusters + off-lane vehicles) — the process exits nonzero when any exist.
     /// </summary>
     private static int WriteReport(string outPath, DeadlockReport.Deps d, string mapFile, float hours,
+        int seed, int maxVehicles,
         double clockStart, int dayStart, double clockEnd, int dayEnd, double wallSeconds,
         int totalSpawned, int totalRemoved, int peakLive, int liveNow, int[] stuckSubsteps)
     {
@@ -209,6 +259,9 @@ public static class SimTestHarness
         sb.AppendLine("=== SIMTEST DEADLOCK REPORT ===");
         sb.AppendLine($"Map: {mapFile}");
         sb.AppendLine($"In-game hours simulated: {hours:F3}");
+        // Recorded so a report is self-describing for reproduction: rerun with this seed and
+        // cap to get the identical result.
+        sb.AppendLine($"Seed: {seed}  vehicle cap: {maxVehicles}");
         // NOTE: MapSerializer.Load restores only TimeOfDay, not DayNumber (shared with the GUI load
         // path), so the day counter below starts from a fresh clock (0), not the saved map's day.
         // The day delta is meaningful; the absolute day number is not the saved map's day.

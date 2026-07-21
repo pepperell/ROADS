@@ -14,28 +14,46 @@
   </PropertyGroup>
 
   <!-- Auto-incrementing build number: buildnumber.txt (beside this project, tracked in
-       git so the count survives clones) holds the last build's number; every build reads
-       it, adds one, writes it back, and stamps Assembly/File/Info versions as
-       $(VersionPrefix3).$(BuildNumber). Runs before the assembly-info generators so the
-       binary always carries the fresh number; the TitleScreen reads it back at runtime
-       via Assembly.GetName().Version. Note every build invocation increments (dotnet run
-       after dotnet build counts twice) — build numbers are unique and ascending, not
-       consecutive. -->
-  <Target Name="IncrementBuildNumber" BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo">
+       git so the count survives clones) holds the last build's number.
+       IncrementBuildNumber bumps it only when a compile input is newer than the stamp
+       file in obj (so a no-op incremental build keeps a stable version and stays a
+       no-op) and never during IDE design-time builds. ApplyBuildNumber then stamps
+       Assembly/File/Info versions as $(VersionPrefix3).$(BuildNumber) on every build,
+       before the assembly-info generators, so the binary always carries the number and
+       the TitleScreen reads it back at runtime via Assembly.GetName().Version. Numbers
+       are unique and ascending, not consecutive (failed builds and per-configuration
+       stamps still consume numbers). -->
+  <Target Name="IncrementBuildNumber"
+          Condition="'$(DesignTimeBuild)' != 'true'"
+          Inputs="@(Compile);@(EmbeddedResource);$(MSBuildAllProjects)"
+          Outputs="$(IntermediateOutputPath)buildnumber.stamp">
     <ReadLinesFromFile File="$(MSBuildProjectDirectory)/buildnumber.txt"
                        Condition="Exists('$(MSBuildProjectDirectory)/buildnumber.txt')">
       <Output TaskParameter="Lines" PropertyName="LastBuildNumber" />
     </ReadLinesFromFile>
     <PropertyGroup>
       <LastBuildNumber Condition="'$(LastBuildNumber)' == ''">0</LastBuildNumber>
-      <BuildNumber>$([MSBuild]::Add($(LastBuildNumber), 1))</BuildNumber>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(MSBuildProjectDirectory)/buildnumber.txt"
+                      Lines="$([MSBuild]::Add($(LastBuildNumber), 1))" Overwrite="true" />
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+    <Touch Files="$(IntermediateOutputPath)buildnumber.stamp" AlwaysCreate="true" />
+  </Target>
+
+  <Target Name="ApplyBuildNumber"
+          DependsOnTargets="IncrementBuildNumber"
+          BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo">
+    <ReadLinesFromFile File="$(MSBuildProjectDirectory)/buildnumber.txt"
+                       Condition="Exists('$(MSBuildProjectDirectory)/buildnumber.txt')">
+      <Output TaskParameter="Lines" PropertyName="BuildNumber" />
+    </ReadLinesFromFile>
+    <PropertyGroup>
+      <BuildNumber Condition="'$(BuildNumber)' == ''">0</BuildNumber>
       <Version>$(VersionPrefix3).$(BuildNumber)</Version>
       <AssemblyVersion>$(VersionPrefix3).$(BuildNumber)</AssemblyVersion>
       <FileVersion>$(VersionPrefix3).$(BuildNumber)</FileVersion>
       <InformationalVersion>$(VersionPrefix3).$(BuildNumber)</InformationalVersion>
     </PropertyGroup>
-    <WriteLinesToFile File="$(MSBuildProjectDirectory)/buildnumber.txt"
-                      Lines="$(BuildNumber)" Overwrite="true" />
   </Target>
 
   <ItemGroup>

@@ -437,7 +437,14 @@ public class VehicleRenderer
         }
 
         // Edge overlap detection: find pairs of braking vehicles on the same edge
-        // and same lane that are within 2x vehicle length of each other
+        // and same lane that are within 2x vehicle length of each other.
+        // Candidates (full-brake, nearly stopped, on-edge) are collected once and sorted
+        // by a packed (edge, lane) key, so pairs are compared only within one lane's run —
+        // the former all-pairs scan over the whole store was O(n²) with the candidate
+        // filter INSIDE the loops, a multi-second freeze at 10K vehicles in a gridlock,
+        // exactly the scenario this overlay exists to inspect. Flags the identical pair
+        // set. Buffers are reused across frames (grown on demand).
+        int candCount = 0;
         for (int i = 0; i < store.Count; i++)
         {
             if (store.State[i] != VehicleState.Driving) continue;
@@ -445,15 +452,25 @@ public class VehicleRenderer
             if (store.Brake[i] < 0.8f) continue;
             if (store.Speed[i] >= 1.0f) continue;
 
-            for (int j = i + 1; j < store.Count; j++)
+            if (candCount == _overlapCandidates.Length)
             {
-                if (store.State[j] != VehicleState.Driving) continue;
-                if (store.CurrentArc[j] >= 0) continue;
-                if (store.Brake[j] < 0.8f) continue;
-                if (store.Speed[j] >= 1.0f) continue;
-                if (store.CurrentEdge[j] != store.CurrentEdge[i]) continue;
-                if (store.CurrentLane[j] != store.CurrentLane[i]) continue;
+                int newCap = Math.Max(64, _overlapCandidates.Length * 2);
+                Array.Resize(ref _overlapCandidates, newCap);
+                Array.Resize(ref _overlapSortKeys, newCap);
+            }
+            _overlapSortKeys[candCount] =
+                ((ulong)(uint)store.CurrentEdge[i] << 8) | store.CurrentLane[i];
+            _overlapCandidates[candCount++] = i;
+        }
+        Array.Sort(_overlapSortKeys, _overlapCandidates, 0, candCount);
 
+        for (int a = 0; a < candCount; a++)
+        {
+            int i = _overlapCandidates[a];
+            ulong key = _overlapSortKeys[a];
+            for (int b = a + 1; b < candCount && _overlapSortKeys[b] == key; b++)
+            {
+                int j = _overlapCandidates[b];
                 float dx = store.PosX[i] - store.PosX[j];
                 float dy = store.PosY[i] - store.PosY[j];
                 float dist = MathF.Sqrt(dx * dx + dy * dy);
@@ -468,5 +485,11 @@ public class VehicleRenderer
             }
         }
     }
+
+    /// <summary>Reusable candidate/sort-key buffers for
+    /// <see cref="DrawArcConflictOverlay"/>'s same-lane overlap scan (key packs
+    /// edge&lt;&lt;8 | lane). Grown on demand; no per-frame allocation.</summary>
+    private int[] _overlapCandidates = Array.Empty<int>();
+    private ulong[] _overlapSortKeys = Array.Empty<ulong>();
 
 }

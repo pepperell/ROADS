@@ -275,7 +275,11 @@ public sealed class Composer
     {
         new[] { (1.5f, 0.6f), (3.0f, 0.9f) },                       // Charleston, displaced
         new[] { (0.0f, 0.8f), (2.5f, 0.55f) },
-        new[] { (1.5f, 0.5f), (2.5f, 0.4f), (3.5f, 0.6f) },
+        // Last hit ends short of the bar line (3.98): overhanging into the next bar can
+        // put this voicing's note-off AFTER an identical next-bar strike on the same
+        // channel+key, and the synth's NoteOff ends all matching voices — clipping the
+        // fresh chord (same mechanism as the GenPad repeated-bar dropout).
+        new[] { (1.5f, 0.5f), (2.5f, 0.4f), (3.5f, 0.48f) },
         new[] { (2.5f, 1.2f) },
         new[] { (0.0f, 0.35f), (1.0f, 0.3f), (2.0f, 0.35f), (3.0f, 0.3f) }, // staccato stabs (tension)
     };
@@ -589,7 +593,7 @@ public sealed class Composer
         var style = DrumStyleFor();
         GenBass(ev, t0, bar, nextBar);
         GenComp(ev, t0, bar);
-        GenPad(ev, t0, bar, barLen);
+        GenPad(ev, t0, bar, nextBar, barLen);
         if (drumLevel > 0.06f) GenDrums(ev, t0, style, drumLevel, lastBar, fillBoost: drumsOwnBar);
         if (drumsOwnBar)
         {
@@ -1268,7 +1272,7 @@ public sealed class Composer
 
     // ═══════════════════════ Pad ═══════════════════════
 
-    private void GenPad(List<MidiEvent> ev, long t0, BarChords bar, long barLen)
+    private void GenPad(List<MidiEvent> ev, long t0, BarChords bar, BarChords nextBar, long barLen)
     {
         // Night float, and the far-zoom "overview ambient" bed.
         float presence = MathF.Max(_night, 0.8f * _ambience);
@@ -1276,14 +1280,44 @@ public sealed class Composer
         var tones = Theory.ChordTones(bar.A.Quality);
         int root = 36 + bar.A.Root % 12;
         int vel = Vel((int)(28f + 36f * presence), 3);
-        long dur = (long)(barLen * 1.02f);
-        Note(ev, ChPad, root, vel, t0, dur);
-        Note(ev, ChPad, root + 7, vel, t0, dur);
-        Note(ev, ChPad, root + 12 + tones[1], vel, t0, dur);
-        Note(ev, ChPad, root + 12 + tones[^1], vel, t0, dur);
+
+        // Per-key duration: the 2% overhang is the legato glue between chord changes,
+        // but a key struck again on the next downbeat must NOT overhang — its late
+        // note-off would land ~50 ms after the next bar's note-on for the same
+        // channel+key, and MeltySynth's NoteOff ends ALL voices on that pair including
+        // the fresh one, silencing the pad bed for the whole repeated bar (minor blues,
+        // AABA bridges, bossa). Repeats are detected per KEY, not per chord: neighboring
+        // different chords can share tones and collide on just those. Repeated keys end
+        // just short of the bar line; the immediate re-strike masks the tiny gap.
+        long overhang = (long)(barLen * 1.02f);
+        long clamped = (long)(barLen * 0.98f);
+        var nextTones = Theory.ChordTones(nextBar.A.Quality);
+        int nextRoot = 36 + nextBar.A.Root % 12;
+        Span<int> nextKeys = stackalloc int[5]
+        {
+            nextRoot,
+            nextRoot + 7,
+            nextRoot + 12 + nextTones[1],
+            nextRoot + 12 + nextTones[^1],
+            presence > 0.6f ? nextRoot + 26 : -1,
+        };
+
+        Note(ev, ChPad, root, vel, t0, PadKeyDur(nextKeys, root, overhang, clamped));
+        Note(ev, ChPad, root + 7, vel, t0, PadKeyDur(nextKeys, root + 7, overhang, clamped));
+        Note(ev, ChPad, root + 12 + tones[1], vel, t0,
+            PadKeyDur(nextKeys, root + 12 + tones[1], overhang, clamped));
+        Note(ev, ChPad, root + 12 + tones[^1], vel, t0,
+            PadKeyDur(nextKeys, root + 12 + tones[^1], overhang, clamped));
         if (presence > 0.6f)
-            Note(ev, ChPad, root + 26, Vel(vel - 6, 3), t0, dur);
+            Note(ev, ChPad, root + 26, Vel(vel - 6, 3), t0,
+                PadKeyDur(nextKeys, root + 26, overhang, clamped));
     }
+
+    /// <summary>Pad note duration for one key: ends short of the bar line when the key
+    /// is struck again on the next downbeat, keeps the legato overhang otherwise
+    /// (see the collision comment in <see cref="GenPad"/>).</summary>
+    private static long PadKeyDur(ReadOnlySpan<int> nextBarKeys, int key, long overhang, long clamped)
+        => nextBarKeys.IndexOf(key) >= 0 ? clamped : overhang;
 
     // ═══════════════════════ Horns ═══════════════════════
 

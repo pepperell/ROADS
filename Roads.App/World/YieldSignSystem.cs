@@ -15,7 +15,10 @@ public class YieldSignSystem
     /// <summary>Per-node flag indicating whether this node has a yield sign.</summary>
     private bool[] _isYield = Array.Empty<bool>();
 
-    /// <summary>Per-edge highest progress value of the lead vehicle (only for yield-bound edges).</summary>
+    /// <summary>Per-edge highest progress value of the lead vehicle (only for yield-bound edges).
+    /// -1 when no vehicle: progress 0.0 is a REAL position (an arc-exiter lands at an entry
+    /// trim of 0), so 0 must never be used as the no-vehicle sentinel — same convention as
+    /// StopSignSystem's lead tracking.</summary>
     private float[] _edgeLeadProgress = Array.Empty<float>();
     /// <summary>Per-edge speed of the lead vehicle approaching the yield intersection.</summary>
     private float[] _edgeLeadSpeed = Array.Empty<float>();
@@ -190,10 +193,12 @@ public class YieldSignSystem
 
         int edgeCount = Math.Min(graph.Edges.Count, _edgeLeadProgress.Length);
 
-        // Reset lead vehicle tracking
-        Array.Clear(_edgeLeadProgress, 0, edgeCount);
+        // Reset lead vehicle tracking. -1 sentinel, NOT 0: a moving vehicle at progress
+        // exactly 0.0 (arc-exiter at an entry trim of 0) is genuine cross-traffic and
+        // must beat the sentinel in the progress comparison below.
         for (int e = 0; e < edgeCount; e++)
         {
+            _edgeLeadProgress[e] = -1f;
             _edgeLeadSpeed[e] = float.MaxValue;
             _edgeDistToStop[e] = float.MaxValue;
         }
@@ -283,7 +288,7 @@ public class YieldSignSystem
                 continue;
             }
 
-            if (_edgeLeadProgress[otherEdge] == 0f) continue; // no vehicle on this edge
+            if (_edgeLeadProgress[otherEdge] < 0f) continue; // no vehicle on this edge
 
             float dist = _edgeDistToStop[otherEdge];
             float speed = _edgeLeadSpeed[otherEdge];
@@ -360,7 +365,7 @@ public class YieldSignSystem
                 continue;
             }
 
-            if (_edgeLeadProgress[otherEdge] == 0f) continue;
+            if (_edgeLeadProgress[otherEdge] < 0f) continue; // no vehicle on this edge
 
             float dist = _edgeDistToStop[otherEdge];
             float speed = _edgeLeadSpeed[otherEdge];

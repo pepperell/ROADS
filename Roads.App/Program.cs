@@ -14,9 +14,11 @@ static class Program
     /// Pass <c>--simtest=&lt;map&gt;</c> to run the headless <see cref="Diagnostics.SimTestHarness"/>
     /// instead of the GUI: <c>--simhours=&lt;h&gt;</c> sim duration (default 1),
     /// <c>--simout=&lt;path&gt;</c> report path (default simtest_report.log),
-    /// <c>--simseed=&lt;n&gt;</c> RNG seed, <c>--simvehicles</c> to load the map's saved
-    /// vehicles (replay a captured live jam), and <c>--diagvehicle=&lt;n&gt;</c> to stream
-    /// that vehicle's per-tick diagnostics to diag.log. Exit code 0 = no jams found.
+    /// <c>--simseed=&lt;n&gt;</c> RNG seed, <c>--simcap=&lt;n&gt;</c> vehicle cap (default:
+    /// settings.json's MaxVehicles, matching the GUI session), <c>--simvehicles</c> to load
+    /// the map's saved vehicles (replay a captured live jam), and <c>--diagvehicle=&lt;n&gt;</c>
+    /// to stream that vehicle's per-tick diagnostics to diag.log. Exit codes: 0 = no jams,
+    /// 1 = jams/off-lane vehicles found, 2 = map missing, 3 = crashed (report has the text).
     ///
     /// Pass <c>--musictest</c> (or <c>--musictest=&lt;seconds&gt;</c>, default 32) to render
     /// the generative music engine offline via <see cref="Diagnostics.MusicTestHarness"/>:
@@ -40,6 +42,7 @@ static class Program
         float simHours = 1f;
         string simOut = "simtest_report.log";
         int simSeed = 12345;
+        int simCap = 0; // <= 0 = default to settings.json's MaxVehicles (GUI parity)
         bool simVehicles = false;
         int diagVehicle = -1;
         float musicTestSeconds = 0f;
@@ -63,6 +66,9 @@ static class Program
             else if (arg.StartsWith("--simseed=", StringComparison.Ordinal)
                      && int.TryParse(arg.AsSpan("--simseed=".Length), out int s))
                 simSeed = s;
+            else if (arg.StartsWith("--simcap=", StringComparison.Ordinal)
+                     && int.TryParse(arg.AsSpan("--simcap=".Length), out int cap) && cap > 0)
+                simCap = cap;
             else if (arg == "--simvehicles")
                 simVehicles = true;
             else if (arg.StartsWith("--diagvehicle=", StringComparison.Ordinal)
@@ -90,7 +96,7 @@ static class Program
         if (simTestMap != null)
         {
             int code = Diagnostics.SimTestHarness.Run(simTestMap, simHours, simOut, simSeed,
-                simVehicles, diagVehicle);
+                simVehicles, diagVehicle, simCap);
             Environment.Exit(code);
         }
 
