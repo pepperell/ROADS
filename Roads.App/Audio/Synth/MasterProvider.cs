@@ -52,6 +52,18 @@ public class MasterProvider : ISampleProvider
         float kDuck = DspUtil.SlewCoeff(duckTarget > _duck.Value ? 0.1f : 0.2f, fs);
         float masterTarget = TargetMaster;
 
+        // Idle gate (the MusicProvider freeze idiom): fully muted → hand back silence
+        // without the per-sample loop. Beyond skipping the loop, this is the denormal
+        // guard for the SIGNAL path — at a ~1e-16 smoothed gain every product and tanh
+        // intermediate below is denormal, paying assist penalties on every sample for
+        // as long as sound stays off. Inputs were already read above, so upstream state
+        // (and the music bus's own freeze) keeps advancing normally.
+        if (masterTarget <= 0f && _master.Value < 1e-4f)
+        {
+            Array.Clear(buffer, offset, read);
+            return read;
+        }
+
         // Stereo interleaved: apply identical gain to the L/R pair so the image is stable.
         for (int i = 0; i < read; i += 2)
         {

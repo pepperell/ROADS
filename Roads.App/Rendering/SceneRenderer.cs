@@ -25,6 +25,35 @@ public class SceneRenderer
     /// their migration lands.</summary>
     private readonly Ui.UiRoot _uiRoot;
 
+    // Editor previews attach dash effects to short-lived using'd paints; disposing an
+    // SKPaint does NOT dispose its attached path effect, so a per-frame CreateDash piles
+    // native objects onto the finalizer queue — hitches precisely while dragging
+    // previews. The fixed 4/4 dash is created once and shared across frames (the
+    // RoadRenderer._centerLineDash idiom); the ghost-ring dash interval varies with the
+    // ring radius, so a one-slot cache rebuilds it only when the interval changes
+    // (steady-state zero churn; the worst case — continuous zoom — matches the old
+    // per-frame cost).
+    private static readonly SKPathEffect PreviewDash = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0);
+    private static SKPathEffect _ringDash = SKPathEffect.CreateDash(new[] { 0.8f, 0.8f }, 0);
+    private static float _ringDashInterval = 0.8f;
+
+    /// <summary>Dashed-ring effect for ghost nodes / water cursors at the given dash
+    /// interval; rebuilt (old one disposed) only when the interval actually changes.</summary>
+    private static SKPathEffect RingDash(float dash)
+    {
+        if (MathF.Abs(dash - _ringDashInterval) > 0.005f)
+        {
+            _ringDash.Dispose();
+            _ringDash = SKPathEffect.CreateDash(new[] { dash, dash }, 0);
+            _ringDashInterval = dash;
+        }
+        return _ringDash;
+    }
+
+    /// <summary>Signal-control badge font, shared across frames (Size is re-set from
+    /// zoom each draw — same no-per-frame-natives discipline as the dash effects).</summary>
+    private static readonly SKFont SignalIconFont = new(SKTypeface.Default, 11f) { Embolden = true };
+
     /// <summary>
     /// Congestion heat-map overlay. Recomputed once per frame in <see cref="Render"/>
     /// before the road draw pass and forwarded to the road renderer.
@@ -514,7 +543,7 @@ public class SceneRenderer
             Style = SKPaintStyle.Stroke,
             StrokeCap = SKStrokeCap.Round,
             IsAntialias = true,
-            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0),
+            PathEffect = PreviewDash,
         };
         canvas.DrawLine(dest.X, dest.Y, foot.X, foot.Y, connectorPaint);
 
@@ -639,7 +668,7 @@ public class SceneRenderer
             Style = SKPaintStyle.Stroke,
             StrokeWidth = Math.Max(1f, 1.5f / camera.Zoom),
             IsAntialias = true,
-            PathEffect = SKPathEffect.CreateDash(new[] { dash, dash }, 0),
+            PathEffect = RingDash(dash),
         };
         canvas.DrawCircle(pos.X, pos.Y, radius, fill);
         canvas.DrawCircle(pos.X, pos.Y, radius, stroke);
@@ -676,7 +705,7 @@ public class SceneRenderer
             Style = SKPaintStyle.Stroke,
             StrokeWidth = Math.Max(1f, 1.5f / camera.Zoom),
             IsAntialias = true,
-            PathEffect = SKPathEffect.CreateDash(new[] { dash, dash }, 0),
+            PathEffect = RingDash(dash),
         };
         canvas.DrawCircle(cursor.X, cursor.Y, radius, fill);
         canvas.DrawCircle(cursor.X, cursor.Y, radius, ring);
@@ -713,7 +742,7 @@ public class SceneRenderer
             StrokeWidth = 1.5f,
             Style = SKPaintStyle.Stroke,
             IsAntialias = true,
-            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0),
+            PathEffect = PreviewDash,
         };
         canvas.DrawPath(previewPath, centerPaint);
     }
@@ -745,7 +774,8 @@ public class SceneRenderer
             IsAntialias = true,
         };
         using var textPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
-        using var font = new SKFont(SKTypeface.Default, 11f / zoom) { Embolden = true };
+        var font = SignalIconFont;
+        font.Size = 11f / zoom;
 
         for (int n = 0; n < graph.Nodes.Count; n++)
         {
@@ -811,33 +841,28 @@ public class SceneRenderer
             canvas.DrawCircle(edge.ControlPoint2.X, edge.ControlPoint2.Y, handleRadius, handlePaint);
         }
 
-        // Selected node: show only the adjacent CP on each connected edge
+        // Selected node: show only the adjacent CP on each connected edge. Walks the
+        // node's adjacency lists (O(degree), not a full edge scan) and draws a two-way
+        // pair once via its primary (lower-index) twin — the reverse twin is skipped
+        // outright (SetControlPoint keeps twin CPs synced, so it is the same handle),
+        // which also removes the old per-frame dedup HashSet allocation.
         if (hasSelectedNode)
         {
-            var drawn = new HashSet<(int, int)>(); // (primaryEdge, cpIndex) to avoid duplicates
-            for (int i = 0; i < graph.Edges.Count; i++)
+            void DrawAdjacentHandle(int edgeIdx, int cpSide)
             {
-                var e = graph.Edges[i];
-                if (e.FromNode < 0) continue;
-
-                int cpSide; // which CP is adjacent to the selected node
-                if (e.FromNode == selNode) cpSide = 1;
-                else if (e.ToNode == selNode) cpSide = 2;
-                else continue;
-
-                // Deduplicate via primary edge
-                int primary = i;
-                int rev = graph.FindReverseEdge(i);
-                if (rev >= 0 && rev < i) { primary = rev; cpSide = cpSide == 1 ? 2 : 1; }
-                if (!drawn.Add((primary, cpSide))) continue;
-
-                var edge = graph.Edges[primary];
+                int rev = graph.FindReverseEdge(edgeIdx);
+                if (rev >= 0 && rev < edgeIdx) return; // the primary twin draws this handle
+                var edge = graph.Edges[edgeIdx];
+                if (edge.FromNode < 0) return;
                 var nodePos = graph.Nodes[cpSide == 1 ? edge.FromNode : edge.ToNode].Position;
                 var cpPos = cpSide == 1 ? edge.ControlPoint1 : edge.ControlPoint2;
 
                 canvas.DrawLine(nodePos.X, nodePos.Y, cpPos.X, cpPos.Y, linePaint);
                 canvas.DrawCircle(cpPos.X, cpPos.Y, handleRadius, handlePaint);
             }
+
+            foreach (int i in graph.GetOutgoingEdges(selNode)) DrawAdjacentHandle(i, 1);
+            foreach (int i in graph.GetIncomingEdges(selNode)) DrawAdjacentHandle(i, 2);
         }
     }
 
@@ -925,7 +950,7 @@ public class SceneRenderer
             StrokeWidth = 1.5f,
             Style = SKPaintStyle.Stroke,
             IsAntialias = true,
-            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0),
+            PathEffect = PreviewDash,
         };
         canvas.DrawPath(previewPath, previewPaint);
 

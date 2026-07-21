@@ -12,8 +12,11 @@ namespace Roads.App.Audio.Synth;
 ///
 /// Anti-click contract: <see cref="TimbreType"/> and the per-assignment detune are only
 /// consumed when <see cref="Retune"/> is observed, and the AudioEngine only sets Retune
-/// while <see cref="IsQuiet"/> is true (the voice fully faded) — pitch jumps never happen
-/// audibly. An unassigned voice has TargetGain 0 and self-reports IsQuiet.
+/// while <see cref="IsQuiet"/> is true (the voice fully faded) AND with the new vehicle's
+/// pitch/cutoff/pan targets already published, raising the gain target only afterwards —
+/// so any callback either takes the quiet fast path or resets to the NEW state while
+/// still silent; pitch jumps never happen audibly. An unassigned voice has TargetGain 0
+/// and self-reports IsQuiet.
 /// </summary>
 public class EngineVoice : ISampleProvider
 {

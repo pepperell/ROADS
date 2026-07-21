@@ -361,13 +361,17 @@ public class PopulationManager
             else
             {
                 // Dormant (or stale vehicle reference): not in a vehicle — occupy its POI.
+                // HoldsPOISlot re-derives from the TryOccupy result (it is transient):
+                // a false result (capacity shrank since the save, or an over-capacity
+                // grace parking) parks the resident without a slot, exactly like a live
+                // arrival at a full POI.
                 res.Activity = ResidentActivity.Dormant;
                 res.VehicleIndex = -1;
                 if (res.CurrentPOINode >= 0 && res.CurrentPOINode < _graph.Nodes.Count)
                 {
                     var poiType = _graph.Nodes[res.CurrentPOINode].PointOfInterest;
                     if (poiType != POIType.None)
-                        _poiRegistry.TryOccupy(res.CurrentPOINode, poiType);
+                        res.HoldsPOISlot = _poiRegistry.TryOccupy(res.CurrentPOINode, poiType);
                 }
             }
         }
@@ -411,7 +415,7 @@ public class PopulationManager
             {
                 if (IsDriving(r.Activity) && r.VehicleIndex >= 0)
                     RemoveVehicle(r);
-                if (r.CurrentPOINode >= 0)
+                if (r.CurrentPOINode >= 0 && r.HoldsPOISlot)
                     _poiRegistry.Vacate(r.CurrentPOINode);
                 _residents.RemoveAt(i);
             }
@@ -1198,7 +1202,7 @@ public class PopulationManager
         var r = _residents[index];
         if (IsDriving(r.Activity) && r.VehicleIndex >= 0)
             RemoveVehicle(r);
-        if (r.CurrentPOINode >= 0)
+        if (r.CurrentPOINode >= 0 && r.HoldsPOISlot)
             _poiRegistry.Vacate(r.CurrentPOINode);
         _residents.RemoveAt(index);
         ReindexResidents();
@@ -1315,16 +1319,21 @@ public class PopulationManager
         if (destNode >= 0 && destNode < _graph.Nodes.Count)
             destType = _graph.Nodes[destNode].PointOfInterest;
 
-        // Try to occupy the destination
-        if (destNode >= 0 && destType != POIType.None)
-            _poiRegistry.TryOccupy(destNode, destType);
+        // Try to occupy the destination. A full POI still accepts the arrival (grace —
+        // two cars can race for the last slot during the drive), but only a successful
+        // TryOccupy grants the slot: HoldsPOISlot gates the eventual Vacate, so a
+        // grace-parked resident can never decrement a slot someone else holds.
+        bool holdsSlot = destNode >= 0 && destType != POIType.None
+            && _poiRegistry.TryOccupy(destNode, destType);
 
         // Remove vehicle from store
         RemoveVehicle(resident);
 
-        // Set resident dormant at destination
+        // Set resident dormant at destination — AFTER RemoveVehicle, whose
+        // VehicleRemoving fixup writes its own park-at-home state for removed drivers.
         resident.Activity = ResidentActivity.Dormant;
         resident.CurrentPOINode = destNode;
+        resident.HoldsPOISlot = holdsSlot;
 
         // A completed move-in (entry/exit node → home) consumed no schedule entry. Skip past any
         // departures whose time already passed during the drive in — except a still-in-effect Work
@@ -1585,10 +1594,12 @@ public class PopulationManager
         if (advanceSchedule)
             resident.ScheduleIndex++;
 
-        // Vacate the POI they're leaving
-        if (resident.CurrentPOINode >= 0)
+        // Vacate the POI they're leaving — only if this resident actually holds its slot
+        // (grace-parked arrivals at a full POI never got one).
+        if (resident.CurrentPOINode >= 0 && resident.HoldsPOISlot)
             _poiRegistry.Vacate(resident.CurrentPOINode);
         resident.CurrentPOINode = -1;
+        resident.HoldsPOISlot = false;
 
         // Track in reverse lookup
         _vehicleToResident[vi] = resident.Id;
@@ -1742,8 +1753,15 @@ public class PopulationManager
             resident.VehicleIndex = -1;
             if (resident.Activity == ResidentActivity.Driving)
             {
+                // Parked WITHOUT claiming a registry slot (HoldsPOISlot false), deliberately:
+                // this fixup also runs inside HandleArrival's RemoveVehicle, where the real
+                // destination parking (and its TryOccupy) is applied right afterwards — an
+                // occupy here would leak a home slot on every normal arrival. For a genuine
+                // external removal (road deleted under the trip) the resident sits at home
+                // uncounted until its next departure, whose Vacate is gated on the flag.
                 resident.Activity = ResidentActivity.Dormant;
                 resident.CurrentPOINode = resident.HomeNode;
+                resident.HoldsPOISlot = false;
             }
             else if (resident.Activity == ResidentActivity.MovingIn)
             {

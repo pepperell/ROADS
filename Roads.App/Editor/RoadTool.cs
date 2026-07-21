@@ -267,7 +267,10 @@ public class RoadTool
     /// <summary>
     /// Detects where the new edge crosses existing edges and splits both at each crossing.
     /// Crossings are processed in ascending parametric order so that earlier splits don't
-    /// invalidate later split positions. Called by <see cref="OnClick"/> after creating a new edge.
+    /// invalidate later split positions; a segment that crosses the SAME existing edge
+    /// more than once re-anchors the later crossings onto the surviving half (split
+    /// records with exact t remapping), so every crossing gets its intersection node.
+    /// Called by <see cref="OnClick"/> after creating a new edge.
     /// </summary>
     /// <param name="graph">Road graph containing the edges.</param>
     /// <param name="newEdgeIndex">Index of the newly created forward edge to check for crossings.</param>
@@ -284,16 +287,48 @@ public class RoadTool
 
         // Step 1: Split all crossed "other" edges at their crossing points.
         // Track the midNode created at each crossing so we can reuse it in Step 2.
+        // A curved segment can cross the SAME existing edge more than once; each split
+        // defuncts the edge it splits, so later crossings of that edge re-anchor onto
+        // the live descendant half via the split records below. The t remap is EXACT:
+        // De Casteljau subdivision at T yields halves tracing the original curve on
+        // [0,T] and [T,1], so original t maps to t/T on the first half and
+        // (t-T)/(1-T) on the second. (Halves are appended, never slot-reused, so a
+        // record chain always walks forward and terminates.)
+        var splits = new Dictionary<int, (int FirstHalf, int SecondHalf, float T)>();
         var midNodes = new int[crossings.Count];
         for (int i = 0; i < crossings.Count; i++)
         {
             var (otherEdge, _, tOther) = crossings[i];
+
+            // Re-anchor through any splits earlier crossings made to this edge.
+            while (splits.TryGetValue(otherEdge, out var rec))
+            {
+                if (tOther <= rec.T)
+                {
+                    otherEdge = rec.FirstHalf;
+                    tOther /= MathF.Max(rec.T, 1e-6f);
+                }
+                else
+                {
+                    otherEdge = rec.SecondHalf;
+                    tOther = (tOther - rec.T) / MathF.Max(1f - rec.T, 1e-6f);
+                }
+            }
+
             if (graph.Edges[otherEdge].FromNode < 0)
             {
-                midNodes[i] = -1; // already split/defunct
+                midNodes[i] = -1; // defunct outside this pass's records — skip
                 continue;
             }
-            var (midNode, _, _) = graph.SplitEdge(otherEdge, tOther);
+
+            // The remapped t can land near the descendant's endpoint (two crossings
+            // close together on the original edge), where an unclamped split would be
+            // degenerate — clamp by the same distance margin Step 2 uses.
+            float margin = SplitMarginT(graph, otherEdge);
+            float tClamped = Math.Clamp(tOther, margin, 1f - margin);
+
+            var (midNode, firstHalf, secondHalf) = graph.SplitEdge(otherEdge, tClamped);
+            splits[otherEdge] = (firstHalf, secondHalf, tClamped);
             midNodes[i] = midNode;
         }
 

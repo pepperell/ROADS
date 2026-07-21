@@ -367,23 +367,41 @@ public class RoadGraph
             inCount[to]++;
         }
 
-        // Rebuild reverse edge cache
+        // Rebuild reverse edge cache. A twin is the opposite-direction edge tracing the
+        // SAME curve, so its control points are mirrored (its CP1 at my CP2 and vice
+        // versa — an invariant every mutation maintains: creation at the thirds,
+        // SetControlPoint twin-sync, MoveNode's symmetric translate/rescale, De
+        // Casteljau split halves). Endpoint matching alone is ambiguous when two
+        // DISTINCT roads connect the same node pair (e.g. a U-shaped segment plus a
+        // straight connector between the same two intersections): the first endpoint
+        // match could pair a road with the OTHER road's opposite direction — the
+        // renderer then skips a "non-primary" edge that is really an unpaired road
+        // (it vanishes), and twin-synced mutations cross roads. Prefer the mirrored
+        // candidate; fall back to the first endpoint match (old behavior) only when
+        // no candidate mirrors.
         int edgeCount = _edges.Count;
         if (_reverseEdgeCache.Length < edgeCount)
             _reverseEdgeCache = new int[edgeCount];
+        const float twinCpEpsilonSq = 1f; // twins match to float noise; distinct roads differ by meters
         for (int i = 0; i < edgeCount; i++)
         {
             _reverseEdgeCache[i] = -1;
             var e = _edges[i];
             if (e.FromNode < 0) continue;
+            int fallback = -1;
             foreach (int candidate in GetOutgoingEdges(e.ToNode))
             {
-                if (_edges[candidate].ToNode == e.FromNode)
+                var c = _edges[candidate];
+                if (c.ToNode != e.FromNode) continue;
+                if (Vector2.DistanceSquared(c.ControlPoint1, e.ControlPoint2) < twinCpEpsilonSq
+                    && Vector2.DistanceSquared(c.ControlPoint2, e.ControlPoint1) < twinCpEpsilonSq)
                 {
-                    _reverseEdgeCache[i] = candidate;
+                    fallback = candidate;
                     break;
                 }
+                if (fallback < 0) fallback = candidate;
             }
+            _reverseEdgeCache[i] = fallback;
         }
     }
 
@@ -414,9 +432,12 @@ public class RoadGraph
             bool hasNonUTurn = false;
             foreach (int outEdge in outgoing)
             {
-                var outE = _edges[outEdge];
-                // U-turn: incoming from A->node, outgoing node->A
-                if (inE.FromNode == outE.ToNode)
+                // U-turn: back onto the arriving road's own reverse TWIN. A different
+                // road that also returns to the same neighbor node (two parallel roads
+                // between the same intersections) is a normal turn, not a U-turn —
+                // an endpoint-based test here wrongly banned switching between such
+                // parallel roads at their shared nodes.
+                if (outEdge == FindReverseEdge(inEdge))
                 {
                     uTurnEdge = outEdge;
                     continue;

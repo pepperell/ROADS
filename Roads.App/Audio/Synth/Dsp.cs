@@ -3,8 +3,8 @@ namespace Roads.App.Audio.Synth;
 /// <summary>
 /// Allocation-free DSP primitives shared by the synth voices. All are small mutable
 /// structs owned by a single voice and advanced per sample on the NAudio playback
-/// thread; none touch shared state. Filters flush denormals (+1e-20f) so near-silent
-/// tails never fall into denormal-speed float math.
+/// thread; none touch shared state. Filters and the parameter smoother flush denormals
+/// (+1e-20f) so near-silent tails never fall into denormal-speed float math.
 /// </summary>
 public static class DspUtil
 {
@@ -30,7 +30,9 @@ public static class DspUtil
 
 /// <summary>One-pole parameter smoother (slew limiter) — the anti-zipper for every
 /// live-controlled gain/pitch/pan/cutoff. Advance per sample with a coefficient from
-/// <see cref="DspUtil.SlewCoeff"/>.</summary>
+/// <see cref="DspUtil.SlewCoeff"/>. Flushes denormals like the filters: decaying toward
+/// a zero target (gain after mute/duck) settles near +1e-20/k — normal-range float —
+/// instead of grinding through denormal territory at microcode-assist speed forever.</summary>
 public struct ParamSmoother
 {
     private float _s;
@@ -43,7 +45,7 @@ public struct ParamSmoother
 
     public float Next(float target, float k)
     {
-        _s += (target - _s) * k;
+        _s += (target - _s) * k + 1e-20f;
         return _s;
     }
 }

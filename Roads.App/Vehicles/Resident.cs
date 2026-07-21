@@ -78,6 +78,15 @@ public class Resident
     /// <summary>Node index of the POI the resident is currently at, or -1 if driving.</summary>
     public int CurrentPOINode;
 
+    /// <summary>True while this resident holds a capacity slot in <see cref="POIRegistry"/>
+    /// for <see cref="CurrentPOINode"/>. MUST stay in lockstep with the registry: set from
+    /// the TryOccupy result when parking (arrival can park at a FULL POI as a grace — then
+    /// this stays false), cleared when the slot is released. Every Vacate is gated on it,
+    /// so a resident that never got a slot can never decrement someone else's (the L10
+    /// downward occupancy drift). Transient; never serialized — load reconstruction
+    /// re-derives it by replaying TryOccupy for parked residents.</summary>
+    public bool HoldsPOISlot;
+
     /// <summary>
     /// A resident whose home was deleted: it always heads to an entry/exit node and is removed from
     /// the population on arrival there (it never goes dormant). Set by the graceful-deletion drain

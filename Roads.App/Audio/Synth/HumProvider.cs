@@ -39,6 +39,17 @@ public class HumProvider : ISampleProvider
         float fs = _format.SampleRate;
         float gainTarget = TargetGain;
         float cutoffTarget = TargetCutoffHz;
+
+        // Idle gate (the MusicProvider freeze idiom): silent with no swell pending →
+        // skip the noise/filter/LFO synthesis entirely. After sound-off the smoothed
+        // gain otherwise decays toward zero and the whole per-sample loop runs at
+        // denormal-assist speed indefinitely; frozen LFO phase is irrelevant in a
+        // random wash.
+        if (gainTarget <= 0f && _gain.Value < 1e-4f)
+        {
+            Array.Clear(buffer, offset, count);
+            return count;
+        }
         // Gain swells slower than it releases the other way (250 ms up / 400 ms down).
         float kGain = DspUtil.SlewCoeff(gainTarget > _gain.Value ? 0.25f : 0.4f, fs);
         float kCutoffSlew = DspUtil.SlewCoeff(0.25f, fs);

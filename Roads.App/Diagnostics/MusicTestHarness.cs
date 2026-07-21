@@ -18,13 +18,18 @@ public static class MusicTestHarness
     private const int SampleRate = 44100;
     private const float SilenceRmsFloor = 1e-3f;
 
-    public static int Run(float seconds, string outPath)
+    /// <summary>Default composer seed: fixed so plain <c>--musictest</c> reruns are
+    /// byte-comparable. Pass <c>--musicseed=&lt;n&gt;</c> to sweep seeds (the GUI seeds
+    /// per-launch with TickCount, so seed-dependent audio bugs need a sweep to catch).</summary>
+    private const int DefaultSeed = 20260716;
+
+    public static int Run(float seconds, string outPath, int seed = DefaultSeed)
     {
         var report = new StringBuilder();
         string reportPath = Path.ChangeExtension(outPath, ".log");
         try
         {
-            return RunCore(seconds, outPath, report, reportPath);
+            return RunCore(seconds, outPath, report, reportPath, seed);
         }
         catch (Exception ex)
         {
@@ -35,7 +40,7 @@ public static class MusicTestHarness
         }
     }
 
-    private static int RunCore(float seconds, string outPath, StringBuilder report, string reportPath)
+    private static int RunCore(float seconds, string outPath, StringBuilder report, string reportPath, int seed)
     {
         string soundFontPath = Path.Combine(AppContext.BaseDirectory, "Assets", "GeneralUser-GS.sf2");
         if (!File.Exists(soundFontPath))
@@ -45,7 +50,7 @@ public static class MusicTestHarness
             return 2;
         }
 
-        var music = new MusicProvider(soundFontPath, SampleRate, seed: 20260716)
+        var music = new MusicProvider(soundFontPath, SampleRate, seed)
         {
             TargetGain = 0.85f,
         };

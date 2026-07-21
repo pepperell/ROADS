@@ -119,9 +119,11 @@ public static class SteeringController
     /// never qualifies because its leader IS path-ahead.</summary>
     private static int[] _lastLeader = Array.Empty<int>();
     /// <summary>Per-vehicle breaker flag: when set, this vehicle is the "front" of a stuck overlap tangle
-    /// and is allowed to creep forward through the overlap (it ignores overlapping cars in its threat /
-    /// hard-overlap checks). Set by the breaker pass at the end of <see cref="UpdateAll"/>, consumed by
-    /// <see cref="FindNearbyThreats"/> and <see cref="ApplyHardOverlapBrake"/> on the next tick.</summary>
+    /// and is allowed to creep forward through the overlap. Set (STICKY while the wedge persists — see
+    /// <see cref="RunDeadlockBreaker"/>) by the breaker pass at the end of <see cref="UpdateAll"/>;
+    /// consumed via <see cref="BreakerFront"/> on the next tick by <see cref="ApplyHardOverlapBrake"/>
+    /// (no Speed halving for the front), the merge-arc entry gate, the arc-exit blocked-lane hold, and
+    /// the merge-yield approach in ApplySpeedControl.</summary>
     private static bool[] _breakerProceed = Array.Empty<bool>();
     /// <summary>Sim ticks a vehicle must be overlap-stalled before the breaker frees the tangle's front
     /// (~3 s at the 30 Hz sim rate) — far longer than any legitimate merge/yield wait.</summary>
@@ -367,8 +369,11 @@ public static class SteeringController
     // race, tight geometry, or a pre-existing tangle), they hard-brake on each other forever. The
     // breaker tracks how long each car has been overlap-stalled and, past a threshold, frees the FRONT
     // of the tangle — the car with no stopped car genuinely ahead — by letting it creep forward and
-    // bypass the merge gate (via _breakerProceed). The rest hold; once the front drains, the next car
-    // becomes the front, and the pile unwinds. Bounded and self-clearing.
+    // bypass the merge gates and the hard overlap brake (via _breakerProceed). Front status is STICKY:
+    // it survives the creep's own motion and ends only when the wedge clears (or the car stops being
+    // the tangle front), so the creep-out is one continuous BreakerCreepSpeed motion. The rest hold;
+    // once the front drains, the next car becomes the front, and the pile unwinds. Bounded and
+    // self-clearing.
 
     private const float BreakerStoppedSpeed = 0.1f;   // m/s below which a car counts as stopped here
     private const float BreakerCreepSpeed = 1.5f;     // cap the freed front's creep speed
@@ -481,10 +486,23 @@ public static class SteeringController
 
         for (int i = 0; i < n; i++)
         {
-            if (store.State[i] != VehicleState.Driving || store.Speed[i] >= BreakerStoppedSpeed)
+            if (store.State[i] != VehicleState.Driving)
             {
                 _overlapStall[i] = 0;
                 _breakerProceed[i] = false;
+                continue;
+            }
+
+            bool wasFront = _breakerProceed[i];
+
+            // Normal moving traffic ages nothing and never gains front status. A freed
+            // front is exempt from the moving early-out: the creep itself lifts it past
+            // the stopped threshold, and demoting it for moving would re-engage the gates
+            // and the hard brake mid-creep-out, so the tangle would only clear in
+            // sub-0.1 m/s bursts every OverlapStallTicks.
+            if (!wasFront && store.Speed[i] >= BreakerStoppedSpeed)
+            {
+                _overlapStall[i] = 0;
                 continue;
             }
 
@@ -501,14 +519,35 @@ public static class SteeringController
                     && store.Speed[ldr] < BreakerStoppedSpeed
                     && !IsAheadAlongPath(store, graph, arcCache, i, ldr);
             }
-            _overlapStall[i] = stalled ? _overlapStall[i] + 1 : 0;
 
-            bool front = _overlapStall[i] >= OverlapStallTicks && IsTangleFront(store, i, grid, graph, arcCache);
-            bool wasFront = _breakerProceed[i];
-            _breakerProceed[i] = front;
-            if (front && !wasFront)
+            if (wasFront)
+            {
+                // STICKY while wedged: front status ends when the wedge actually clears —
+                // or when a stopped car turns up genuinely path-ahead (rechecked every
+                // tick), in which case this car must hold and the tangle's new front gets
+                // freed instead. It does NOT end merely because the creep has the car
+                // moving.
+                if (!stalled || !IsTangleFront(store, i, grid, graph, arcCache))
+                {
+                    _overlapStall[i] = 0;
+                    _breakerProceed[i] = false;
+                    continue;
+                }
+            }
+            else
+            {
+                _overlapStall[i] = stalled ? _overlapStall[i] + 1 : 0;
+                if (_overlapStall[i] < OverlapStallTicks
+                    || !IsTangleFront(store, i, grid, graph, arcCache))
+                    continue;
+                _breakerProceed[i] = true;
                 BreakerFreed?.Invoke(i);
-            if (front && store.Speed[i] < BreakerCreepSpeed)
+            }
+
+            // Creep the front out: forward throttle below the cap; at or above the cap the
+            // per-vehicle IDM controls (braking hard on the tiny gap) stay in force and
+            // act as the speed limiter.
+            if (store.Speed[i] < BreakerCreepSpeed)
             {
                 store.Brake[i] = 0f;
                 store.Throttle[i] = BreakerCreepThrottle;
@@ -1582,10 +1621,18 @@ public static class SteeringController
     /// <param name="speed">Current vehicle speed in m/s.</param>
     /// <summary>
     /// Emergency brake when gap is dangerously small. Returns true if braking was applied.
+    /// Skipped for a breaker-freed front: it is deliberately creeping THROUGH the overlap,
+    /// and the direct Speed halving here would fight the breaker's end-of-pass creep
+    /// override every tick (equilibrium ~0.05 m/s — the wedge cleared 10-20x slower than
+    /// the intended <see cref="BreakerCreepSpeed"/>). The false return falls through to
+    /// IDM, whose clamped gap term still brakes hard above the creep speed, so the IDM
+    /// controls double as the front's speed cap while the breaker only overrides them
+    /// below the cap.
     /// </summary>
     private static bool ApplyHardOverlapBrake(VehicleStore store, int index, float gap)
     {
         if (gap >= 0.5f || gap >= float.MaxValue) return false;
+        if (BreakerFront(index)) return false;
         store.Speed[index] = MathF.Max(0f, store.Speed[index] * 0.5f);
         store.Throttle[index] = 0f;
         store.Brake[index] = 1.0f;

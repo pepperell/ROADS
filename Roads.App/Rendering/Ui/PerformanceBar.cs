@@ -17,6 +17,10 @@ public class PerformanceBar : Panel
     private readonly SKPaint _idlePaint = new() { Color = new SKColor(60, 62, 68), Style = SKPaintStyle.Fill };
     private readonly SKPaint _outlinePaint = new() { Color = new SKColor(80, 82, 88), Style = SKPaintStyle.Stroke, StrokeWidth = 1f };
 
+    /// <summary>Reusable clip shape (a fresh SKRoundRect per draw is an undisposed
+    /// native object destined for the finalizer queue); re-set from Bounds each draw.</summary>
+    private readonly SKRoundRect _clipRound = new();
+
     public PerformanceBar(PerfTelemetry telemetry)
     {
         _telemetry = telemetry;
@@ -48,7 +52,8 @@ public class PerformanceBar : Panel
             float idleW = idleFrac * Bounds.Width;
 
             canvas.Save();
-            canvas.ClipRoundRect(new SKRoundRect(Bounds, 3f));
+            _clipRound.SetRect(Bounds, 3f, 3f);
+            canvas.ClipRoundRect(_clipRound);
             canvas.DrawRect(Bounds.Left, Bounds.Top, simW, Bounds.Height, _simPaint);
             canvas.DrawRect(Bounds.Left + simW, Bounds.Top, drawW, Bounds.Height, _drawPaint);
             canvas.DrawRect(Bounds.Left + simW + drawW, Bounds.Top, idleW, Bounds.Height, _idlePaint);

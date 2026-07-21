@@ -560,15 +560,26 @@ public sealed class AudioEngine : IDisposable
             _voiceVehicle[free] = veh;
             voice.TimbreType = _vehicles.PreferredVehicle[veh];
             voice.Detune = 1f + ((float)_rng.NextDouble() - 0.5f) * 0.06f;
-            RefreshVoiceTargets(free, veh, engineMix, camX, viewWidth, zoom);
+            // Anti-click ordering: publish the new vehicle's pitch/cutoff/pan targets
+            // while the gain TARGET is still 0, arm the retune (volatile — the writes
+            // above are visible to whoever observes it), and only then raise the gain.
+            // Whichever buffer boundary the callback lands on, it either stays in the
+            // quiet fast path or hard-resets to the NEW state while still silent.
+            // (Raising the gain before Retune let one ~33 ms buffer render with the
+            // previous vehicle's smoother state, then reset pitch mid-fade — a click.)
+            RefreshVoiceTargets(free, veh, engineMix, camX, viewWidth, zoom, holdSilent: true);
             voice.Retune = true;
+            RefreshVoiceTargets(free, veh, engineMix, camX, viewWidth, zoom);
             active++;
         }
     }
 
-    /// <summary>Streams the per-frame pitch/gain/pan/cutoff targets for an assigned voice.</summary>
+    /// <summary>Streams the per-frame pitch/gain/pan/cutoff targets for an assigned voice.
+    /// <paramref name="holdSilent"/> publishes pitch/cutoff/pan but writes the gain target
+    /// as 0 — the assignment path's anti-click ordering (targets first, then Retune, then
+    /// a second call raises the gain).</summary>
     private void RefreshVoiceTargets(int voiceIdx, int veh, float engineMix,
-        float camX, int viewWidth, float zoom)
+        float camX, int viewWidth, float zoom, bool holdSilent = false)
     {
         var voice = _engineVoices[voiceIdx];
         float speed = _vehicles.Speed[veh];
@@ -591,7 +602,9 @@ public sealed class AudioEngine : IDisposable
 
         voice.TargetPitchHz = pitch;
         voice.TargetCutoffHz = MathF.Min(pitch * (4f + 8f * throttle) * cutoffScale, 6000f);
-        voice.TargetGain = 0.10f * (0.25f + 0.75f * (0.4f * speedNorm + 0.6f * throttle)) * distAtten * engineMix;
+        voice.TargetGain = holdSilent
+            ? 0f
+            : 0.10f * (0.25f + 0.75f * (0.4f * speedNorm + 0.6f * throttle)) * distAtten * engineMix;
         voice.TargetPan = ScreenPan(_vehicles.PosX[veh], camX, viewWidth, zoom);
     }
 

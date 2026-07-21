@@ -23,7 +23,9 @@ static class Program
     /// Pass <c>--musictest</c> (or <c>--musictest=&lt;seconds&gt;</c>, default 32) to render
     /// the generative music engine offline via <see cref="Diagnostics.MusicTestHarness"/>:
     /// four mood presets to a WAV (<c>--musicout=&lt;path&gt;</c>, default musictest.wav)
-    /// plus an RMS report beside it. Exit code 0 = every phase produced audio.
+    /// plus an RMS report beside it. <c>--musicseed=&lt;n&gt;</c> overrides the fixed
+    /// composer seed for seed sweeps (the GUI seeds per-launch with TickCount).
+    /// Exit code 0 = every phase produced audio.
     ///
     /// Pass <c>--steerprobe</c> to run the headless steering-stability harness
     /// (<see cref="Diagnostics.SteeringProbeHarness"/>): straight-road cruise + lateral
@@ -47,6 +49,7 @@ static class Program
         int diagVehicle = -1;
         float musicTestSeconds = 0f;
         string musicOut = "musictest.wav";
+        int musicSeed = int.MinValue; // sentinel: harness default (fixed, byte-comparable)
         foreach (var arg in Environment.GetCommandLineArgs())
         {
             if (arg == "--autobench")
@@ -81,6 +84,9 @@ static class Program
                 musicTestSeconds = ms;
             else if (arg.StartsWith("--musicout=", StringComparison.Ordinal))
                 musicOut = arg["--musicout=".Length..];
+            else if (arg.StartsWith("--musicseed=", StringComparison.Ordinal)
+                     && int.TryParse(arg.AsSpan("--musicseed=".Length), out int mseed))
+                musicSeed = mseed;
         }
 
         if (steerProbe)
@@ -90,7 +96,9 @@ static class Program
 
         if (musicTestSeconds > 0f)
         {
-            Environment.Exit(Diagnostics.MusicTestHarness.Run(musicTestSeconds, musicOut));
+            Environment.Exit(musicSeed != int.MinValue
+                ? Diagnostics.MusicTestHarness.Run(musicTestSeconds, musicOut, musicSeed)
+                : Diagnostics.MusicTestHarness.Run(musicTestSeconds, musicOut));
         }
 
         if (simTestMap != null)

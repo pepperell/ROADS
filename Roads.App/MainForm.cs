@@ -128,6 +128,9 @@ public class MainForm : Form
     /// <summary>Whether the drag dead zone (5 px) has been exceeded.</summary>
     private bool _dragActive;
     private const int DragDeadZone = 5;
+    /// <summary>World position of the dragged node or control point at drag start, so
+    /// <see cref="AbortActiveDrag"/> can revert the geometry on cancel (Escape/right-click).</summary>
+    private Vector2 _dragRevertPos;
 
     /// <summary>World-space radius within which the Destination placement tool will attach a
     /// connector to the nearest road. Larger than SnapDistance so a destination can be dropped
@@ -1574,6 +1577,7 @@ public class MainForm : Form
                         _editorState.DragNodeIndex = nearNode;
                         _dragStartScreenPos = e.Location;
                         _dragOffset = _roadGraph.Nodes[nearNode].Position - worldVec;
+                        _dragRevertPos = _roadGraph.Nodes[nearNode].Position;
                         _dragActive = false;
                         _canvas.Cursor = Cursors.Hand;
                     }
@@ -1649,7 +1653,42 @@ public class MainForm : Form
     }
 
     /// <summary>
-    /// Shared right-click / ESC "cancel" semantics, one step per invocation: aborts the
+    /// Aborts an in-progress node or control-point drag, REVERTING the dragged geometry
+    /// to its pre-drag position: MoveNode's proportional handle rescale is exactly
+    /// inverted by moving back to the start position, and SetControlPoint re-syncs the
+    /// two-way twin. Pending crossing previews are discarded uncommitted (the split only
+    /// ever happens on a mouse-up commit). No-op when nothing is being dragged.
+    /// </summary>
+    /// <returns>True when a drag was active and has been aborted.</returns>
+    private bool AbortActiveDrag()
+    {
+        if (_editorState.IsDraggingNode)
+        {
+            // Skip the revert inside the dead zone: nothing has moved yet, so don't
+            // touch the graph (MoveNode would bump Version and rebuild caches).
+            if (_dragActive)
+                _roadGraph.MoveNode(_editorState.DragNodeIndex, _dragRevertPos);
+            _editorState.DragCrossingPreviews.Clear();
+            _editorState.DragNodeIndex = -1;
+            _canvas.Cursor = Cursors.Default;
+            return true;
+        }
+        if (_editorState.IsDraggingControlPoint)
+        {
+            if (_dragActive)
+                _roadGraph.SetControlPoint(_editorState.DragEdgeIndex,
+                    _editorState.DragControlPointIndex, _dragRevertPos);
+            _editorState.DragEdgeIndex = -1;
+            _editorState.DragControlPointIndex = -1;
+            _canvas.Cursor = Cursors.Default;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Shared right-click / ESC "cancel" semantics, one step per invocation: aborts an
+    /// in-progress node/control-point drag (reverting the geometry), then the
     /// in-progress road chain, then an in-progress water stroke or pending stream chain,
     /// then exits lane-restrict mode, then clears any selection, then switches a
     /// non-Select tool back to Select. Returns whether anything was cancelled — false
@@ -1658,6 +1697,8 @@ public class MainForm : Form
     /// </summary>
     private bool CancelActiveTool()
     {
+        if (AbortActiveDrag())
+            return true;
         if (_editorState.IsDrawingRoad)
         {
             _roadTool.OnCancel(_editorState);
@@ -1769,6 +1810,7 @@ public class MainForm : Form
         var cpPos = bestCp == 1 ? dragEdge.ControlPoint1 : dragEdge.ControlPoint2;
         _dragStartScreenPos = screenPos;
         _dragOffset = cpPos - worldVec;
+        _dragRevertPos = cpPos;
         _dragActive = false;
         _canvas.Cursor = Cursors.Hand;
         return true;
@@ -1787,6 +1829,16 @@ public class MainForm : Form
         else if (e.Button == MouseButtons.Left)
         {
             _uiRoot.OnMouseUp(e.X, e.Y);
+            if (AnyModalVisible)
+            {
+                // A modal overlay is open: never commit world edits under it. Any
+                // gesture that was somehow still live is aborted (drag reverts) instead
+                // of committing — SplitNodeEdgeCrossings must not fire beneath a menu.
+                AbortActiveDrag();
+                _editorState.IsPaintingWater = false;
+                _editorState.WaterLastDabPos = null;
+                return;
+            }
             if (_editorState.IsPaintingWater)
             {
                 // End of a brush/erase stroke.
@@ -1858,6 +1910,19 @@ public class MainForm : Form
             float dy = e.Y - _lastMousePos.Y;
             _camera.Pan(dx, dy);
             _lastMousePos = e.Location;
+            return;
+        }
+
+        // Modal overlays own the pointer: UI hover only — no world hover highlights and
+        // no gesture updates (a node/control-point drag must not keep following the
+        // mouse beneath an open menu; drags are aborted when a modal opens, this gate
+        // enforces the same contract for any state that slips through).
+        if (AnyModalVisible)
+        {
+            _uiRoot.OnMouseMove(e.X, e.Y);
+            _editorState.HoveredNode = -1;
+            _editorState.HoveredEdge = -1;
+            _editorState.HoveredVehicle = -1;
             return;
         }
 

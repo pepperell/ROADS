@@ -353,11 +353,14 @@ public class IntersectionArcCache
         int nodeIndex, int inEdge, RoadEdge inEdgeData, int outEdge, RoadEdge outEdgeData,
         List<IntersectionArc> arcList, List<int> nodeArcIdxList)
     {
-        // A U-turn (outgoing edge returns to the incoming edge's origin) only survives the
+        // A U-turn (back onto the incoming edge's own reverse TWIN) only survives the
         // turn matrix at a dead-end, where one lane is far too narrow for a trackable arc
         // (its radius would be well under a vehicle's minimum turning radius). Generate no
         // arc — SteeringController pivots the vehicle onto the reverse lane instead.
-        if (outEdgeData.ToNode == inEdgeData.FromNode) return;
+        // Twin-based, matching RebuildTurnMatrix: a DIFFERENT road returning to the same
+        // neighbor (parallel roads between the same intersections) is a normal allowed
+        // turn and needs a real arc.
+        if (outEdge == graph.FindReverseEdge(inEdge)) return;
 
         float inStopT = stopLines.GetStopTAtToNode(inEdge);
         float outStartT = stopLines.GetStopTAtFromNode(outEdge);

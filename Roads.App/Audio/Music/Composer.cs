@@ -574,7 +574,8 @@ public sealed class Composer
             return barLen;
         }
 
-        if (_barInChart == 0) BeginChorus(ev, t0);
+        bool chorusStart = _barInChart == 0;
+        if (chorusStart) BeginChorus(ev, t0);
 
         var bar = TransposedBar(_barInChart);
         var nextBar = TransposedBar((_barInChart + 1) % _chart.Bars.Length);
@@ -584,6 +585,15 @@ public sealed class Composer
         float drumLevel = Math.Clamp((_intensity - 0.12f) / 0.35f, 0f, 1f)
             * (1f - DspUtil.SmoothStep(0.35f, 0.75f, _night))
             * (1f - 0.5f * _ambience);
+        // Vamp tunes settle in on the head chorus: the funk groove at full punch from
+        // silence (kick 92 / bass 96, vs the swing head's feathered kit and two-feel
+        // bass) is the loudest entrance in the repertoire — ~2x any other form's first
+        // bar, a jolt right after the near-silent count-in. The first chorus runs the
+        // kit at reduced level (GenBass applies the matching bass restraint); interlude
+        // vamps (_chart switched inside another form) keep full heat — lifting tension
+        // mid-tune is their purpose.
+        if (tune.Form == MusicForm.Vamp && _chorusIndex == 0)
+            drumLevel *= 0.6f;
         bool drumsOwnBar = _role == ChorusRole.Solo && _chart.Bars.Length >= 8
             && _intensity > 0.5f && _barInChart / 4 % 2 == 1;
         float melodyAct = DspUtil.SmoothStep(0.35f, 0.7f, _intensity)
@@ -595,6 +605,14 @@ public sealed class Composer
         GenComp(ev, t0, bar);
         GenPad(ev, t0, bar, nextBar, barLen);
         if (drumLevel > 0.06f) GenDrums(ev, t0, style, drumLevel, lastBar, fillBoost: drumsOwnBar);
+        // Chorus-top section crash — rides the kit's audibility gate and level scaling
+        // (GenDrums' velocity curve). A raw-velocity crash with the kit faded out
+        // (night / far-zoom ambience / low energy) was the single loudest event at app
+        // open: near-silent count-in, no drums, then a full crash on the first downbeat.
+        if (chorusStart && drumLevel > 0.06f && tune.Form != MusicForm.Nocturne && _intensity > 0.3f)
+            Note(ev, ChDrums, Theory.DrCrash,
+                Vel(Math.Max(1, (int)(72 * (0.45f + 0.55f * drumLevel))), 6),
+                t0, (long)(1.5f * _spb));
         if (drumsOwnBar)
         {
             // Trading fours: the drums own this bar; the melody sits out and re-enters fresh.
@@ -885,7 +903,9 @@ public sealed class Composer
     }
 
     /// <summary>Chorus boundary within a Playing tune: interlude switching, head/solo
-    /// role, two-feel, the gear-change lift, lead rotation, and the section crash.</summary>
+    /// role, two-feel, the gear-change lift, and lead rotation. The section crash is
+    /// emitted by <see cref="GenerateBar"/> instead, where the drum layer level exists
+    /// to gate and scale it with the rest of the kit.</summary>
     private void BeginChorus(List<MidiEvent> ev, long t0)
     {
         var tune = _tune!;
@@ -936,9 +956,6 @@ public sealed class Composer
         int bass = _chart == VampChart || tune.Form == MusicForm.Vamp
             ? Theory.GmFingerBass : Theory.GmAcousticBass;
         if (bass != _bassProgram) { _bassProgram = bass; Program(ev, t0, ChBass, bass); }
-
-        if (tune.Form != MusicForm.Nocturne && _intensity > 0.3f)
-            Note(ev, ChDrums, Theory.DrCrash, Vel(72, 6), t0, (long)(1.5f * _sampleRate * 60f / _tempo));
     }
 
     private DrumStyle DrumStyleFor()
@@ -1151,11 +1168,15 @@ public sealed class Composer
         {
             // Fixed funk ostinato transposed to the bar's root; tension pushes toward
             // insistent root 8ths (the pedal that reads as "stuck traffic").
+            // Head-chorus restraint for a vamp TUNE (mirrors the drum-level restraint in
+            // GenerateBar): the ostinato states the groove at reduced velocity on the
+            // first chorus, full punch from chorus two. Interlude vamps keep full heat.
+            float punch = tune.Form == MusicForm.Vamp && _chorusIndex == 0 ? 0.72f : 1f;
             int root = PlaceNear(bar.A.Root, 33, 26, 40);
             if (_tension > 0.7f)
             {
                 for (int e = 0; e < 8; e++)
-                    Note(ev, ChBass, root, Vel(e % 2 == 0 ? 86 : 68, 5), Beat(t0, Swing8(e * 0.5f)), (long)(0.4f * _spb));
+                    Note(ev, ChBass, root, Vel((int)((e % 2 == 0 ? 86 : 68) * punch), 5), Beat(t0, Swing8(e * 0.5f)), (long)(0.4f * _spb));
             }
             else
             {
@@ -1165,7 +1186,7 @@ public sealed class Composer
                     (2.0f, 12, 0.45f, 90), (3.0f, 7, 0.3f, 76), (3.5f, 10, 0.25f, 70),
                 };
                 foreach (var h in hits)
-                    Note(ev, ChBass, root + h.Offset, Vel(h.V, 5), Beat(t0, h.BeatPos), (long)(h.Dur * _spb));
+                    Note(ev, ChBass, root + h.Offset, Vel((int)(h.V * punch), 5), Beat(t0, h.BeatPos), (long)(h.Dur * _spb));
             }
             _prevBassKey = root;
             return;
