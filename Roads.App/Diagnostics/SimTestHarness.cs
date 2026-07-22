@@ -171,9 +171,18 @@ public static class SimTestHarness
         vehicles.VehicleRemoving += (removed, swappedFrom) =>
         {
             totalRemoved++;
-            // Carry the swapped index's counter into the removed slot (mirror MainForm.OnVehicleRemoving).
+            // Carry the swapped index's counter into the removed slot and zero the vacated
+            // slot (mirror MainForm.OnVehicleRemoving) — a reused slot must not inherit a
+            // stale stuck counter into the report.
             if (swappedFrom >= 0 && removed >= 0 && removed < stuckSubsteps.Length && swappedFrom < stuckSubsteps.Length)
+            {
                 stuckSubsteps[removed] = stuckSubsteps[swappedFrom];
+                stuckSubsteps[swappedFrom] = 0;
+            }
+            else if (removed >= 0 && removed < stuckSubsteps.Length)
+            {
+                stuckSubsteps[removed] = 0;
+            }
         };
 
         // ── LOAD (no vehicles) ──────────────────────────────────────────────
@@ -184,8 +193,10 @@ public static class SimTestHarness
             return ExitMapMissing;
         }
 
+        // World settings load from the map (v5+; defaults otherwise) into the instance
+        // the population manager reads, so soaks honor the map's spawn tuning.
         MapSerializer.Load(path, graph, vehicles, camera, sim.Clock, stopSigns, yieldSigns,
-            trafficSignals, population, water, loadVehicles: loadVehicles);
+            trafficSignals, population, water, population.WorldSettings, loadVehicles: loadVehicles);
         sim.RebuildWorldCaches();
         sim.Paused = false;
 

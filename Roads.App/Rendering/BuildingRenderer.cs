@@ -82,9 +82,16 @@ public sealed class BuildingRenderer
 
         if (zoom >= 0.3f)
         {
-            // Halos extend past the footprint AABB; widen the cull test at night.
+            // Ground art extends past the cached footprint AABB — the widest reach is the
+            // work parking pad (clamped to HalfDepth + 12 m toward the node); aprons,
+            // walkways and patios stay inside that. Day cull inflates by that reach so
+            // pads don't pop in at screen edges. (A home walkway toward a very distant
+            // connector node can theoretically exceed it, but it is a 1 px line.)
+            // Night halos reach further still; widen the cull test accordingly.
+            const float groundArtReach = 14f;
             var cullRect = viewRect;
-            cullRect.Inflate(nightFactor > 0f ? 40f : 4f, nightFactor > 0f ? 40f : 4f);
+            cullRect.Inflate(nightFactor > 0f ? 40f : groundArtReach,
+                nightFactor > 0f ? 40f : groundArtReach);
 
             var buildings = layer.Buildings;
             if (zoom < 0.8f)

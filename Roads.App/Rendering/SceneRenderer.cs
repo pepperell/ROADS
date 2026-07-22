@@ -118,7 +118,8 @@ public class SceneRenderer
         set => _heatMap.Enabled = value;
     }
 
-    /// <summary>Draws the faint 100 m alignment grid when set (Settings dialog, Graphics page).</summary>
+    /// <summary>Draws the zoom-adaptive alignment grid when set (toggled from the
+    /// Visibility menu; spacing follows <see cref="GridSpacing"/>).</summary>
     public bool GridEnabled { get; set; } = true;
 
     /// <summary>
@@ -176,8 +177,8 @@ public class SceneRenderer
         var viewRect = camera.GetVisibleWorldRect(info.Width, info.Height);
 
         // Terrain detail (grass mottling) over the base clear color, then water on the
-        // ground plane (under roads, so crossings read as bridges), then a faint
-        // 100 m reference grid kept as an editor alignment aid (optional via Settings).
+        // ground plane (under roads, so crossings read as bridges), then a zoom-adaptive
+        // reference grid kept as an editor alignment aid (optional via the Visibility menu).
         _terrain.Draw(canvas, viewRect, camera.Zoom, darkness);
         _waterRenderer.Draw(canvas, viewRect, camera.Zoom, darkness);
         if (GridEnabled)
@@ -274,6 +275,26 @@ public class SceneRenderer
         _uiRoot.Draw(canvas, info.Width, info.Height);
     }
 
+    /// <summary>Minimum on-screen spacing (px) between adjacent grid lines. The world
+    /// spacing rises through the 1-2-5 decade progression as the camera zooms out, so
+    /// screen spacing always lands in [MinGridScreenSpacingPx, 2.5×) regardless of zoom.</summary>
+    private const float MinGridScreenSpacingPx = 60f;
+
+    /// <summary>Grid spacing (world meters) for the current zoom: the smallest 1/2/5×10^k
+    /// step whose on-screen spacing is at least <see cref="MinGridScreenSpacingPx"/> —
+    /// a fixed spacing would collapse into near-solid noise zoomed out and vanish
+    /// off-screen zoomed in. Round-number spacings keep the grid usable as a distance
+    /// reference at every zoom.</summary>
+    private static float GridSpacing(float zoom)
+    {
+        float minWorld = MinGridScreenSpacingPx / zoom;
+        float pow10 = MathF.Pow(10f, MathF.Floor(MathF.Log10(minWorld)));
+        if (pow10 >= minWorld) return pow10;
+        if (2f * pow10 >= minWorld) return 2f * pow10;
+        if (5f * pow10 >= minWorld) return 5f * pow10;
+        return 10f * pow10;
+    }
+
     private static void DrawGrid(SKCanvas canvas, Camera camera, SKImageInfo info, SKColor gridColor)
     {
         using var gridPaint = new SKPaint
@@ -283,7 +304,7 @@ public class SceneRenderer
             IsAntialias = true
         };
 
-        float gridSize = 100f;
+        float gridSize = GridSpacing(camera.Zoom);
         var view = camera.GetVisibleWorldRect(info.Width, info.Height);
         float worldLeft = view.Left;
         float worldRight = view.Right;
@@ -960,16 +981,17 @@ public class SceneRenderer
     }
 
     /// <summary>
-    /// Faint editor-grid color: a lightened, translucent variant of the terrain base so the
-    /// 100 m alignment grid stays visible over grass without competing with the scenery.
+    /// Editor-grid color: a lightened, translucent variant of the terrain base so the
+    /// alignment grid reads clearly over grass (day and night) while still sitting
+    /// behind the scenery visually.
     /// </summary>
     private static SKColor GetGridColor(float darkness)
     {
         var b = TerrainRenderer.GetBaseColor(darkness);
         return new SKColor(
-            (byte)Math.Min(b.Red + 20, 255),
-            (byte)Math.Min(b.Green + 20, 255),
-            (byte)Math.Min(b.Blue + 20, 255),
-            70);
+            (byte)Math.Min(b.Red + 45, 255),
+            (byte)Math.Min(b.Green + 45, 255),
+            (byte)Math.Min(b.Blue + 45, 255),
+            120);
     }
 }

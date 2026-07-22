@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using Roads.App;
 
@@ -328,8 +329,15 @@ public class RoadGraph
         int outPos = 0, inPos = 0;
         for (int n = 0; n < nodeCount; n++)
         {
+            // The per-node degree fields stay byte-sized (255+ edges at ONE node is
+            // pathological geometry, not a scale target) — but a silent (byte) wrap
+            // would make the node read a truncated or foreign list, so trip loudly.
+            Debug.Assert(outCount[n] <= byte.MaxValue,
+                $"Node {n} has {outCount[n]} outgoing edges - RoadNode.EdgeCount (byte) would wrap.");
+            Debug.Assert(inCount[n] <= byte.MaxValue,
+                $"Node {n} has {inCount[n]} incoming edges - _incomingCount (byte) would wrap.");
             var node = _nodes[n];
-            node.EdgeStartIdx = (ushort)outPos;
+            node.EdgeStartIdx = outPos;
             node.EdgeCount = (byte)outCount[n];
             _nodes[n] = node;
 
@@ -403,6 +411,18 @@ public class RoadGraph
             }
             _reverseEdgeCache[i] = fallback;
         }
+
+#if DEBUG
+        // ActiveEdgeCount drift tripwire: every mutator updates the cached count BEFORE
+        // calling RebuildAdjacency, so a mismatch here means an increment/decrement was
+        // missed or doubled (the L5 class of bug — it previously drifted +1 per two-way
+        // split and healed only on load). Debug builds only; O(E).
+        int activeActual = 0;
+        for (int i = 0; i < edgeCount; i++)
+            if (_edges[i].FromNode >= 0) activeActual++;
+        Debug.Assert(ActiveEdgeCount == activeActual,
+            $"ActiveEdgeCount drift: cached {ActiveEdgeCount}, actual {activeActual}");
+#endif
     }
 
     /// <summary>
@@ -1585,10 +1605,11 @@ public class RoadGraph
         // If reverse exists, split it at (1-t) using the same midNode
         if (reverseEdge >= 0 && _edges[reverseEdge].FromNode >= 0)
         {
+            // SplitEdgeSingle maintains ActiveEdgeCount itself (net +1 per direction) —
+            // no extra increment here, or the count drifts +1 per two-way split.
             var (revFirst, revSecond) = SplitEdgeSingle(reverseEdge, 1f - t, midNode);
             MigrateLaneRestrictionsForSplit(reverseEdge, revFirst, revSecond);
             EdgeSplit?.Invoke(reverseEdge, revFirst, revSecond);
-            ActiveEdgeCount++; // net +1 for the reverse split too
         }
 
         // Rebuild compact adjacency from edges (updates EdgeStartIdx/EdgeCount on all nodes)

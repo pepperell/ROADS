@@ -6,12 +6,12 @@ using Roads.App.World;
 namespace Roads.App.Persistence;
 
 /// <summary>
-/// Binary save/load for road maps. File format version 3.
+/// Binary save/load for road maps. File format version 5.
 /// Saves the road graph (nodes, edges, lane restrictions, traffic control overrides),
 /// camera state, simulation time, the water layer (v3 — always present, even when
-/// vehicles are not saved), and optionally all vehicle state plus the resident
-/// population (v2). v1 files (no population section) and v2 files (no water section)
-/// still load — their vehicles fall back to legacy handling and their water is empty.
+/// vehicles are not saved), the per-world settings (v5 — always present), and optionally
+/// all vehicle state plus the resident population (v2). Older files still load — missing
+/// sections fall back to legacy handling (empty water, default world settings).
 /// Load is all-or-nothing: the entire stream is parsed and index-validated into
 /// temporaries before any live object is touched, so a truncated or corrupt file
 /// throws while the previous world remains fully intact.
@@ -19,7 +19,11 @@ namespace Roads.App.Persistence;
 public static class MapSerializer
 {
     private static readonly byte[] Magic = "ROAD"u8.ToArray();
-    private const ushort FormatVersion = 3;
+    // v5: world-settings section (through-traffic spawn tuning) appended after water.
+    // v4: edge Flags widened byte → ushort on disk (EdgeFlags is a ushort enum — a byte
+    //     write silently dropped any flag above bit 7 on round-trip). v3: water layer.
+    //     v2: resident population. Loads accept all older versions.
+    private const ushort FormatVersion = 5;
 
     /// <summary>
     /// Saves the current map state to a binary file. Crash-safe: the bytes are written to
@@ -32,7 +36,8 @@ public static class MapSerializer
     public static void Save(string path, RoadGraph graph, VehicleStore vehicles,
         Camera camera, SimulationClock clock,
         StopSignSystem stopSigns, YieldSignSystem yieldSigns, TrafficSignalSystem signals,
-        PopulationManager population, WaterLayer water, bool includeVehicles)
+        PopulationManager population, WaterLayer water, WorldSettings worldSettings,
+        bool includeVehicles)
     {
         string tmpPath = path + ".tmp";
         try
@@ -41,7 +46,7 @@ public static class MapSerializer
             using (var w = new BinaryWriter(fs))
             {
                 WriteMapData(w, graph, vehicles, camera, clock, stopSigns, yieldSigns,
-                    signals, population, water, includeVehicles);
+                    signals, population, water, worldSettings, includeVehicles);
                 w.Flush();
                 fs.Flush(flushToDisk: true); // durable before the move commits it
             }
@@ -54,13 +59,14 @@ public static class MapSerializer
         }
     }
 
-    /// <summary>Writes the complete map payload (header + sections 1–8) to
+    /// <summary>Writes the complete map payload (header + sections 1–9) to
     /// <paramref name="w"/> — the format core wrapped by <see cref="Save"/>'s
     /// crash-safe temp-file-then-move commit.</summary>
     private static void WriteMapData(BinaryWriter w, RoadGraph graph, VehicleStore vehicles,
         Camera camera, SimulationClock clock,
         StopSignSystem stopSigns, YieldSignSystem yieldSigns, TrafficSignalSystem signals,
-        PopulationManager population, WaterLayer water, bool includeVehicles)
+        PopulationManager population, WaterLayer water, WorldSettings worldSettings,
+        bool includeVehicles)
     {
         // Header
         w.Write(Magic);
@@ -93,7 +99,7 @@ public static class MapSerializer
             w.Write(e.SpeedLimit);
             w.Write(e.LaneCount);
             w.Write((byte)e.RoadType);
-            w.Write((byte)e.Flags);
+            w.Write((ushort)e.Flags); // full width — EdgeFlags is a ushort enum (v4)
             w.Write(e.ControlPoint1.X);
             w.Write(e.ControlPoint1.Y);
             w.Write(e.ControlPoint2.X);
@@ -264,6 +270,12 @@ public static class MapSerializer
             w.Write(s.P3.X); w.Write(s.P3.Y);
             w.Write(s.Width);
         }
+
+        // Section 9 — World Settings (v5). Always written, directly after Water.
+        w.Write(worldSettings.ThroughTrafficEnabled);
+        w.Write(worldSettings.ThroughTrafficMultiplier);
+        w.Write(worldSettings.ThroughTrafficBaseCarsPerMin);
+        w.Write(worldSettings.RushHourVariation);
     }
 
     /// <summary>
@@ -274,11 +286,12 @@ public static class MapSerializer
     public static bool Load(string path, RoadGraph graph, VehicleStore vehicles,
         Camera camera, SimulationClock clock,
         StopSignSystem stopSigns, YieldSignSystem yieldSigns, TrafficSignalSystem signals,
-        PopulationManager population, WaterLayer water, bool loadVehicles)
+        PopulationManager population, WaterLayer water, WorldSettings worldSettings,
+        bool loadVehicles)
     {
         using var fs = File.OpenRead(path);
         return Load(fs, graph, vehicles, camera, clock, stopSigns, yieldSigns, signals,
-            population, water, loadVehicles);
+            population, water, worldSettings, loadVehicles);
     }
 
     /// <summary>
@@ -295,7 +308,8 @@ public static class MapSerializer
     public static bool Load(Stream stream, RoadGraph graph, VehicleStore vehicles,
         Camera camera, SimulationClock clock,
         StopSignSystem stopSigns, YieldSignSystem yieldSigns, TrafficSignalSystem signals,
-        PopulationManager population, WaterLayer water, bool loadVehicles)
+        PopulationManager population, WaterLayer water, WorldSettings worldSettings,
+        bool loadVehicles)
     {
         using var r = new BinaryReader(stream);
 
@@ -351,7 +365,8 @@ public static class MapSerializer
                 SpeedLimit = r.ReadSingle(),
                 LaneCount = r.ReadByte(),
                 RoadType = (RoadType)r.ReadByte(),
-                Flags = (EdgeFlags)r.ReadByte(),
+                // v4 widened Flags to the enum's full ushort; pre-v4 files stored one byte.
+                Flags = version >= 4 ? (EdgeFlags)r.ReadUInt16() : (EdgeFlags)r.ReadByte(),
                 ControlPoint1 = new Vector2(r.ReadSingle(), r.ReadSingle()),
                 ControlPoint2 = new Vector2(r.ReadSingle(), r.ReadSingle())
             };
@@ -496,6 +511,19 @@ public static class MapSerializer
             }
         }
 
+        // Section 9 — World Settings (v5+). Pre-v5 files carry none; the commit phase
+        // resets the live instance to defaults. Numeric values are sanitized (finite,
+        // clamped to the UI ranges) so a corrupt float can't become a spawn flood.
+        bool wsThroughEnabled = true, wsRushHour = true;
+        float wsMultiplier = 1f, wsBasePerMin = 0f;
+        if (version >= 5)
+        {
+            wsThroughEnabled = r.ReadBoolean();
+            wsMultiplier = SanitizeRange(r.ReadSingle(), 0f, WorldSettings.MaxMultiplier, 1f);
+            wsBasePerMin = SanitizeRange(r.ReadSingle(), 0f, WorldSettings.MaxBaseCarsPerMin, 0f);
+            wsRushHour = r.ReadBoolean();
+        }
+
         // ── Commit phase ────────────────────────────────────────────────────────
         // Replaces the live world from the validated temporaries above. No stream reads
         // and no unguarded indexing happen from here on, so there is no failure window
@@ -592,8 +620,20 @@ public static class MapSerializer
         else
             water.Clear();
 
+        // World settings: mutate the shared instance IN PLACE (PopulationManager and the
+        // World Settings panel hold the same reference). Pre-v5 temporaries are defaults.
+        worldSettings.ThroughTrafficEnabled = wsThroughEnabled;
+        worldSettings.ThroughTrafficMultiplier = wsMultiplier;
+        worldSettings.ThroughTrafficBaseCarsPerMin = wsBasePerMin;
+        worldSettings.RushHourVariation = wsRushHour;
+
         return hasVehicles;
     }
+
+    /// <summary>Sanitizes a file-supplied float: non-finite values fall back to
+    /// <paramref name="fallback"/>, finite ones clamp into [min, max].</summary>
+    private static float SanitizeRange(float value, float min, float max, float fallback)
+        => float.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
 
     /// <summary>Cap on list preallocation from file-supplied element counts. Lists grow
     /// past it normally for legitimately large maps; its only job is turning a corrupt

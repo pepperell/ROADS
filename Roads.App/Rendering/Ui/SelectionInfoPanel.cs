@@ -7,11 +7,11 @@ namespace Roads.App.Rendering.Ui;
 /// <summary>
 /// Read-only details for the current node or edge selection (Select tool), under a
 /// SELECTION title row (matching the statistics panel): node flags and lane-restrict mode
-/// state, or edge lane count / speed limit / road type; "No selection" when nothing is
-/// selected. Deliberately contains NO keyboard-shortcut hints — those live in the legend
-/// panel. Always visible (same-validity guards the retired status bar used decide the
-/// content, not the visibility); height follows the line count via <see cref="Measure"/>
-/// with a reused line list, and the bottom-left stack positions it above its siblings.
+/// state, or edge lane count / speed limit / road type. Deliberately contains NO
+/// keyboard-shortcut hints — those live in the pause menu's legend. Hidden entirely while
+/// nothing valid is selected (live <see cref="Panel.VisibleWhen"/> gate; the bottom-left
+/// stack skips hidden children, so the stack collapses); height follows the line count
+/// via <see cref="Measure"/> with a reused line list.
 /// </summary>
 public class SelectionInfoPanel : Panel
 {
@@ -22,11 +22,9 @@ public class SelectionInfoPanel : Panel
     private readonly RoadGraph _graph;
     private readonly EditorState _editorState;
     private readonly List<string> _lines = new(6);
-    private bool _hasSelection;
 
     private readonly SKPaint _titlePaint = new() { Color = new SKColor(200, 200, 200), IsAntialias = true };
     private readonly SKPaint _labelPaint = new() { Color = new SKColor(200, 200, 200), IsAntialias = true };
-    private readonly SKPaint _dimPaint = new() { Color = UiTheme.TextDim, IsAntialias = true };
     private readonly SKPaint _headerPaint = new() { Color = new SKColor(100, 200, 255), IsAntialias = true };
 
     public SelectionInfoPanel(RoadGraph graph, EditorState editorState)
@@ -36,6 +34,7 @@ public class SelectionInfoPanel : Panel
         BackgroundColor = UiTheme.PanelBackground;
         BorderColor = UiTheme.Outline;
         Size = new SKSize(PanelWidth, Pad * 2f);
+        VisibleWhen = () => HasValidNodeSelection() || HasValidEdgeSelection();
     }
 
     private bool HasValidNodeSelection()
@@ -60,7 +59,7 @@ public class SelectionInfoPanel : Panel
 
         for (int i = 0; i < _lines.Count; i++)
         {
-            var paint = !_hasSelection ? _dimPaint : i == 0 ? _headerPaint : _labelPaint;
+            var paint = i == 0 ? _headerPaint : _labelPaint;
             canvas.DrawText(_lines[i], Bounds.Left + Pad,
                 textY + (i + 1) * LineHeight, SKTextAlign.Left, UiTheme.Font12, paint);
         }
@@ -69,7 +68,6 @@ public class SelectionInfoPanel : Panel
     private void BuildLines()
     {
         _lines.Clear();
-        _hasSelection = true;
 
         if (HasValidNodeSelection())
         {
@@ -92,10 +90,6 @@ public class SelectionInfoPanel : Panel
             _lines.Add($"Speed: {edge.SpeedLimit * 2.23694f:F0} mph");
             _lines.Add($"Type: {edge.RoadType}");
         }
-        else
-        {
-            _hasSelection = false;
-            _lines.Add("No selection");
-        }
+        // No else: with neither selection valid the VisibleWhen gate hides the panel.
     }
 }

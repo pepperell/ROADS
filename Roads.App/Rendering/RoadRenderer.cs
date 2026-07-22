@@ -275,7 +275,8 @@ public class RoadRenderer
                     var from = graph.Nodes[edge.FromNode].Position;
                     var to   = graph.Nodes[edge.ToNode].Position;
                     float halfW = GeometryUtil.RoadHalfWidth(graph, i);
-                    if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to, halfW), viewRect))
+                    if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to,
+                            edge.ControlPoint1, edge.ControlPoint2, halfW), viewRect))
                         continue;
                 }
 
@@ -305,7 +306,8 @@ public class RoadRenderer
                     var from = graph.Nodes[edge.FromNode].Position;
                     var to   = graph.Nodes[edge.ToNode].Position;
                     float halfW = GeometryUtil.RoadHalfWidth(graph, i);
-                    if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to, halfW), viewRect))
+                    if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to,
+                            edge.ControlPoint1, edge.ControlPoint2, halfW), viewRect))
                         continue;
                 }
 
@@ -332,7 +334,8 @@ public class RoadRenderer
                 var from = graph.Nodes[edge.FromNode].Position;
                 var to   = graph.Nodes[edge.ToNode].Position;
                 float halfW = GeometryUtil.RoadHalfWidth(graph, i);
-                if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to, halfW), viewRect))
+                if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to,
+                        edge.ControlPoint1, edge.ControlPoint2, halfW), viewRect))
                     continue;
             }
 
@@ -361,7 +364,8 @@ public class RoadRenderer
                 var from = graph.Nodes[edge.FromNode].Position;
                 var to   = graph.Nodes[edge.ToNode].Position;
                 float halfW = GeometryUtil.RoadHalfWidth(graph, i);
-                if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to, halfW), viewRect))
+                if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to,
+                        edge.ControlPoint1, edge.ControlPoint2, halfW), viewRect))
                     continue;
             }
 

@@ -61,8 +61,11 @@ public struct RoadNode
 {
     /// <summary>World-space position in meters.</summary>
     public Vector2 Position;
-    /// <summary>Start index into RoadGraph's adjacency array for this node's outgoing edges.</summary>
-    public ushort EdgeStartIdx;
+    /// <summary>Start index into RoadGraph's adjacency array for this node's outgoing edges.
+    /// An int: the index counts TOTAL active edges graph-wide, and a ushort silently wrapped
+    /// past 65,535 (≈33K two-way roads — within city-scale ambitions), making nodes read
+    /// other nodes' outgoing lists. Not serialized — rebuilt by RebuildAdjacency.</summary>
+    public int EdgeStartIdx;
     /// <summary>Number of outgoing edges from this node.</summary>
     public byte EdgeCount;
     /// <summary>Traffic control flags for this intersection.</summary>

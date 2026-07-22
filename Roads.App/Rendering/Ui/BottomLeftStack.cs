@@ -8,8 +8,8 @@ namespace Roads.App.Rendering.Ui;
 /// vehicle-info panel, and selection-info panel never overlap and always sit flush above
 /// one another regardless of which combination is shown (this replaces the stale
 /// hardcoded HUD-height constant that made the old panels overlap by 28 px).
-/// Anchored as a second bottom-left column just right of the (240 px wide) shortcut
-/// legend, since the stack's panels are shown by default and would otherwise cover it.
+/// Anchored flush to the bottom-left corner (the shortcut legend that once occupied this
+/// column now lives in the pause menu, so the stack fills the freed space).
 /// Children are stacked in ADD order, bottom-first. The container itself draws nothing
 /// and is input-transparent; its children consume input normally.
 /// </summary>
@@ -21,7 +21,7 @@ public class BottomLeftStack : Panel
     {
         HitTestSelf = false;
         Anchor = UiAnchor.BottomLeft;
-        Margin = new SKPoint(258f, 10f);
+        Margin = new SKPoint(10f, 10f);
         Size = new SKSize(0f, 0f);
     }
 

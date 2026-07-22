@@ -64,6 +64,17 @@ public class EditorState
     /// <summary>POI type to assign when placing destination nodes (sticky across tool switches).</summary>
     public POIType SelectedPOIType { get; set; } = POIType.Home;
 
+    /// <summary>True while the menu bar's Visibility submenu (panel/overlay toggles) is
+    /// open. Toggled by the Visibility button; gates the submenu's VisibleWhen. Not
+    /// touched by <see cref="ResetToolState"/> — the menu is independent of tool state.
+    /// The MenuBar keeps this and <see cref="WorldSettingsMenuOpen"/> mutually exclusive
+    /// (the two submenus would overlap).</summary>
+    public bool VisibilityMenuOpen { get; set; }
+
+    /// <summary>True while the menu bar's World Settings submenu (per-world spawn tuning,
+    /// saved in the map file) is open. Same lifecycle as <see cref="VisibilityMenuOpen"/>.</summary>
+    public bool WorldSettingsMenuOpen { get; set; }
+
     // ── Road-toolbar options (sticky across tool switches, like SelectedPOIType) ──
     // Applied to newly drawn roads by RoadTool and to clicked segments by UpdateSegmentTool.
     // Mutual exclusion is enforced in the setters so the invariants hold for every caller:

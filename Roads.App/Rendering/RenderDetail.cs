@@ -73,25 +73,29 @@ public static class RenderDetail
     }
 
     /// <summary>
-    /// Builds a conservative world-space AABB for a road edge, given the positions of
-    /// its two endpoint nodes and the total road half-width. Because the edge is a cubic
-    /// Bézier that may bow outside the endpoint bounding box, an additional
-    /// <paramref name="margin"/> (default 20 m — typically larger than any road half-width)
-    /// is added on all sides so no visible geometry is accidentally culled.
-    /// The road half-width is included so that the asphalt surface is fully enclosed.
+    /// Builds a conservative world-space AABB for a road edge from all four Bézier
+    /// control points. A cubic Bézier lies entirely within the convex hull of its
+    /// control points, so this AABB genuinely contains the curve — an endpoint-only
+    /// box with a fixed fudge margin did not: with handles ≈ chord/3 a curve bows up
+    /// to ~chord/4 outside the endpoint box, so long sweeping curves (chord ≳ 90 m)
+    /// were culled while their belly was still on-screen. The road half-width encloses
+    /// the asphalt surface; <paramref name="margin"/> now only covers strokes drawn
+    /// just beyond it (curbs, dashed edge lines).
     /// </summary>
     /// <param name="from">Position of the FromNode in world space.</param>
     /// <param name="to">Position of the ToNode in world space.</param>
+    /// <param name="cp1">First Bézier control point.</param>
+    /// <param name="cp2">Second Bézier control point.</param>
     /// <param name="roadHalfWidth">Half the total road surface width (LaneCount * LaneWidth).</param>
-    /// <param name="margin">Additional outward margin to account for Bézier bowing.</param>
-    public static SKRect EdgeBounds(Vector2 from, Vector2 to,
-        float roadHalfWidth, float margin = 20f)
+    /// <param name="margin">Additional outward margin for strokes beyond the surface.</param>
+    public static SKRect EdgeBounds(Vector2 from, Vector2 to, Vector2 cp1, Vector2 cp2,
+        float roadHalfWidth, float margin = 5f)
     {
         float expand = roadHalfWidth + margin;
-        float left   = MathF.Min(from.X, to.X) - expand;
-        float right  = MathF.Max(from.X, to.X) + expand;
-        float top    = MathF.Min(from.Y, to.Y) - expand;
-        float bottom = MathF.Max(from.Y, to.Y) + expand;
+        float left   = MathF.Min(MathF.Min(from.X, to.X), MathF.Min(cp1.X, cp2.X)) - expand;
+        float right  = MathF.Max(MathF.Max(from.X, to.X), MathF.Max(cp1.X, cp2.X)) + expand;
+        float top    = MathF.Min(MathF.Min(from.Y, to.Y), MathF.Min(cp1.Y, cp2.Y)) - expand;
+        float bottom = MathF.Max(MathF.Max(from.Y, to.Y), MathF.Max(cp1.Y, cp2.Y)) + expand;
         return new SKRect(left, top, right, bottom);
     }
 }

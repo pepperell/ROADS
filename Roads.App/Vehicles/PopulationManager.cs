@@ -86,9 +86,17 @@ public class PopulationManager
     private const float MoveInHeadwaySeconds = 2.5f;
 
     /// <summary>Through-traffic spawn rate, in cars per second per housed resident at the peak
-    /// time-of-day factor (1.0). Scaled by <see cref="HousedPopulation"/> and
-    /// <see cref="TimeOfDayTrafficFactor"/>. Tunable; the spawn-clearance gate caps real bursts.</summary>
+    /// time-of-day factor (1.0). Scaled by <see cref="HousedPopulation"/>,
+    /// <see cref="TimeOfDayTrafficFactor"/>, and the per-world settings in
+    /// <see cref="WorldSettings"/>. The spawn-clearance gate caps real bursts.</summary>
     private const float ThroughTrafficBaseRate = 0.001f;
+
+    /// <summary>Per-world spawn tuning (through-traffic rate/switches), shared BY REFERENCE
+    /// with the owner and MapSerializer — the serializer mutates the instance in place on
+    /// load, and <see cref="ProcessThroughTraffic"/> reads it every tick, so loaded or
+    /// UI-edited values apply immediately. Defaults preserve historical behavior for
+    /// owners that never assign it (harnesses without a world-settings file section).</summary>
+    public World.WorldSettings WorldSettings { get; set; } = new();
 
     /// <summary>Upper bound on the fractional-car spawn credit, so a blocked entry/exit node can't
     /// build a backlog that floods once it clears.</summary>
@@ -220,6 +228,13 @@ public class PopulationManager
             ClearPopulation();
         }
 
+        // Ambient through-traffic: non-resident cars entering at one active entry/exit node
+        // and leaving via a different one, at a rate set by the world settings. Deliberately
+        // BEFORE the schedule-mode early-out: the population-independent base rate must
+        // produce cars in a world with entry/exits but no homes at all (schedule mode off,
+        // housed population simply 0). The POI registry rebuild above is its only dependency.
+        ProcessThroughTraffic(simDt, timeOfDay);
+
         if (!ScheduleModeEnabled) return;
 
         // Check if POIs changed while schedule mode is active
@@ -241,10 +256,6 @@ public class PopulationManager
         // departures. Both draw from one per-tick spawn budget to bound pop-in.
         int movedIn = ProcessMoveIns(timeOfDay, MaxSpawnsPerTick);
         int departed = ProcessDepartures(timeOfDay, MaxSpawnsPerTick - movedIn);
-
-        // Ambient through-traffic: non-resident cars entering at one active entry/exit node and
-        // leaving via a different one, at a population- and time-of-day-scaled rate.
-        ProcessThroughTraffic(simDt, timeOfDay);
 
         // Graceful deletion: spawn people out of draining nodes and out of their homes (emigrants),
         // then close & remove emptied roads. Shares the remaining per-tick spawn budget so a busy
@@ -1514,23 +1525,31 @@ public class PopulationManager
 
     /// <summary>
     /// Spawns non-resident through-traffic entering at an entry-capable entry/exit node and bound for
-    /// a distinct exit-capable one, at a rate of <see cref="ThroughTrafficBaseRate"/> × housed
-    /// population × <see cref="TimeOfDayTrafficFactor"/>. Strict gate: requires a housed population and
-    /// a valid pass-through pair (an entry-capable node and a different exit-capable node — e.g. the
+    /// a distinct exit-capable one. The rate combines the population-driven component
+    /// (<see cref="ThroughTrafficBaseRate"/> × housed population × the world multiplier) with the
+    /// world's population-independent floor (<see cref="World.WorldSettings.ThroughTrafficBaseCarsPerMin"/>),
+    /// shaped by <see cref="TimeOfDayTrafficFactor"/> unless the world disables rush-hour variation.
+    /// Gate: a positive rate (the flat floor lets an unpopulated world still carry traffic) and a
+    /// valid pass-through pair (an entry-capable node and a different exit-capable node — e.g. the
     /// two ends of a one-way road).
     /// </summary>
     private void ProcessThroughTraffic(float simDt, double timeOfDay)
     {
+        var ws = WorldSettings;
         int housed = HousedPopulation;
         GatherEntryNodes(); // _entryNodesBuffer (spawn origins)
         GatherExitNodes();  // _exitNodesBuffer (despawn targets) — both consumed by TrySpawnThroughCar
-        if (housed <= 0 || !CanPassThrough())
+        float factor = ws.RushHourVariation ? TimeOfDayTrafficFactor(timeOfDay) : 1f;
+        float rate = ws.ThroughTrafficEnabled
+            ? (ThroughTrafficBaseRate * housed * ws.ThroughTrafficMultiplier
+               + ws.ThroughTrafficBaseCarsPerMin / 60f) * factor // cars/sec
+            : 0f;
+        if (rate <= 0f || !CanPassThrough())
         {
             _throughSpawnAccumulator = 0f; // no backlog builds while inactive
             return;
         }
 
-        float rate = ThroughTrafficBaseRate * housed * TimeOfDayTrafficFactor(timeOfDay); // cars/sec
         _throughSpawnAccumulator = Math.Min(_throughSpawnAccumulator + rate * simDt, ThroughAccumulatorCap);
 
         int spawned = 0;

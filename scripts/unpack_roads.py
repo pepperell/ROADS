@@ -115,7 +115,8 @@ def unpack(filepath: str) -> str:
             length, speed = read_fmt(f, "<ff")
             (lanes,) = read_fmt(f, "<B")
             (rtype,) = read_fmt(f, "<B")
-            (eflags,) = read_fmt(f, "<B")
+            # v4 widened edge Flags to ushort (EdgeFlags is a ushort enum); pre-v4 = 1 byte.
+            (eflags,) = read_fmt(f, "<H" if version >= 4 else "<B")
             cp1x, cp1y, cp2x, cp2y = read_fmt(f, "<ffff")
             edges.append((from_n, to_n, length, speed, lanes, rtype, eflags,
                           cp1x, cp1y, cp2x, cp2y))
@@ -255,6 +256,18 @@ def unpack(filepath: str) -> str:
                     w(f"  [{i:4d}] ({p0x:8.1f},{p0y:8.1f}) -> ({p3x:8.1f},{p3y:8.1f})  w={width:.1f}m")
             if water_segments > 10:
                 w(f"  ... {water_segments - 10} more")
+            w()
+
+        # --- Section 9: World Settings (v5+) ---
+        if version >= 5:
+            (through_enabled,) = read_fmt(f, "<?")
+            (through_mult,) = read_fmt(f, "<f")
+            (base_per_min,) = read_fmt(f, "<f")
+            (rush_hour,) = read_fmt(f, "<?")
+            w("=== WORLD SETTINGS ===")
+            w(f"  Through traffic  : {'on' if through_enabled else 'off'}  multiplier=x{through_mult:.2f}")
+            w(f"  Base traffic     : {base_per_min:.1f} cars/min (population-independent)")
+            w(f"  Rush-hour curve  : {'on' if rush_hour else 'off'}")
             w()
 
         # --- Summary ---

@@ -26,6 +26,15 @@ public static class SimRandom
     /// </summary>
     public static void Seed(int seed) => _rng = new Random(seed);
 
+    /// <summary>
+    /// Reseeds the simulation RNG from fresh entropy (the parameterless <see cref="Random"/>
+    /// constructor), discarding the current stream. The GUI calls this whenever a built-in
+    /// world is loaded (title backdrop, New-game template) so each visit starts a genuinely
+    /// new traffic sequence rather than continuing wherever the previous world left off.
+    /// Never called by the headless harnesses — they need <see cref="Seed"/> determinism.
+    /// </summary>
+    public static void Reseed() => _rng = new Random();
+
     /// <summary>Returns a non-negative random integer less than <paramref name="maxExclusive"/>.</summary>
     public static int Next(int maxExclusive) => _rng.Next(maxExclusive);
 

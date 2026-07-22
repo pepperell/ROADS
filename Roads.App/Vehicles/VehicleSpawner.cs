@@ -5,7 +5,8 @@ using Roads.App.World;
 namespace Roads.App.Vehicles;
 
 /// <summary>
-/// Manages vehicle spawning, pathfinding, and rerouting. Manual spawns (V key) start on a
+/// Manages vehicle spawning, pathfinding, and rerouting. Manual spawns
+/// (<see cref="SpawnRandom"/>, currently not bound to any UI) start on a
 /// random active edge; scheduled traffic (residents, through-cars) enters via
 /// PopulationManager at EntryExit nodes. Destination locations are determined by
 /// NodeFlags.Destination on road graph nodes.

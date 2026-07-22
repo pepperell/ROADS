@@ -55,7 +55,6 @@ public class MainForm : Form
     private readonly Ui.MinimapPanel _minimapPanel;
     private readonly Ui.StatisticsPanel _statisticsPanel;
     private readonly Ui.PerformanceHudPanel _hudPanel;
-    private readonly Ui.LegendPanel _legendPanel = new();
     private readonly Ui.SettingsDialog _settingsDialog;
     private readonly Ui.TitleScreen _titleScreen;
     private readonly Ui.PauseMenu _pauseMenu;
@@ -108,6 +107,10 @@ public class MainForm : Form
     private readonly Stopwatch _perfStopwatch = new();
     private readonly Stopwatch _autoSaveClock = Stopwatch.StartNew();
     private readonly POIRegistry _poiRegistry = new();
+    /// <summary>Per-world settings saved inside the map file. ONE instance for the whole
+    /// app lifetime, shared by reference with PopulationManager, MapSerializer (which
+    /// mutates it in place on load), AutoSaveManager, and the World Settings panel.</summary>
+    private readonly World.WorldSettings _worldSettings = new();
     private readonly VehicleSpawner _spawner;
     private readonly PopulationManager _populationManager;
     private readonly GraphChangeHandler _graphChangeHandler;
@@ -146,7 +149,8 @@ public class MainForm : Form
     /// (speed &lt; <see cref="StuckSpeedThreshold"/>), reset to 0 the moment it moves. Updated every
     /// tick in <see cref="OnTick"/>; read by the deadlock-capture dump (press <c>D</c>) to report how
     /// long each car has been wedged and to gather a whole stuck cluster. Index-aligned to the
-    /// VehicleStore; follows swap-and-pop removals via <see cref="OnVehicleRemoving"/>.</summary>
+    /// VehicleStore; follows swap-and-pop removals (vacated slot zeroed) via
+    /// <see cref="OnVehicleRemoving"/> and is zeroed wholesale on <see cref="OnVehiclesCleared"/>.</summary>
     private int[] _stuckTicks = System.Array.Empty<int>();
     /// <summary>Speed (m/s) below which a vehicle counts as "stopped" for stuck-time tracking.</summary>
     private const float StuckSpeedThreshold = 0.1f;
@@ -172,6 +176,7 @@ public class MainForm : Form
         _editorState.ActiveTool = EditorTool.Select;
         _spawner = new VehicleSpawner(_roadGraph, _vehicles, _vehicleGrid);
         _populationManager = new PopulationManager(_roadGraph, _vehicles, _vehicleGrid, _poiRegistry, _settings.MaxVehicles);
+        _populationManager.WorldSettings = _worldSettings;
         _graphChangeHandler = new GraphChangeHandler(_roadGraph, _editorState, _vehicles, _edgeSpatialGrid, _spawner);
         _simLoop = new SimulationLoop(_roadGraph, _vehicles, _vehicleGrid, _stopLineCache, _intersectionArcs, _edgeSpatialGrid, _trafficSignals, _stopSigns, _yieldSigns, _spawner, _populationManager, _editorState, _graphChangeHandler);
         _simLoop.Paused = true;
@@ -185,13 +190,16 @@ public class MainForm : Form
         var roadSubmenu = new Ui.RoadSubmenu(_editorState);
         var signalSubmenu = new Ui.SignalSubmenu(_editorState);
         var waterSubmenu = new Ui.WaterSubmenu(_editorState);
+        var visibilitySubmenu = new Ui.VisibilitySubmenu(_editorState, () => _settings, MutateSettings);
+        var worldSettingsSubmenu = new Ui.WorldSettingsSubmenu(_editorState, _worldSettings);
         var clockPanel = new Ui.ClockPanel(_simLoop, OnUiAction);
         _uiRoot.Add(menuBar);
         _uiRoot.Add(poiSubmenu);
         _uiRoot.Add(roadSubmenu);
         _uiRoot.Add(signalSubmenu);
         _uiRoot.Add(waterSubmenu);
-        _uiRoot.Add(_legendPanel);
+        _uiRoot.Add(visibilitySubmenu);
+        _uiRoot.Add(worldSettingsSubmenu);
         _uiRoot.Add(clockPanel);
 
         // Bottom-left stack (second column, right of the shortcut legend): HUD at the very
@@ -233,7 +241,8 @@ public class MainForm : Form
         GateToInGame(roadSubmenu);
         GateToInGame(signalSubmenu);
         GateToInGame(waterSubmenu);
-        GateToInGame(_legendPanel);
+        GateToInGame(visibilitySubmenu);
+        GateToInGame(worldSettingsSubmenu);
         GateToInGame(clockPanel);
         GateToInGame(bottomLeftStack);
         GateToInGame(_minimapPanel);
@@ -244,7 +253,8 @@ public class MainForm : Form
         // backup format is identical to a manual save (minus vehicles, which are transient).
         // Triggered from the render-timer tick so it runs on the UI thread with no locking.
         _autoSave = new Persistence.AutoSaveManager(_roadGraph, _vehicles, _camera,
-            _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals, _populationManager, _waterLayer);
+            _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals, _populationManager,
+            _waterLayer, _worldSettings);
 
         // Push the loaded settings into every live system before the first frame (all
         // targets — panels, renderer, autosave, sim — exist by this point).
@@ -456,16 +466,28 @@ public class MainForm : Form
         _editorState.HoveredVehicle = FixupVehicleIndex(_editorState.HoveredVehicle, removed, swappedFrom);
 
         // Keep the stuck-time tracker index-aligned across swap-and-pop: the vehicle at swappedFrom
-        // moved into the removed slot, so its counter follows it.
+        // moved into the removed slot, so its counter follows it; the vacated slot (the tail after a
+        // swap, or the removed slot itself when the tail was removed) is zeroed so the next spawn
+        // that reuses it starts clean instead of inheriting a stale counter.
         if (swappedFrom >= 0 && removed >= 0 && removed < _stuckTicks.Length && swappedFrom < _stuckTicks.Length)
+        {
             _stuckTicks[removed] = _stuckTicks[swappedFrom];
+            _stuckTicks[swappedFrom] = 0;
+        }
+        else if (removed >= 0 && removed < _stuckTicks.Length)
+        {
+            _stuckTicks[removed] = 0;
+        }
     }
 
-    /// <summary>Drops editor-held vehicle indices when the store is bulk-cleared.</summary>
+    /// <summary>Drops editor-held vehicle indices when the store is bulk-cleared, and zeroes
+    /// the stuck-time tracker — counters from the previous population must not pollute the
+    /// first D-key capture after a map load.</summary>
     private void OnVehiclesCleared()
     {
         _editorState.SelectedVehicle = -1;
         _editorState.HoveredVehicle = -1;
+        System.Array.Clear(_stuckTicks, 0, _stuckTicks.Length);
     }
 
     private static int FixupVehicleIndex(int holder, int removed, int swappedFrom)
@@ -694,8 +716,8 @@ public class MainForm : Form
     }
 
     /// <summary>
-    /// Handles keyboard input: V to spawn vehicles, +/- to adjust lane count on selected edge,
-    /// [/] to adjust speed limit, P to toggle the performance HUD, M to toggle the minimap,
+    /// Handles keyboard input: +/- to adjust lane count on selected edge,
+    /// P to toggle the performance HUD, M to toggle the minimap,
     /// N to toggle the statistics panel, Space to pause/unpause, comma/period to
     /// decrease/increase simulation speed (1x-64x). While the Settings dialog is open,
     /// Escape cancels it and every other key is swallowed (modal).
@@ -725,13 +747,6 @@ public class MainForm : Form
             return;
         }
 
-        // Press 'V' to spawn a vehicle with a random path
-        if (e.KeyCode == Keys.V && _roadGraph.ActiveEdgeCount > 0)
-        {
-            _spawner.SpawnRandom();
-            e.Handled = true;
-        }
-
         // +/- to change lane count on selected edge
         if (_editorState.ActiveTool == EditorTool.Select && _editorState.SelectedEdge >= 0)
         {
@@ -746,16 +761,6 @@ public class MainForm : Form
                 else if (e.KeyCode == Keys.OemMinus || e.KeyCode == Keys.Subtract)
                 {
                     _roadGraph.SetLaneCount(_editorState.SelectedEdge, (byte)(edge.LaneCount - 1));
-                    e.Handled = true;
-                }
-                else if (e.KeyCode == Keys.OemCloseBrackets) // ] = increase speed limit
-                {
-                    _roadGraph.SetSpeedLimit(_editorState.SelectedEdge, edge.SpeedLimit + 2.235f);
-                    e.Handled = true;
-                }
-                else if (e.KeyCode == Keys.OemOpenBrackets) // [ = decrease speed limit
-                {
-                    _roadGraph.SetSpeedLimit(_editorState.SelectedEdge, edge.SpeedLimit - 2.235f);
                     e.Handled = true;
                 }
             }
@@ -975,13 +980,6 @@ public class MainForm : Form
             e.Handled = true;
         }
 
-        // Ctrl+O: Load map
-        if (e.KeyCode == Keys.O && e.Control)
-        {
-            LoadMap();
-            e.Handled = true;
-        }
-
         // K: generate stress-test grid scene with bulk vehicle spawn
         if (e.KeyCode == Keys.K)
         {
@@ -1126,6 +1124,7 @@ public class MainForm : Form
         _stopSigns.SetExemptEdges(new List<int>());
         _yieldSigns.SetExemptEdges(new List<int>());
         _trafficSignals.SetPhaseRotations(new List<(int, byte)>());
+        _worldSettings.ResetToDefaults(); // per-world, so a blank world starts at defaults
 
         _simLoop.RebuildWorldCaches();
         _sceneRenderer.OnMapReplaced();
@@ -1147,7 +1146,7 @@ public class MainForm : Form
     {
         Persistence.MapSerializer.Save(path, _roadGraph, _vehicles,
             _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
-            _populationManager, _waterLayer, includeVehicles);
+            _populationManager, _waterLayer, _worldSettings, includeVehicles);
     }
 
     /// <summary>
@@ -1296,7 +1295,7 @@ public class MainForm : Form
     {
         Persistence.MapSerializer.Load(path, _roadGraph, _vehicles,
             _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
-            _populationManager, _waterLayer, loadVehicles);
+            _populationManager, _waterLayer, _worldSettings, loadVehicles);
         FinishMapLoad();
     }
 
@@ -1307,11 +1306,16 @@ public class MainForm : Form
     /// empty-world fallback.</summary>
     private void LoadMapFromResource(string resourceName)
     {
+        // Fresh entropy for every built-in world (title backdrop, New template): the seed is
+        // set BEFORE deserialization so load-time draws (population/schedule reconstruction,
+        // signal offsets) and all subsequent traffic come from a brand-new stream instead of
+        // continuing the previous world's sequence.
+        Core.SimRandom.Reseed();
         using var stream = typeof(MainForm).Assembly.GetManifestResourceStream(resourceName)
             ?? throw new InvalidOperationException($"Missing embedded map resource '{resourceName}'.");
         Persistence.MapSerializer.Load(stream, _roadGraph, _vehicles,
             _camera, _simLoop.Clock, _stopSigns, _yieldSigns, _trafficSignals,
-            _populationManager, _waterLayer, loadVehicles: true);
+            _populationManager, _waterLayer, _worldSettings, loadVehicles: true);
         FinishMapLoad();
     }
 
@@ -1392,7 +1396,6 @@ public class MainForm : Form
         _hudPanel.Visible = _settings.ShowPerformanceHud;
         _minimapPanel.Visible = _settings.ShowMinimap;
         _statisticsPanel.Visible = _settings.ShowStatistics;
-        _legendPanel.Visible = _settings.ShowLegend;
 
         _populationManager.MaxActiveVehicles = _settings.MaxVehicles;
         _simLoop.Clock.GameSecondsPerRealSecond = _settings.GameSecondsPerRealSecond;
@@ -2247,6 +2250,7 @@ public class MainForm : Form
         _stopSigns.SetExemptEdges(new List<int>());
         _yieldSigns.SetExemptEdges(new List<int>());
         _trafficSignals.SetPhaseRotations(new List<(int, byte)>());
+        _worldSettings.ResetToDefaults(); // the stress scene replaces the whole map
 
         _simLoop.RebuildWorldCaches();
         _sceneRenderer.OnMapReplaced();

@@ -316,6 +316,11 @@ public class VehicleStore
         if (DiagVehicle == index) DiagVehicle = -1;
         else if (DiagVehicle == last) DiagVehicle = index;
 
+        // SteeringController's per-slot side arrays are STATIC (shared by every store),
+        // so their fixup is called directly here rather than event-wired per host — the
+        // GUI and each headless harness would each have to remember the subscription.
+        SteeringController.OnVehicleRemoved(index, index < last ? last : -1);
+
         if (index < last)
         {
             // Swap last into the hole
@@ -366,15 +371,22 @@ public class VehicleStore
         return index < last ? index : -1;
     }
 
+    /// <summary>A fresh store starts with clean controller side-array state: those arrays
+    /// are static, and the headless harnesses construct stores sequentially in one
+    /// process — without this, run N+1 would inherit run N's stall/breaker state.</summary>
+    public VehicleStore() => SteeringController.OnVehiclesCleared();
+
     /// <summary>
     /// Removes all vehicles, resets the diagnostic target, and raises
-    /// <see cref="VehiclesCleared"/> so index holders drop their references.
+    /// <see cref="VehiclesCleared"/> so index holders drop their references. Also resets
+    /// SteeringController's static per-slot side arrays (see <see cref="Remove"/>).
     /// </summary>
     public void ClearAll()
     {
         Count = 0;
         DiagVehicle = -1;
         VehiclesCleared?.Invoke();
+        SteeringController.OnVehiclesCleared();
     }
 
     /// <summary>

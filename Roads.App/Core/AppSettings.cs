@@ -54,7 +54,8 @@ public sealed record AppSettings
     // ── Graphics ──
     /// <summary>Borderless fullscreen (true) vs. a normal sizable window (false).</summary>
     public bool Fullscreen { get; set; }
-    /// <summary>Draw the faint 100 m alignment grid over the terrain.</summary>
+    /// <summary>Draw the zoom-adaptive alignment grid over the terrain (spacing steps
+    /// through round 1/2/5×10^k meter values so line density stays readable).</summary>
     public bool ShowGrid { get; set; } = true;
     /// <summary>Congestion heat-map overlay (also toggled by the H key).</summary>
     public bool HeatMapEnabled { get; set; }
@@ -64,8 +65,6 @@ public sealed record AppSettings
     public bool ShowMinimap { get; set; } = true;
     /// <summary>Statistics panel (also toggled by the N key).</summary>
     public bool ShowStatistics { get; set; } = true;
-    /// <summary>Keyboard-shortcut legend panel.</summary>
-    public bool ShowLegend { get; set; } = true;
 
     // ── Simulation ──
     /// <summary>Maximum simultaneously active vehicles (lowering never despawns —

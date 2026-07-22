@@ -211,6 +211,12 @@ public static class Pathfinder
 
             var outEdgeData = graph.Edges[outEdge];
             if (outEdgeData.FromNode < 0) continue;
+            // Skip edges closed by an in-progress drain (mirrors FindPath's seed/neighbor
+            // exclusion): rerouting a wrong-lane vehicle ONTO the closing edge would pin
+            // it at the steering closed-edge gate's stop line for the whole drain. The
+            // check sits before the direct-to-destination early return so that shortcut
+            // can never pick a closed edge either.
+            if (graph.IsEdgeClosed(outEdge)) continue;
 
             int fromNode = outEdgeData.ToNode;
             if (fromNode == destinationNode)

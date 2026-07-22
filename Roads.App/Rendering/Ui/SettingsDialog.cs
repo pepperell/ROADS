@@ -113,18 +113,6 @@ public class SettingsDialog : Panel
         var graphics = AddPage(Tab.Graphics);
         AddCheckRow(graphics, 0, "Fullscreen (borderless)",
             () => _staged.Fullscreen, v => _staged.Fullscreen = v);
-        AddCheckRow(graphics, 1, "Show alignment grid",
-            () => _staged.ShowGrid, v => _staged.ShowGrid = v);
-        AddCheckRow(graphics, 2, "Congestion heat-map",
-            () => _staged.HeatMapEnabled, v => _staged.HeatMapEnabled = v);
-        AddCheckRow(graphics, 3, "Performance HUD",
-            () => _staged.ShowPerformanceHud, v => _staged.ShowPerformanceHud = v);
-        AddCheckRow(graphics, 4, "Minimap",
-            () => _staged.ShowMinimap, v => _staged.ShowMinimap = v);
-        AddCheckRow(graphics, 5, "Statistics panel",
-            () => _staged.ShowStatistics, v => _staged.ShowStatistics = v);
-        AddCheckRow(graphics, 6, "Shortcut legend",
-            () => _staged.ShowLegend, v => _staged.ShowLegend = v);
 
         var simulation = AddPage(Tab.Simulation);
         AddSliderRow(simulation, 0, "Max vehicles", 50f, 2000f,

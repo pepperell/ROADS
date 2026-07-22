@@ -129,6 +129,45 @@ public static class SteeringController
     /// (~3 s at the 30 Hz sim rate) — far longer than any legitimate merge/yield wait.</summary>
     private const int OverlapStallTicks = 90;
 
+    /// <summary>Keeps the controller's per-slot side arrays (<see cref="_overlapStall"/>,
+    /// <see cref="_breakerProceed"/>, <see cref="_lastLeader"/>) index-aligned across
+    /// VehicleStore's swap-and-pop: the swapped vehicle's state follows it into the removed
+    /// slot, and the vacated tail slot is reset so the next Add that reuses it starts clean —
+    /// a fresh spawn must not inherit a stale stall counter or a breaker-front pass (which
+    /// would bypass the merge gates). Called by <see cref="VehicleStore.Remove"/> directly:
+    /// these arrays are STATIC (global), and per-host event wiring (GUI + each headless
+    /// harness) is exactly the drift that let them go stale. _lastLeader entries elsewhere
+    /// that point at the moved index need no remap — the field is rewritten at the top of
+    /// every vehicle's Update and consumed within the same pass, and removals never happen
+    /// mid-pass.</summary>
+    internal static void OnVehicleRemoved(int removed, int swappedFrom)
+    {
+        if (swappedFrom >= 0)
+        {
+            if (removed < _overlapStall.Length && swappedFrom < _overlapStall.Length)
+                _overlapStall[removed] = _overlapStall[swappedFrom];
+            if (removed < _breakerProceed.Length && swappedFrom < _breakerProceed.Length)
+                _breakerProceed[removed] = _breakerProceed[swappedFrom];
+            if (removed < _lastLeader.Length && swappedFrom < _lastLeader.Length)
+                _lastLeader[removed] = _lastLeader[swappedFrom];
+        }
+        int vacated = swappedFrom >= 0 ? swappedFrom : removed;
+        if (vacated < _overlapStall.Length) _overlapStall[vacated] = 0;
+        if (vacated < _breakerProceed.Length) _breakerProceed[vacated] = false;
+        if (vacated < _lastLeader.Length) _lastLeader[vacated] = -1;
+    }
+
+    /// <summary>Resets every per-slot side array. Called on VehicleStore bulk clear (new
+    /// map / load) AND from the store's constructor — the arrays are static, so without
+    /// the constructor reset a fresh store (headless harnesses build them sequentially
+    /// in one process) would inherit the previous run's state.</summary>
+    internal static void OnVehiclesCleared()
+    {
+        Array.Clear(_overlapStall, 0, _overlapStall.Length);
+        Array.Clear(_breakerProceed, 0, _breakerProceed.Length);
+        Array.Fill(_lastLeader, -1);
+    }
+
     /// <summary>Raised on the RISING edge of a vehicle becoming the breaker-freed front of a
     /// stuck tangle (see <see cref="RunDeadlockBreaker"/>) — the audio engine's horn trigger.
     /// Fires on the sim/UI thread during UpdateAll. Null (zero-cost) unless the audio engine
@@ -1008,9 +1047,12 @@ public static class SteeringController
         }
         else if (progress >= transitionT)
         {
-            // No more path — stop
+            // No more path — stop. Logged through the DebugLoggingEnabled-gated skip log:
+            // end-of-path stops are routine (fallback/null-path cars), so an unconditional
+            // Console.Error write here formatted a string on every one for nothing (a
+            // WinExe has no console) and could even block if stderr were piped.
             var p = store.Path[index];
-            Console.Error.WriteLine($"[Steering] Vehicle {index} stopped at end: edge={edgeIdx} progress={progress:F3} transitionT={transitionT:F3} pathIdx={store.PathIndex[index]}/{p?.Count ?? 0} arc={store.CurrentArc[index]}");
+            LogSkip($"END_OF_PATH V{index} stopped: edge={edgeIdx} progress={progress:F3} transitionT={transitionT:F3} pathIdx={store.PathIndex[index]}/{p?.Count ?? 0} arc={store.CurrentArc[index]}");
             progress = 1f;
             store.Speed[index] = 0f;
             store.Throttle[index] = 0f;
@@ -1210,11 +1252,13 @@ public static class SteeringController
     {
         Vector2 targetPos = ComputeEdgeLookahead(store, index, graph, edgeIdx, rawProgress, edgeLength, checkCollinearity: true);
         float laneOffset = LaneChangeLogic.ComputeCurrentLaneOffset(store, index, graph, edgeIdx);
-        if (store.DiagVehicle == index)
+        if (DebugLoggingEnabled && store.DiagVehicle == index)
         {
+            // Full master-gate contract (same as LogDiag): DiagVehicle alone must never
+            // open diag.log — the F-key follow can target a vehicle with logging off,
+            // and this block previously did two AutoFlush file writes per tick there.
             var edgePos = graph.EvaluateBezier(edgeIdx, progress);
-            _diagWriter ??= new StreamWriter("diag.log", append: true) { AutoFlush = true };
-            _diagWriter.WriteLine(
+            LogDiag(store, index,
                 $"  LOOK edgePos=({edgePos.X:F2},{edgePos.Y:F2}) dot=({targetPos.X:F2},{targetPos.Y:F2}) " +
                 $"prog={progress:F4}");
         }
@@ -1255,13 +1299,9 @@ public static class SteeringController
         float steer = ((Kp * sharpness) * headingError + (Kd * sharpness) * errorDerivative - latCorrection)
             * SpeedGainCompensation(store, index);
         steer = MathF.Max(-MaxSteer, MathF.Min(MaxSteer, steer));
-        if (store.DiagVehicle == index)
-        {
-            _diagWriter ??= new StreamWriter("diag.log", append: true) { AutoFlush = true };
-            _diagWriter.WriteLine(
-                $"  STEER hdgErr={headingError * 180f / MathF.PI:F1} latErr={lateralError:F3} " +
-                $"errDeriv={errorDerivative:F3} steer={steer * 180f / MathF.PI:F1} sharp={sharpness:F2}");
-        }
+        LogDiag(store, index,
+            $"  STEER hdgErr={headingError * 180f / MathF.PI:F1} latErr={lateralError:F3} " +
+            $"errDeriv={errorDerivative:F3} steer={steer * 180f / MathF.PI:F1} sharp={sharpness:F2}");
 
         store.SteeringAngle[index] = steer;
     }

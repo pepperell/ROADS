@@ -51,6 +51,7 @@ public class AutoSaveManager
     private readonly TrafficSignalSystem _signals;
     private readonly PopulationManager _population;
     private readonly WaterLayer _water;
+    private readonly WorldSettings _worldSettings;
 
     /// <summary>
     /// Constructs an <see cref="AutoSaveManager"/> with references to every object
@@ -66,7 +67,8 @@ public class AutoSaveManager
         YieldSignSystem yieldSigns,
         TrafficSignalSystem signals,
         PopulationManager population,
-        WaterLayer water)
+        WaterLayer water,
+        WorldSettings worldSettings)
     {
         _graph = graph;
         _vehicles = vehicles;
@@ -77,6 +79,7 @@ public class AutoSaveManager
         _signals = signals;
         _population = population;
         _water = water;
+        _worldSettings = worldSettings;
     }
 
     /// <summary>
@@ -117,7 +120,8 @@ public class AutoSaveManager
             // Save without vehicles — backups are map-geometry snapshots;
             // vehicle state is transient and large.
             MapSerializer.Save(path, _graph, _vehicles, _camera, _clock,
-                _stopSigns, _yieldSigns, _signals, _population, _water, includeVehicles: false);
+                _stopSigns, _yieldSigns, _signals, _population, _water, _worldSettings,
+                includeVehicles: false);
 
             PruneOldBackups(dir);
         }
