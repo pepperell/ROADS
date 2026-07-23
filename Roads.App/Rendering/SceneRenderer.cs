@@ -893,11 +893,12 @@ public class SceneRenderer
     /// cursor in empty space) — the chain start before the first click, the segment end
     /// while drawing (this replaced the old snap-indicator ring). While drawing it adds a
     /// translucent round-capped band at the committed road's width (covering the node
-    /// space at each end) with a thin dashed centerline, from the start anchor to the
-    /// snapped end anchor — following the planned tangent-continuous Bezier when curved
-    /// mode has published preview control points; a ghost node when the start is still a
-    /// PENDING anchor (nothing commits until the second click); and a ghost node at every
-    /// crossing where the segment will split an existing road.
+    /// space at each end) with a thin dashed centerline, following EVERY planned leg of
+    /// the commit (pass-through routing splits the segment at existing nodes under it —
+    /// see RoadTool.PlanPreviewLegs; curved mode's tangent-continuous Beziers included),
+    /// with a ghost node at each pass-through junction; a ghost node when the start is
+    /// still a PENDING anchor (nothing commits until the second click); and a ghost node
+    /// at every crossing where a leg will split an existing road.
     /// </summary>
     private static void DrawRoadPreview(SKCanvas canvas, RoadGraph graph, EditorState editorState,
         Camera camera, Point currentMousePos, SKImageInfo info)
@@ -945,14 +946,33 @@ public class SceneRenderer
         // cover the space of the node the commit creates there — plus the classic thin
         // dashed centerline on top as the drawing guide. (Dashing the wide band itself
         // would not work: round caps extend each dash by half the road width, fusing the
-        // gaps shut.) In curved mode the hover handler publishes the planned Bezier's
-        // control points, and both layers follow that curve instead of a straight line.
+        // gaps shut.) Both layers follow the planned legs published by the hover handler
+        // — one cubic per leg, so pass-through routing and curved-mode bends render as
+        // the commit will create them. REUSE legs (endpoints already connected — the
+        // commit creates nothing there) are omitted, breaking the path so the ghost never
+        // overlays an existing road. Straight start→end fallback only before the first
+        // hover pass has planned legs this frame.
+        var legs = editorState.RoadPreviewLegs;
         using var previewPath = new SKPath();
-        previewPath.MoveTo(startPos.X, startPos.Y);
-        if (editorState.RoadPreviewCp1 is { } cp1 && editorState.RoadPreviewCp2 is { } cp2)
-            previewPath.CubicTo(cp1.X, cp1.Y, cp2.X, cp2.Y, endX, endY);
+        if (legs.Count > 0)
+        {
+            bool needMove = true;
+            foreach (var leg in legs)
+            {
+                if (leg.Reuse) { needMove = true; continue; }
+                if (needMove)
+                {
+                    previewPath.MoveTo(leg.Start.X, leg.Start.Y);
+                    needMove = false;
+                }
+                previewPath.CubicTo(leg.Cp1.X, leg.Cp1.Y, leg.Cp2.X, leg.Cp2.Y, leg.End.X, leg.End.Y);
+            }
+        }
         else
+        {
+            previewPath.MoveTo(startPos.X, startPos.Y);
             previewPath.LineTo(endX, endY);
+        }
 
         using var bandPaint = new SKPaint
         {
@@ -975,7 +995,16 @@ public class SceneRenderer
         };
         canvas.DrawPath(previewPath, previewPaint);
 
-        // Intersection nodes the commit will create where the segment crosses roads.
+        // Pass-through junctions: the existing nodes the commit will route the road
+        // through (each interior leg boundary that is a real node — pending split
+        // points are ghosted from RoadCrossingPreviews below instead).
+        for (int i = 1; i < legs.Count; i++)
+            if (legs[i].StartNode >= 0)
+                DrawGhostNode(canvas, legs[i].Start, camera, ghostRadius);
+
+        // Intersection nodes the commit will create where the legs cross roads —
+        // min-node-distance adjusted by the planner, so they sit exactly where the
+        // committed nodes will.
         foreach (var crossing in editorState.RoadCrossingPreviews)
             DrawGhostNode(canvas, crossing, camera, ghostRadius);
     }

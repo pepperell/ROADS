@@ -155,17 +155,19 @@ public class EditorState
     /// reads its end tangent so the next segment continues smoothly.</summary>
     public int RoadPrevEdge { get; set; } = -1;
 
-    /// <summary>First control point of the curved-mode preview Bezier for the in-progress
-    /// segment, or <c>null</c> when the preview is a straight line (straight mode, or no
-    /// tangent reference). Recomputed each mouse-move alongside <see cref="RoadAnchorGhostPos"/>.</summary>
-    public System.Numerics.Vector2? RoadPreviewCp1 { get; set; }
+    /// <summary>The legs the road tool's NEXT click will commit — the pass-through route
+    /// from the chain start through every existing node within snap distance of the drawn
+    /// geometry to the snapped end anchor (a single leg when nothing is passed over).
+    /// Recomputed each mouse-move while drawing (<see cref="RoadTool.PlanPreviewLegs"/>);
+    /// the preview band, centerline, and pass-through junction ghosts render from this
+    /// list. Empty when not drawing.</summary>
+    public List<RoadTool.PreviewLeg> RoadPreviewLegs { get; } = new();
 
-    /// <summary>Second control point of the curved-mode preview Bezier (see <see cref="RoadPreviewCp1"/>).</summary>
-    public System.Numerics.Vector2? RoadPreviewCp2 { get; set; }
-
-    /// <summary>Ghost positions of the intersection nodes the in-progress road segment
-    /// will create where its preview line crosses existing roads. Recomputed each
-    /// mouse-move while drawing; empty otherwise.</summary>
+    /// <summary>Ghost positions of the intersection nodes the in-progress road will
+    /// create where its planned legs cross existing roads — the route planner's PENDING
+    /// split points, already min-node-distance adjusted (slid along their host edges), so
+    /// each ghost sits exactly where the committed node will. Recomputed each mouse-move
+    /// while drawing; empty otherwise.</summary>
     public List<System.Numerics.Vector2> RoadCrossingPreviews { get; } = new();
 
     /// <summary>
@@ -307,8 +309,7 @@ public class EditorState
         RoadCrossingPreviews.Clear();
         RoadAnchorGhostPos = null;
         RoadPrevEdge = -1;
-        RoadPreviewCp1 = null;
-        RoadPreviewCp2 = null;
+        RoadPreviewLegs.Clear();
         SelectedEdge = -1;
         HoveredEdge = -1;
         HoveredNode = -1;

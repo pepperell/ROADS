@@ -1827,31 +1827,19 @@ public class RoadGraph
     }
 
     /// <summary>
-    /// Finds the world positions where a hypothetical STRAIGHT segment (the Road tool's
-    /// in-progress preview line) would cross existing roads. Thin wrapper over
-    /// <see cref="FindCurveCrossings"/> with collinear control points at the thirds —
-    /// which parameterize the cubic exactly linearly, so results match a true line test.
+    /// Finds where a hypothetical cubic Bezier (the Road tool's planned leg — straight
+    /// legs use collinear thirds, which parameterize the cubic exactly linearly) would
+    /// cross existing roads, reporting the crossed edge and both curve parameters so the
+    /// route planner can place (and slide) the future intersection node on the crossed
+    /// edge. Mirrors <see cref="FindEdgeCrossings"/>'s rules (20-segment sampling,
+    /// primary edges only, the endpoint setback on both curves) without mutating
+    /// anything, so the ghost preview and the committed intersections agree.
+    /// <paramref name="ignoreNode"/> excludes edges sharing the segment's start node
+    /// (they connect, not cross); <paramref name="ignoreEdge"/> excludes the pending
+    /// start anchor's edge and its reverse twin (the segment starts ON that road).
     /// </summary>
-    public void FindSegmentCrossings(Vector2 segStart, Vector2 segEnd,
-        int ignoreNode, int ignoreEdge, List<Vector2> result)
-    {
-        var third = (segEnd - segStart) * (1f / 3f);
-        FindCurveCrossings(segStart, segStart + third, segStart + third * 2f, segEnd,
-            ignoreNode, ignoreEdge, result);
-    }
-
-    /// <summary>
-    /// Finds the world positions where a hypothetical cubic Bezier (the Road tool's
-    /// in-progress preview — straight or curved mode) would cross existing roads — the
-    /// intersection nodes the commit will create. Mirrors <see cref="FindEdgeCrossings"/>'s
-    /// rules (20-segment sampling, primary edges only, the endpoint setback on both curves)
-    /// without mutating anything, so the ghost preview and the committed intersections
-    /// agree. <paramref name="ignoreNode"/> excludes edges sharing the segment's start node
-    /// (they connect, not cross); <paramref name="ignoreEdge"/> excludes the pending start
-    /// anchor's edge and its reverse twin (the segment starts ON that road).
-    /// </summary>
-    public void FindCurveCrossings(Vector2 p0, Vector2 c1, Vector2 c2, Vector2 p3,
-        int ignoreNode, int ignoreEdge, List<Vector2> result)
+    public void FindCurveCrossingsDetailed(Vector2 p0, Vector2 c1, Vector2 c2, Vector2 p3,
+        int ignoreNode, int ignoreEdge, List<(int otherEdge, float tSelf, float tOther, Vector2 pos)> result)
     {
         result.Clear();
         float selfLen = MathF.Max(EstimateBezierLength(p0, c1, c2, p3), 0.01f);
@@ -1922,7 +1910,8 @@ public class RoadGraph
                             tOther * otherLen < setback || (1f - tOther) * otherLen < setback)
                             continue;
 
-                        result.Add(selfPoints[i] + (selfPoints[i + 1] - selfPoints[i]) * u);
+                        result.Add((other, tSelf, tOther,
+                            selfPoints[i] + (selfPoints[i + 1] - selfPoints[i]) * u));
                     }
                 }
             }

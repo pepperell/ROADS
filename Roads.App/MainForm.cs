@@ -1885,8 +1885,7 @@ public class MainForm : Form
         _editorState.NodeGhostPos = null;
         _editorState.RoadCrossingPreviews.Clear();
         _editorState.RoadAnchorGhostPos = null;
-        _editorState.RoadPreviewCp1 = null;
-        _editorState.RoadPreviewCp2 = null;
+        _editorState.RoadPreviewLegs.Clear();
         _editorState.WaterGhostPos = null;
 
         // A captured UI drag (minimap scrub, slider thumb) owns every move until release,
@@ -2124,16 +2123,19 @@ public class MainForm : Form
                     _editorState.HoveredNode = -1;
                     _editorState.HoveredEdge = -1;
 
-                    // Anchor ghost, shown at all times: where a click would land — the
-                    // chain start before the first click, the segment end while drawing.
-                    var anchorGhost = RoadTool.ComputeAnchorGhost(worldVec, _roadGraph, _edgeSpatialGrid);
+                    // Anchor probe, shown at all times as the ghost: where a click would
+                    // land — the chain start before the first click, the segment end
+                    // while drawing. Node/edge feed the route planner below.
+                    var (anchorGhost, endSnapNode, endAnchorEdge) =
+                        RoadTool.ProbeAnchorInfo(worldVec, _roadGraph, _edgeSpatialGrid);
                     _editorState.RoadAnchorGhostPos = anchorGhost;
 
-                    // Ghost the intersection nodes the in-progress segment will create
-                    // where the preview crosses existing roads (the commit runs the
-                    // same crossing detection on the real edge). The segment ends at the
-                    // SNAPPED anchor, matching the edge the commit creates. Cleared at
-                    // the top of this handler, so the list is stale-free on every path.
+                    // Plan the legs the commit will create (pass-through routing splits
+                    // the segment at existing nodes under it), then ghost the
+                    // intersection nodes each leg will create where it crosses roads —
+                    // the commit runs the same discovery and crossing detection on the
+                    // real edges. All lists are cleared at the top of this handler, so
+                    // they are stale-free on every path.
                     if (_editorState.IsDrawingRoad)
                     {
                         Vector2 startPos;
@@ -2151,22 +2153,12 @@ public class MainForm : Form
                             startPos = _editorState.RoadStartAnchorPos!.Value;
                         }
 
-                        // Curved mode: preview the same tangent-continuous Bezier the
-                        // commit will create, and probe crossings along it.
-                        if (_editorState.SelectedCurved
-                            && RoadTool.TryGetChainTangent(_roadGraph, _editorState) is { } tangent)
-                        {
-                            var (cp1, cp2) = RoadTool.ComputeCurveControls(startPos, anchorGhost, tangent);
-                            _editorState.RoadPreviewCp1 = cp1;
-                            _editorState.RoadPreviewCp2 = cp2;
-                            _roadGraph.FindCurveCrossings(startPos, cp1, cp2, anchorGhost,
-                                ignoreNode, _editorState.RoadStartEdge, _editorState.RoadCrossingPreviews);
-                        }
-                        else
-                        {
-                            _roadGraph.FindSegmentCrossings(startPos, anchorGhost, ignoreNode,
-                                _editorState.RoadStartEdge, _editorState.RoadCrossingPreviews);
-                        }
+                        // One planner call fills both the legs (band/centerline) and the
+                        // pending-split ghost positions (the min-distance-adjusted
+                        // intersection nodes the commit will create).
+                        RoadTool.PlanPreviewLegs(_roadGraph, _editorState, startPos, anchorGhost,
+                            ignoreNode, endSnapNode, endAnchorEdge,
+                            _editorState.RoadPreviewLegs, _editorState.RoadCrossingPreviews);
                     }
                     break;
                 }
