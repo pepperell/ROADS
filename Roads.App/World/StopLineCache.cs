@@ -6,9 +6,12 @@ namespace Roads.App.World;
 /// <summary>
 /// Caches the parametric t position of stop lines at both ends of each edge.
 /// Stop lines are set back from intersections based on the width and angle of crossing roads,
-/// so vehicles stop before blocking cross-traffic. Computes per-side (left/right of tangent)
-/// trim values so that boundary lines at acute-angle Y-intersections are asymmetric — pushed
-/// back further on the sharp-angle side. At signalized (traffic-light) approaches the vehicle
+/// so vehicles stop before blocking cross-traffic. Crossing angles use each leg's LOCAL
+/// approach direction — a secant over the first <see cref="ApproachProbeDistance"/> meters
+/// of curve (see <see cref="ApproachDir"/>) — so a curved leg whose handle joins obliquely
+/// gets the clearance of its drawn angle, not of its node-to-node chord. Computes per-side
+/// (left/right of tangent) trim values so that boundary lines at acute-angle Y-intersections
+/// are asymmetric — pushed back further on the sharp-angle side. At signalized (traffic-light) approaches the vehicle
 /// stop-T gets an EXTRA <see cref="SimConstants.SignalCrosswalkSetback"/> so the continental
 /// crosswalk fits between the stop line and the junction; the boundary trims deliberately do
 /// not move (they define the junction fill / boundary-line geometry). Reading the TrafficLight
@@ -39,6 +42,13 @@ public class StopLineCache
     private const float MinSinAngle = 0.5f;
     /// <summary>Maximum fraction of edge length a stop line can be set back from the node.</summary>
     private const float MaxDistanceFraction = 0.4f;
+    /// <summary>
+    /// Arc-length distance (m) from the node at which a leg's local approach direction is
+    /// probed (see <see cref="ApproachDir"/>). Chosen at the scale of typical intersection
+    /// clearances so the secant reflects the road's drawn direction across the junction
+    /// area; legs shorter than this probe fall back to the far endpoint (the chord).
+    /// </summary>
+    private const float ApproachProbeDistance = 10f;
 
     /// <summary>Per-edge parametric t of the stop line near the ToNode end (max of both sides; used for vehicles).</summary>
     private float[] _stopTAtToNode = Array.Empty<float>();
@@ -166,18 +176,16 @@ public class StopLineCache
         var edge = graph.Edges[edgeIndex];
         int nodeIndex = atToNode ? edge.ToNode : edge.FromNode;
 
-        // Approach direction = node-to-node chord (travel direction), NOT the bezier tangent
-        // at the endpoint. The endpoint tangent depends on control-point placement, so a
-        // curved or dragged road can meet the node at a steep local angle even when the roads
-        // look perpendicular — which made the computed crossing angle (and the intersection
-        // clearance) balloon and shift erratically with small edits. The chord reflects the
-        // visible road direction and is stable.
-        var fromPos = graph.Nodes[edge.FromNode].Position;
-        var toPos = graph.Nodes[edge.ToNode].Position;
-        var chord = toPos - fromPos;
-        float chordLen = chord.Length();
-        if (chordLen < 0.001f) { stopT = defaultT; leftTrimT = defaultT; rightTrimT = defaultT; return; }
-        var dir = chord / chordLen;
+        // Approach direction = local secant at this end (see ApproachDir), NOT the
+        // node-to-node chord and NOT the instantaneous endpoint tangent. The chord ignores
+        // curvature: a curved leg whose handle joins the crossing road obliquely still read
+        // as perpendicular, so the acute-side clearance came out far too small and boundary
+        // lines / stop lines poked into the junction. The raw endpoint tangent is the
+        // opposite extreme (control-point-sensitive jitter, which the chord was originally
+        // chosen to avoid). The secant reflects the road as actually drawn across the
+        // junction area and changes smoothly with edits.
+        var dir = ApproachDir(graph, edgeIndex, atToNode);
+        if (dir == Vector2.Zero) { stopT = defaultT; leftTrimT = defaultT; rightTrimT = defaultT; return; }
 
         // Local endpoint tangent at this node (zero if degenerate). Used only to recognize a
         // smooth through-road as a continuation (not a crossing) — see AccumulateCrossingDistances.
@@ -189,11 +197,11 @@ public class StopLineCache
 
         foreach (int otherEdge in graph.GetOutgoingEdges(nodeIndex))
             AccumulateCrossingDistances(graph, nodeIndex, edgeIndex, otherEdge, dir, selfTangent, halfWidthSelf,
-                ref maxLeftDist, ref maxRightDist);
+                atToNode, ref maxLeftDist, ref maxRightDist);
 
         foreach (int otherEdge in graph.GetIncomingEdges(nodeIndex))
             AccumulateCrossingDistances(graph, nodeIndex, edgeIndex, otherEdge, dir, selfTangent, halfWidthSelf,
-                ref maxLeftDist, ref maxRightDist);
+                atToNode, ref maxLeftDist, ref maxRightDist);
 
         // Clamp
         float maxAllowed = edge.Length * MaxDistanceFraction;
@@ -230,17 +238,23 @@ public class StopLineCache
     /// current road via cross product) to assign asymmetric distances:
     /// near-side = (hSelf·cosθ + hOther) / sinθ, far-side = (hOther − hSelf·cosθ) / sinθ.
     ///
-    /// A leg is skipped as a through-continuation (not a crossing) when it is near-collinear
-    /// by EITHER the node-to-node chord OR the local endpoint tangent. Both tests are needed
-    /// because dragging a node rigidly shifts the near control point (see RoadGraph.MoveNode):
-    /// a smooth through-road can then kink in chord space (so the chord alone would mistake it
-    /// for a crossing and balloon the intersection), while a dragged road can meet the node at
-    /// a stale tangent angle (so the tangent alone is unreliable). The crossing-angle MAGNITUDE
-    /// still uses the chord, which reflects the visible road direction. <paramref name="selfTangent"/>
-    /// is this edge's normalized endpoint tangent at the node (Zero if degenerate).
+    /// A leg can be skipped as a through-continuation (not a crossing) ONLY when it leaves
+    /// the node on the OPPOSITE side of this edge (away-oriented directions anti-parallel):
+    /// a leg leaving on the SAME side is a merge and always gets full crossing treatment no
+    /// matter how shallow the angle — an angle-only test made sharp merges lose every
+    /// setback, so their stop lines and signals vanished. Opposite-side legs are then judged
+    /// near-collinear by EITHER the local approach secant OR the local endpoint tangent.
+    /// Both tests are needed: a smooth through-road can bend within the probe distance (an
+    /// S through the node — the secants alone would mistake it for a crossing and balloon
+    /// the joint, while the tangents are collinear), and dragging a node can leave a stale
+    /// tangent angle (see RoadGraph.MoveNode) that the secant — which follows the drawn
+    /// curve — corrects. The crossing-angle MAGNITUDE uses the secants.
+    /// <paramref name="selfTangent"/> is this edge's normalized endpoint tangent at the
+    /// node (Zero if degenerate); <paramref name="selfAtToNode"/> says which end of THIS
+    /// edge the node is (needed to away-orient <paramref name="dir"/> for the side test).
     /// </summary>
     private void AccumulateCrossingDistances(RoadGraph graph, int nodeIndex, int edgeIndex, int otherEdge,
-        Vector2 dir, Vector2 selfTangent, float halfWidthSelf,
+        Vector2 dir, Vector2 selfTangent, float halfWidthSelf, bool selfAtToNode,
         ref float maxLeftDist, ref float maxRightDist)
     {
         if (otherEdge == edgeIndex) return;
@@ -251,36 +265,47 @@ public class StopLineCache
         // Skip reverse edge (same road, opposite direction)
         if (other.FromNode == edge.ToNode && other.ToNode == edge.FromNode) return;
 
-        // Crossing road's direction = its node-to-node chord. It auto-orients to the travel
-        // direction (points away from the node for an outgoing edge, toward it for an incoming
-        // one), matching what the endpoint tangent used to give but without that tangent's
-        // control-point sensitivity (see ComputeAllStopTs).
-        var oFrom = graph.Nodes[other.FromNode].Position;
-        var oTo = graph.Nodes[other.ToNode].Position;
-        var otherChord = oTo - oFrom;
-        float otherLen = otherChord.Length();
-        if (otherLen < 0.001f) return;
-        var otherDir = otherChord / otherLen;
+        // Crossing road's local approach direction at the node (secant probe — see
+        // ApproachDir). It auto-orients to the travel direction (points away from the node
+        // for an outgoing edge, toward it for an incoming one), matching the self-direction
+        // convention in ComputeAllStopTs. Zero means a degenerate edge.
+        bool otherIncoming = other.ToNode == nodeIndex;
+        var otherDir = ApproachDir(graph, otherEdge, atToNode: otherIncoming);
+        if (otherDir == Vector2.Zero) return;
 
-        // Acute angle between the two chord directions — drives the setback magnitude.
+        // Acute angle between the two approach directions — drives the setback magnitude.
         float absDot = MathF.Min(MathF.Abs(dir.X * otherDir.X + dir.Y * otherDir.Y), 1f);
         float angle = MathF.Acos(absDot);
 
-        // Continuation test: skip if near-collinear by chord OR by local endpoint tangent.
-        // Fall back to the chord angle alone when either tangent is degenerate.
-        float skipAngle = angle;
-        var otherTangent = EndpointTangentDir(graph, otherEdge, atToNode: other.ToNode == nodeIndex);
-        if (selfTangent != Vector2.Zero && otherTangent != Vector2.Zero)
+        // Side test with away-oriented directions (pointing OUT of the node along each leg):
+        // only an OPPOSITE-side leg (away-dot < 0) can be a through-continuation. A leg
+        // leaving on the SAME side is a merge regardless of angle and keeps weight 1.
+        // Continuous at the branch boundary: away-dot ≈ 0 means ~90° legs, where the
+        // continuation branch also yields weight 1.
+        var awaySelf = selfAtToNode ? -dir : dir;
+        var awayOther = otherIncoming ? -otherDir : otherDir;
+        float weight = 1f;
+        if (awaySelf.X * awayOther.X + awaySelf.Y * awayOther.Y < 0f)
         {
-            float tanDot = MathF.Min(MathF.Abs(selfTangent.X * otherTangent.X + selfTangent.Y * otherTangent.Y), 1f);
-            skipAngle = MathF.Min(angle, MathF.Acos(tanDot));
-        }
+            // Opposite-side leg: judge continuation by secant collinearity, refined by the
+            // endpoint tangents when both are valid AND themselves opposite-side (an
+            // anti-parallel tangent pair marks a smooth through-joint).
+            float skipAngle = angle;
+            var otherTangent = EndpointTangentDir(graph, otherEdge, atToNode: otherIncoming);
+            if (selfTangent != Vector2.Zero && otherTangent != Vector2.Zero)
+            {
+                float tanDot = selfTangent.X * otherTangent.X + selfTangent.Y * otherTangent.Y;
+                if (tanDot < 0f)
+                    skipAngle = MathF.Min(skipAngle, MathF.Acos(MathF.Min(-tanDot, 1f)));
+            }
 
-        // Smoothly fade the crossing in across [MinAngle, MinAngle + ContinuationBand] instead of
-        // switching it on abruptly, so the intersection size changes continuously (no snap) as a
-        // leg is dragged through the continuation→crossing transition. weight is 0 below MinAngle.
-        float weight = ContinuationWeight(skipAngle);
-        if (weight <= 0f) return;
+            // Smoothly fade the crossing in across [MinAngle, MinAngle + ContinuationBand]
+            // instead of switching it on abruptly, so the intersection size changes
+            // continuously (no snap) as a leg is dragged through the continuation→crossing
+            // transition. weight is 0 below MinAngle.
+            weight = ContinuationWeight(skipAngle);
+            if (weight <= 0f) return;
+        }
 
         float sinAngle = MathF.Max(MathF.Sin(angle), MinSinAngle);
         float cosAngle = absDot; // cos of the acute angle
@@ -322,6 +347,27 @@ public class StopLineCache
         if (x <= 0f) return 0f;
         if (x >= 1f) return 1f;
         return x * x * (3f - 2f * x);
+    }
+
+    /// <summary>
+    /// Local approach direction of an edge at one of its end nodes, oriented along the
+    /// travel direction (into the node at the ToNode end, away from it at the FromNode
+    /// end — the chord convention the crossing math was built on). Computed as the secant
+    /// from the node to the curve point <see cref="ApproachProbeDistance"/> of arc length
+    /// away: unlike the node-to-node chord it reflects how a CURVED leg actually meets the
+    /// junction (an oblique handle gives an oblique approach), and unlike the instantaneous
+    /// endpoint tangent it integrates the first meters of curve, staying stable under small
+    /// control-point edits. Legs shorter than the probe degrade to the chord. Returns
+    /// <see cref="Vector2.Zero"/> for degenerate (zero-length) geometry.
+    /// </summary>
+    private static Vector2 ApproachDir(RoadGraph graph, int edgeIndex, bool atToNode)
+    {
+        float tProbe = ArcLengthToT(graph, edgeIndex, ApproachProbeDistance, atToNode);
+        var nodePos = graph.EvaluateBezier(edgeIndex, atToNode ? 1f : 0f);
+        var probe = graph.EvaluateBezier(edgeIndex, tProbe);
+        var secant = atToNode ? nodePos - probe : probe - nodePos;
+        float len = secant.Length();
+        return len < 0.001f ? Vector2.Zero : secant / len;
     }
 
     /// <summary>

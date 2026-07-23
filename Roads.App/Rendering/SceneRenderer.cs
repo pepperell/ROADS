@@ -193,8 +193,9 @@ public class SceneRenderer
         simLoop.EdgeGrid.QueryVisible(graph.Edges.Count, viewRect.Left, viewRect.Top, viewRect.Right, viewRect.Bottom, _visibleEdges);
 
         // Draw roads (heat-map forwarded so the renderer can tint surfaces; traffic
-        // signals forwarded so light-controlled approaches get crosswalks).
-        _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness, _heatMap, viewRect, _visibleEdges, stopSigns, trafficSignals);
+        // signals forwarded so light-controlled approaches get crosswalks; water layer
+        // forwarded so roads touching water render as bridges with guard rails).
+        _roadRenderer.Draw(canvas, graph, stopLineCache, camera.Zoom, darkness, _heatMap, viewRect, _visibleEdges, stopSigns, trafficSignals, _waterLayer);
 
         // Buildings and props sit under vehicles. Placement rebuilds are deferred until the
         // graph version has held still for SceneryRebuildDelayFrames (drags bump it every

@@ -6,8 +6,10 @@ namespace Roads.App.World;
 /// <summary>
 /// Manages all-way stop sign behavior at intersection nodes. Vehicles must come to a full
 /// stop, wait a minimum time, then are granted right-of-way in first-come-first-served order.
-/// <see cref="AutoAssign"/> normalizes the StopSign flag on nodes with 3+ incoming edges
-/// that have angular spread and no traffic light or yield (unless manually overridden);
+/// <see cref="AutoAssign"/> normalizes the StopSign flag on traffic-control junctions whose
+/// approaches have angular spread — where "same corridor" means arriving from opposite
+/// sides, so shallow-angle MERGES still count as real intersections — and no traffic light
+/// or yield (unless manually overridden);
 /// <see cref="RebuildIfNeeded"/> then projects node flags into internal arrays.
 /// </summary>
 public class StopSignSystem
@@ -523,17 +525,23 @@ public class StopSignSystem
     }
 
     /// <summary>
-    /// Check if incoming edges approach from genuinely different directions (not collinear).
-    /// Two roads meeting end-to-end approach from opposite directions (folded angles ≈ same).
-    /// A real intersection has at least one pair of incoming edges whose folded angles differ
-    /// by more than 30°, accounting for wrap-around at π.
+    /// Check if incoming edges approach from genuinely different directions — i.e. the node
+    /// is more than a corridor pass-through. The two halves of a through-road arrive from
+    /// OPPOSITE sides, so a pair is written off as "same corridor" only when its arrival
+    /// directions are within 30° of anti-parallel. Any other pair marks a real intersection —
+    /// perpendicular crossings and near-PARALLEL arrivals (two roads merging at a shallow
+    /// angle) alike. An earlier version folded angles mod π, which erased the parallel/
+    /// anti-parallel distinction and silently removed stop control from sharp-angle merges.
+    /// Hairpin bends of a single road never reach this test —
+    /// <see cref="RoadGraph.IsTrafficControlJunction"/> already excludes 2-neighbor nodes.
     /// </summary>
     private static bool HasAngularSpread(RoadGraph graph, ArraySegment<int> incoming)
     {
-        const float minSpread = MathF.PI / 6f; // 30° threshold
+        const float cosSpread = 0.86602540f; // cos(30°)
         const int maxEdges = 16;
 
-        Span<float> folded = stackalloc float[maxEdges];
+        Span<float> dirX = stackalloc float[maxEdges];
+        Span<float> dirY = stackalloc float[maxEdges];
         int count = 0;
 
         foreach (int edgeIdx in incoming)
@@ -543,24 +551,22 @@ public class StopSignSystem
             if (edge.FromNode < 0) continue;
 
             var tangent = graph.EvaluateBezierTangent(edgeIdx, 1.0f);
-            float angle = MathF.Atan2(tangent.Y, tangent.X);
-            // Fold mod π: opposing directions map to same value
-            float f = angle % MathF.PI;
-            if (f < 0) f += MathF.PI;
-            folded[count++] = f;
+            float len = tangent.Length();
+            if (len < 0.001f) continue;
+            dirX[count] = tangent.X / len;
+            dirY[count] = tangent.Y / len;
+            count++;
         }
 
         if (count < 2) return false;
 
-        // Check all pairs: if any pair differs by more than the threshold, it's a real intersection.
-        // Uses wrap-aware distance in [0, π) space.
+        // Any pair whose arrival directions are NOT within 30° of anti-parallel
+        // (dot > -cos(30°)) is a genuine conflict.
         for (int i = 0; i < count; i++)
         {
             for (int j = i + 1; j < count; j++)
             {
-                float diff = MathF.Abs(folded[i] - folded[j]);
-                float wrapDiff = MathF.PI - diff;
-                if (MathF.Min(diff, wrapDiff) > minSpread)
+                if (dirX[i] * dirX[j] + dirY[i] * dirY[j] > -cosSpread)
                     return true;
             }
         }

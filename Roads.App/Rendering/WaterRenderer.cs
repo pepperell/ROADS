@@ -16,8 +16,8 @@ namespace Roads.App.Rendering;
 /// </summary>
 public class WaterRenderer
 {
-    /// <summary>Shore band width in meters added around every primitive in pass 0.</summary>
-    private const float ShoreBand = 2.5f;
+    // Shore band width lives on WaterLayer (WaterLayer.ShoreBand) — bridge detection
+    // in RoadRenderer needs the same value to treat the tan ring as water contact.
 
     /// <summary>Primitives smaller than this on screen (pixels) are skipped.</summary>
     private const float MinPixelSize = 0.5f;
@@ -56,7 +56,7 @@ public class WaterRenderer
             _visibleCircles, _visibleSegments);
         if (_visibleCircles.Count == 0 && _visibleSegments.Count == 0) return;
 
-        DrawPass(canvas, zoom, TerrainRenderer.DimColor(ShoreBase, darkness), ShoreBand);
+        DrawPass(canvas, zoom, TerrainRenderer.DimColor(ShoreBase, darkness), WaterLayer.ShoreBand);
         DrawPass(canvas, zoom, TerrainRenderer.DimColor(WaterBase, darkness), 0f);
     }
 

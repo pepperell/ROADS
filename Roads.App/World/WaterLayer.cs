@@ -40,6 +40,13 @@ public struct WaterSegment
 /// </summary>
 public class WaterLayer
 {
+    /// <summary>
+    /// Shore band width in meters rendered around every primitive (the tan ring).
+    /// Lives here rather than in <c>WaterRenderer</c> because bridge detection also
+    /// counts the band as water contact — a road touching the tan gets guard rails.
+    /// </summary>
+    public const float ShoreBand = 2.5f;
+
     private const float CellSize = 50f; // matches SpatialGrid/EdgeSpatialGrid cells
     private const int SegmentSamples = 16; // polyline resolution for distance tests
 
@@ -123,26 +130,41 @@ public class WaterLayer
     /// True when the point lies inside any water primitive (used by prop placement
     /// to keep trees/street lights out of rivers and ponds). O(1) cell lookup.
     /// </summary>
-    public bool IsWater(Vector2 p)
+    public bool IsWater(Vector2 p) => IsWater(p, 0f);
+
+    /// <summary>
+    /// True when the point lies within <paramref name="expand"/> meters of any water
+    /// primitive's fill. Bridge detection calls this with <see cref="ShoreBand"/> plus
+    /// the road half-width so "the blue/tan touches the roadway" counts as contact.
+    /// Scans every grid cell the inflated point box overlaps, so <paramref name="expand"/>
+    /// may exceed the cell size (primitives are indexed by their un-inflated bounds).
+    /// </summary>
+    public bool IsWater(Vector2 p, float expand)
     {
         if (IsEmpty) return false;
         RebuildDerivedIfNeeded();
 
-        int key = GeometryUtil.PackCell((int)MathF.Floor(p.X / CellSize), (int)MathF.Floor(p.Y / CellSize));
-        if (_circleCells.TryGetValue(key, out var circles))
+        int cx0 = (int)MathF.Floor((p.X - expand) / CellSize), cx1 = (int)MathF.Floor((p.X + expand) / CellSize);
+        int cy0 = (int)MathF.Floor((p.Y - expand) / CellSize), cy1 = (int)MathF.Floor((p.Y + expand) / CellSize);
+        for (int cx = cx0; cx <= cx1; cx++)
+        for (int cy = cy0; cy <= cy1; cy++)
         {
-            foreach (int i in circles)
+            int key = GeometryUtil.PackCell(cx, cy);
+            if (_circleCells.TryGetValue(key, out var circles))
             {
-                var c = _circles[i];
-                if (Vector2.DistanceSquared(c.Center, p) <= Sq(c.Radius)) return true;
+                foreach (int i in circles)
+                {
+                    var c = _circles[i];
+                    if (Vector2.DistanceSquared(c.Center, p) <= Sq(c.Radius + expand)) return true;
+                }
             }
-        }
-        if (_segmentCells.TryGetValue(key, out var segs))
-        {
-            foreach (int i in segs)
+            if (_segmentCells.TryGetValue(key, out var segs))
             {
-                var s = _segments[i];
-                if (DistSqToSegmentSpine(in s, p) <= Sq(s.Width * 0.5f)) return true;
+                foreach (int i in segs)
+                {
+                    var s = _segments[i];
+                    if (DistSqToSegmentSpine(in s, p) <= Sq(s.Width * 0.5f + expand)) return true;
+                }
             }
         }
         return false;

@@ -191,14 +191,27 @@ public class VehicleSpawner
     }
 
     /// <summary>
-    /// Picks a random destination node and pathfinds from a given edge, trying both forward and
-    /// reverse directions. Returns the best path, or null if no path found.
+    /// Picks a random destination node and pathfinds from a given edge, trying both
+    /// forward and reverse directions (shorter wins). Outputs the edge/T the returned
+    /// path actually starts on (the REVERSE edge when the path turns around) and the
+    /// chosen destination. Returns null when nothing is reachable.
     /// </summary>
-    public List<int>? FindNewPath(int currentEdge, float currentT)
-    {
-        return FindPathToRandomDestination(currentEdge, currentT,
-            out _, out _, out _);
-    }
+    public List<int>? FindNewPath(int currentEdge, float currentT,
+        out int bestStartEdge, out float bestStartT, out int destNode)
+        => FindPathToRandomDestination(currentEdge, currentT,
+            out bestStartEdge, out bestStartT, out destNode);
+
+    /// <summary>
+    /// Repairs a route after a graph edit: pathfinds from the given edge to the vehicle's
+    /// EXISTING destination node, so an edit near a car never hijacks its journey (placing
+    /// a POI used to reroute passing traffic into it). Prefers continuing in the current
+    /// direction, turning around via the reverse edge only when no forward path exists.
+    /// Outputs the edge/T the path starts on; null when the destination is unreachable.
+    /// </summary>
+    public List<int>? FindPathToNode(int currentEdge, float currentT, int destNode,
+        out int bestStartEdge, out float bestStartT)
+        => TryPathToNode(currentEdge, currentT, destNode, preferShorter: false,
+            out bestStartEdge, out bestStartT);
 
     private List<int>? FindPathToRandomDestination(int currentEdge, float currentT,
         out int bestStartEdge, out float bestStartT, out int destNode)
@@ -208,63 +221,85 @@ public class VehicleSpawner
         bestStartT = currentT;
         destNode = -1;
 
-        var edge = _graph.Edges[currentEdge];
-        int reverseEdge = _graph.FindReverseEdge(currentEdge);
-        float reverseT = 1f - currentT;
-
         for (int attempt = 0; attempt < 50; attempt++)
         {
             if (_destNodeCache.Count == 0) break;
             int dn = _destNodeCache[SimRandom.Next(_destNodeCache.Count)];
-
-            // Try forward direction
-            List<int>? fwdFull = null;
-            if (dn != edge.ToNode)
-            {
-                var fwdPath = Pathfinder.FindPath(_graph, edge.ToNode, dn, currentEdge);
-                if (fwdPath != null && fwdPath.Count > 0)
-                {
-                    fwdFull = new List<int> { currentEdge };
-                    fwdFull.AddRange(fwdPath);
-                }
-            }
-            if (dn == edge.ToNode)
-                fwdFull = new List<int> { currentEdge };
-
-            // Try reverse direction
-            List<int>? revFull = null;
-            if (reverseEdge >= 0 && reverseEdge < _graph.Edges.Count
-                && _graph.Edges[reverseEdge].FromNode >= 0)
-            {
-                var revEdge = _graph.Edges[reverseEdge];
-                if (dn != revEdge.ToNode)
-                {
-                    var revPath = Pathfinder.FindPath(_graph, revEdge.ToNode, dn, reverseEdge);
-                    if (revPath != null && revPath.Count > 0)
-                    {
-                        revFull = new List<int> { reverseEdge };
-                        revFull.AddRange(revPath);
-                    }
-                }
-                if (dn == revEdge.ToNode)
-                    revFull = new List<int> { reverseEdge };
-            }
-
-            // Pick shorter path
-            if (fwdFull != null && revFull != null)
+            var path = TryPathToNode(currentEdge, currentT, dn, preferShorter: true,
+                out bestStartEdge, out bestStartT);
+            if (path != null)
             {
                 destNode = dn;
-                if (revFull.Count < fwdFull.Count)
-                { bestStartEdge = reverseEdge; bestStartT = reverseT; return revFull; }
-                else
-                { bestStartEdge = currentEdge; bestStartT = currentT; return fwdFull; }
+                return path;
             }
-            if (fwdFull != null)
-            { destNode = dn; bestStartEdge = currentEdge; bestStartT = currentT; return fwdFull; }
-            if (revFull != null)
-            { destNode = dn; bestStartEdge = reverseEdge; bestStartT = reverseT; return revFull; }
         }
 
+        return null;
+    }
+
+    /// <summary>
+    /// Pathfinds from an edge to a specific node, trying the forward direction and the
+    /// reverse twin. With <paramref name="preferShorter"/> both are computed and the
+    /// shorter wins (the historical random-destination behavior); without it the forward
+    /// path wins outright when it exists — route REPAIR keeps a moving car pointed the
+    /// way it was already going. The returned path includes its start edge as element 0;
+    /// <paramref name="bestStartEdge"/>/<paramref name="bestStartT"/> mirror that choice.
+    /// </summary>
+    private List<int>? TryPathToNode(int currentEdge, float currentT, int dn, bool preferShorter,
+        out int bestStartEdge, out float bestStartT)
+    {
+        bestStartEdge = currentEdge;
+        bestStartT = currentT;
+
+        var edge = _graph.Edges[currentEdge];
+        int reverseEdge = _graph.FindReverseEdge(currentEdge);
+        float reverseT = 1f - currentT;
+
+        // Try forward direction
+        List<int>? fwdFull = null;
+        if (dn == edge.ToNode)
+        {
+            fwdFull = new List<int> { currentEdge };
+        }
+        else
+        {
+            var fwdPath = Pathfinder.FindPath(_graph, edge.ToNode, dn, currentEdge);
+            if (fwdPath != null && fwdPath.Count > 0)
+            {
+                fwdFull = new List<int> { currentEdge };
+                fwdFull.AddRange(fwdPath);
+            }
+        }
+        if (fwdFull != null && !preferShorter)
+            return fwdFull;
+
+        // Try reverse direction
+        List<int>? revFull = null;
+        if (reverseEdge >= 0 && reverseEdge < _graph.Edges.Count
+            && _graph.Edges[reverseEdge].FromNode >= 0)
+        {
+            var revEdge = _graph.Edges[reverseEdge];
+            if (dn == revEdge.ToNode)
+            {
+                revFull = new List<int> { reverseEdge };
+            }
+            else
+            {
+                var revPath = Pathfinder.FindPath(_graph, revEdge.ToNode, dn, reverseEdge);
+                if (revPath != null && revPath.Count > 0)
+                {
+                    revFull = new List<int> { reverseEdge };
+                    revFull.AddRange(revPath);
+                }
+            }
+        }
+
+        if (fwdFull != null && revFull != null && revFull.Count < fwdFull.Count)
+        { bestStartEdge = reverseEdge; bestStartT = reverseT; return revFull; }
+        if (fwdFull != null)
+            return fwdFull;
+        if (revFull != null)
+        { bestStartEdge = reverseEdge; bestStartT = reverseT; return revFull; }
         return null;
     }
 

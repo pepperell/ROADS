@@ -235,7 +235,17 @@ public class PopulationManager
         // housed population simply 0). The POI registry rebuild above is its only dependency.
         ProcessThroughTraffic(simDt, timeOfDay);
 
-        if (!ScheduleModeEnabled) return;
+        if (!ScheduleModeEnabled)
+        {
+            // Drains must keep processing after schedule mode exits: deleting the LAST
+            // home flips schedule mode off on this very tick (ClearPopulation above
+            // already removed the household), and the drain still owns the node and its
+            // driveway — stranding it here would leave them on the map forever. With no
+            // residents left, the spawn-out phase closes immediately and the finalize
+            // step removes the held edges and node.
+            ProcessDrains(timeOfDay, MaxSpawnsPerTick);
+            return;
+        }
 
         // Check if POIs changed while schedule mode is active
         if (_poiGraphVersion != _graph.Version)
@@ -318,13 +328,17 @@ public class PopulationManager
 
     private void ClearPopulation()
     {
-        // Remove ALL vehicles, not just resident-linked ones. When the resident population
-        // takes over (schedule mode activating, e.g. right after a map load), any leftover
-        // legacy vehicles are stale — loaded vehicles lose their resident identity on load
-        // (ResidentId is not serialized), so they would otherwise persist as immortal
-        // wanderers. Residents repopulate from POIs on the following ticks.
+        // Remove only RESIDENT-owned vehicles. Non-resident traffic (entry/exit
+        // through-cars from the world-settings spawning, stress-scene cars) has its own
+        // lifecycle and must survive schedule-mode transitions — placing the first Home
+        // (or deleting the last) would otherwise vanish every car on the road. Loaded
+        // ex-resident cars (ResidentId is not serialized) survive as ordinary
+        // non-resident traffic and despawn via the normal exit-routing path.
+        // Downward iteration is swap-and-pop safe: a removal moves an already-visited
+        // tail element into the vacated slot.
         for (int i = _vehicles.Count - 1; i >= 0; i--)
-            _vehicles.Remove(i);
+            if (_vehicles.ResidentId[i] >= 0)
+                _vehicles.Remove(i);
         _residents.Clear();
         _vehicleToResident.Clear();
         ClearDepartureQueue();

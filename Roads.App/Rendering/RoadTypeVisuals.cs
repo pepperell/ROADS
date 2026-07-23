@@ -6,10 +6,12 @@ namespace Roads.App.Rendering;
 /// <summary>
 /// Static per-<see cref="RoadType"/> visual style table. Provides the asphalt surface color,
 /// a width multiplier applied to the lane-derived road width, the shoulder/sidewalk/verge
-/// band (width + color) drawn under and outside the asphalt, and the brightened schematic
-/// color/stroke used at city-overview zoom. Color helpers take an ambient lighting factor
-/// (1.0 = full day) and dim RGB channels for night; geometry helpers are zoom-independent.
-/// Unpaved types (dirt) carry no painted lane markings.
+/// band (width + color) drawn under and outside the asphalt, the bridge palette (deck,
+/// deck-edge band, guard rail, rail post) used where a road crosses painted water, and the
+/// brightened schematic color/stroke used at city-overview zoom. Color helpers take an
+/// ambient lighting factor (1.0 = full day) and dim RGB channels for night; geometry
+/// helpers are zoom-independent. Unpaved types (dirt) carry no painted lane markings and
+/// get a timber bridge palette instead of concrete/steel.
 /// </summary>
 public static class RoadTypeVisuals
 {
@@ -89,6 +91,52 @@ public static class RoadTypeVisuals
             RoadType.Dirt        => new SKColor(Dim(105, ambient), Dim(86, ambient), Dim(58, ambient)),
             _                    => new SKColor(Dim(152, ambient), Dim(150, ambient), Dim(142, ambient)),
         };
+    }
+
+    /// <summary>
+    /// Bridge deck color for the given road type — pale, slightly desaturated concrete
+    /// stroked over the asphalt where the road crosses water. Tones grade with the type's
+    /// asphalt so a highway bridge still reads darker than a residential one; dirt gets
+    /// timber planks. Dimmed by the ambient lighting factor.
+    /// </summary>
+    public static SKColor GetBridgeDeckColor(RoadType type, float ambient)
+    {
+        return type switch
+        {
+            RoadType.Highway     => new SKColor(Dim(104, ambient), Dim(106, ambient), Dim(112, ambient)),
+            RoadType.Arterial    => new SKColor(Dim(119, ambient), Dim(120, ambient), Dim(123, ambient)),
+            RoadType.Residential => new SKColor(Dim(133, ambient), Dim(133, ambient), Dim(131, ambient)),
+            RoadType.Dirt        => new SKColor(Dim(139, ambient), Dim(112, ambient), Dim(76, ambient)),
+            _                    => new SKColor(Dim(133, ambient), Dim(133, ambient), Dim(131, ambient)),
+        };
+    }
+
+    /// <summary>
+    /// Color of the deck-edge band (parapet) drawn under/outside the bridge deck at the
+    /// same width as the shoulder band, replacing the sidewalk/shoulder over the water
+    /// span. Bright structural concrete for paved types, edge timbers for dirt.
+    /// </summary>
+    public static SKColor GetBridgeEdgeColor(RoadType type, float ambient)
+    {
+        return type == RoadType.Dirt
+            ? new SKColor(Dim(116, ambient), Dim(92, ambient), Dim(60, ambient))
+            : new SKColor(Dim(158, ambient), Dim(156, ambient), Dim(150, ambient));
+    }
+
+    /// <summary>Guard-rail line color on bridges: light steel for paved types, timber for dirt.</summary>
+    public static SKColor GetBridgeRailColor(RoadType type, float ambient)
+    {
+        return type == RoadType.Dirt
+            ? new SKColor(Dim(152, ambient), Dim(121, ambient), Dim(78, ambient))
+            : new SKColor(Dim(198, ambient), Dim(203, ambient), Dim(210, ambient));
+    }
+
+    /// <summary>Guard-rail post tick color on bridges (darker than the rail so posts read as depth).</summary>
+    public static SKColor GetBridgePostColor(RoadType type, float ambient)
+    {
+        return type == RoadType.Dirt
+            ? new SKColor(Dim(98, ambient), Dim(77, ambient), Dim(50, ambient))
+            : new SKColor(Dim(108, ambient), Dim(113, ambient), Dim(122, ambient));
     }
 
     /// <summary>

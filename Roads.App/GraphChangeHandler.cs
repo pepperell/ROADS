@@ -46,9 +46,11 @@ public class GraphChangeHandler
 
     /// <summary>
     /// Checks if the graph version has changed and, if so, fixes stale editor selections,
-    /// strips marker flags from nodes that now have too many edges, and reroutes vehicles
-    /// on defunct edges (removing any stranded farther than <see cref="MaxResnapDistance"/>
-    /// from every surviving edge). Called once per tick by SimulationLoop; O(1) when unchanged.
+    /// strips marker flags from nodes that now have too many edges, and repairs vehicles
+    /// on defunct edges/paths — re-snapping them and re-pathing to their ORIGINAL
+    /// destination (random fallback only when that is gone; removal when stranded farther
+    /// than <see cref="MaxResnapDistance"/> from every surviving edge or nothing is
+    /// reachable). Called once per tick by SimulationLoop; O(1) when unchanged.
     /// </summary>
     public void HandleIfNeeded()
     {
@@ -110,20 +112,37 @@ public class GraphChangeHandler
                 continue;
             }
 
-            _vehicles.CurrentEdge[i] = newEdge;
-            _vehicles.EdgeProgress[i] = newT;
-            _vehicles.PrevHeadingError[i] = 0f;
-            _vehicles.CurrentArc[i] = -1;
-            _vehicles.ArcProgress[i] = 0f;
-            _vehicles.ClearingArc[i] = -1;
-
-            var newPath = _spawner.FindNewPath(newEdge, newT);
+            // Repair the route to the vehicle's ORIGINAL destination first — an edit near
+            // a car must never hijack its journey (placing the first Home used to pull
+            // every passing car into its driveway via the random fallback). A fresh
+            // random destination is chosen only when the original is gone or unreachable
+            // from the re-snapped edge; the path may start on the reverse edge (turn
+            // around), so CurrentEdge follows the path's actual start.
+            int dest = _vehicles.DestinationNode[i];
+            int startEdge = newEdge;
+            float startT = newT;
+            List<int>? newPath = null;
+            if (dest >= 0 && dest < _graph.Nodes.Count
+                && !float.IsNaN(_graph.Nodes[dest].Position.X))
+                newPath = _spawner.FindPathToNode(newEdge, newT, dest, out startEdge, out startT);
+            if (newPath == null)
+            {
+                newPath = _spawner.FindNewPath(newEdge, newT, out startEdge, out startT, out int newDest);
+                if (newPath != null)
+                    _vehicles.DestinationNode[i] = newDest;
+            }
             if (newPath == null)
             {
                 _vehicles.Remove(i);
                 continue;
             }
 
+            _vehicles.CurrentEdge[i] = startEdge;
+            _vehicles.EdgeProgress[i] = startT;
+            _vehicles.PrevHeadingError[i] = 0f;
+            _vehicles.CurrentArc[i] = -1;
+            _vehicles.ArcProgress[i] = 0f;
+            _vehicles.ClearingArc[i] = -1;
             _vehicles.Path[i] = newPath;
             _vehicles.PathIndex[i] = 0;
         }

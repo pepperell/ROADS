@@ -11,10 +11,13 @@ namespace Roads.App.Rendering;
 /// treatment (dark curbs on residential/arterial, white edge lines on highway), per-type
 /// center-line policy (none on residential, double solid yellow on arterial, median band
 /// plus yellow lines on highway, worn tire tracks on dirt), lane markings, stop lines,
-/// continental crosswalks at signalized approaches, intersection fills, and node dots.
+/// continental crosswalks at signalized approaches, intersection fills, node dots, and
+/// bridge treatment where a road touches painted water (concrete deck tint over the
+/// asphalt, a deck-edge band replacing the shoulder, guard rails with post ticks, and
+/// expansion joints at the span ends — timber palette on dirt roads).
 /// Traffic-control furniture (signal heads, stop/yield/speed signs) is drawn by
-/// <see cref="SignRenderer"/>. Caches per-edge Bezier offset paths and invalidates when
-/// the graph version changes.
+/// <see cref="SignRenderer"/>. Caches per-edge Bezier offset paths (including bridge
+/// spans) and invalidates when the graph version OR water-layer version changes.
 /// </summary>
 public class RoadRenderer
 {
@@ -51,11 +54,36 @@ public class RoadRenderer
     private const float CrosswalkStartOffset = 1.3f;
     /// <summary>Zoom below which editor node dots are hidden (they are an aid, not scenery).</summary>
     private const float NodeDotMinZoom = 0.5f;
+    /// <summary>Dry lead-in length (m) that bridge rails/deck extend past the shoreline contact span.</summary>
+    private const float BridgeLeadIn = 2f;
+    /// <summary>Target spacing (m) between spine samples when detecting water contact along an edge.</summary>
+    private const float BridgeSampleSpacing = 2f;
+    /// <summary>Sample-count clamp for bridge detection: short edges still resolve narrow streams,
+    /// very long edges sample coarser than <see cref="BridgeSampleSpacing"/>.</summary>
+    private const int BridgeMinSamples = 8, BridgeMaxSamples = 128;
+    /// <summary>Lateral outset (m) of the guard rail beyond the drawn asphalt edge — puts the
+    /// rail on the deck-edge band (parapet), inside the shoulder-width band for every type.</summary>
+    private const float BridgeRailOutset = 0.55f;
+    /// <summary>Zoom at or above which guard-rail post ticks are drawn (sub-pixel below).</summary>
+    private const float BridgePostMinZoom = 1.2f;
+    /// <summary>Spacing (m) between guard-rail post ticks along a bridge span.</summary>
+    private const float BridgePostSpacing = 4f;
+    /// <summary>Half-length (m) of a post tick, drawn perpendicular to the road across the rail.</summary>
+    private const float BridgePostHalf = 0.45f;
+    /// <summary>Stroke width (m) of the dark expansion-joint line at each bridge span end.</summary>
+    private const float BridgeJointWidth = 0.3f;
 
     /// <summary>Cached offset paths per edge, invalidated when graph version changes.</summary>
     private readonly List<CachedEdgePaths> _cache = new();
     /// <summary>Graph version when the cache was last rebuilt.</summary>
     private int _cachedVersion = -1;
+    /// <summary>Water-layer version when the cache was last rebuilt (bridge spans depend on it).</summary>
+    private int _cachedWaterVersion = -1;
+    /// <summary>True when any cached edge has bridge spans — cheap early-out so per-node
+    /// bridge checks cost nothing on maps without water contact.</summary>
+    private bool _anyBridges;
+    /// <summary>Rebuild-time scratch for bridge span t-ranges (never used during draw passes).</summary>
+    private readonly List<(float T0, float T1)> _bridgeSpanScratch = new();
     /// <summary>Ambient lighting factor for the current frame (1.0 = full day). Set at the start of Draw.</summary>
     private float _ambient = 1f;
     /// <summary>
@@ -184,6 +212,53 @@ public class RoadRenderer
         StrokeJoin = SKStrokeJoin.Round,
         IsAntialias = true
     };
+    // Bridge deck-edge band (parapet) stroked shoulder-wide over water spans. Butt caps:
+    // this stroke is many meters wide, and a round cap would overshoot the expansion
+    // joint longitudinally by half that width.
+    private readonly SKPaint _bridgeEdgePaint = new()
+    {
+        Style = SKPaintStyle.Stroke,
+        StrokeCap = SKStrokeCap.Butt,
+        StrokeJoin = SKStrokeJoin.Round,
+        IsAntialias = true
+    };
+    // Pale concrete bridge deck stroked at asphalt width over the deck-edge band.
+    private readonly SKPaint _bridgeDeckPaint = new()
+    {
+        Style = SKPaintStyle.Stroke,
+        StrokeCap = SKStrokeCap.Butt,
+        StrokeJoin = SKStrokeJoin.Round,
+        IsAntialias = true
+    };
+    // Guard-rail line along each bridge deck edge.
+    private readonly SKPaint _bridgeRailPaint = new()
+    {
+        Style = SKPaintStyle.Stroke,
+        StrokeCap = SKStrokeCap.Round,
+        StrokeJoin = SKStrokeJoin.Round,
+        IsAntialias = true
+    };
+    // Guard-rail post ticks (close zoom only).
+    private readonly SKPaint _bridgePostPaint = new()
+    {
+        Style = SKPaintStyle.Stroke,
+        StrokeCap = SKStrokeCap.Butt,
+        IsAntialias = true
+    };
+    // Dark expansion-joint line across the deck at each bridge span end.
+    private readonly SKPaint _bridgeJointPaint = new()
+    {
+        Style = SKPaintStyle.Stroke,
+        StrokeCap = SKStrokeCap.Butt,
+        IsAntialias = true
+    };
+    // Filled discs covering the round asphalt/shoulder end-caps where a bridge span
+    // reaches an edge endpoint (color set per stage: parapet band, then deck).
+    private readonly SKPaint _bridgeCapPaint = new()
+    {
+        Style = SKPaintStyle.Fill,
+        IsAntialias = true
+    };
 
     /// <summary>
     /// Draws all active road edges in three passes (shoulders/sidewalks first, then asphalt
@@ -215,10 +290,13 @@ public class RoadRenderer
     /// <param name="visibleEdges">Optional pre-culled edge index list from the edge spatial grid.</param>
     /// <param name="stopSigns">Optional stop-sign system for stop-line exemption checks.</param>
     /// <param name="trafficSignals">Optional signal system; enables crosswalk rendering at lights.</param>
+    /// <param name="water">Optional painted water layer; enables bridge rendering (deck
+    /// tint, deck-edge band, guard rails, expansion joints) where roads touch water.</param>
     public void Draw(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom,
         float darkness = 0f, CongestionHeatMap? heatMap = null,
         SKRect viewRect = default, IReadOnlyList<int>? visibleEdges = null,
-        StopSignSystem? stopSigns = null, TrafficSignalSystem? trafficSignals = null)
+        StopSignSystem? stopSigns = null, TrafficSignalSystem? trafficSignals = null,
+        WaterLayer? water = null)
     {
         // An edge-less graph still flows through every pass: each pass iterates the (empty)
         // edge list and skips naturally, while DrawNodes at the end still renders any
@@ -250,8 +328,9 @@ public class RoadRenderer
         _tireTrackPaint.Color = new SKColor(Dim(96, _ambient), Dim(76, _ambient), Dim(48, _ambient));
         _crosswalkPaint.Color = new SKColor(Dim(255, _ambient), Dim(255, _ambient), Dim(255, _ambient), 200);
         _stopLinePaint.Color = new SKColor(Dim(255, _ambient), Dim(255, _ambient), Dim(255, _ambient));
+        _bridgeJointPaint.Color = new SKColor(Dim(38, _ambient), Dim(39, _ambient), Dim(42, _ambient));
 
-        RebuildCacheIfNeeded(graph, stopLines);
+        RebuildCacheIfNeeded(graph, stopLines, water);
 
         // viewRect is only used for culling; a zero/empty rect means no culling (backward-compat
         // with callers that do not supply it, e.g. signal/sign helper methods).
@@ -342,8 +421,21 @@ public class RoadRenderer
             DrawRoadSurface(canvas, edge, i);
         }
 
-        // Heat-map field is only valid during Pass 1; clear it so stale data is never
-        // accidentally accessed by intersection-fill or marking passes.
+        // Pass 1.25: bridge decks over ALL asphalt. Decks cannot be drawn inside the
+        // per-edge surface pass: the asphalt strokes use round end-caps that extend half
+        // a road-width past each node, so a later edge's cap would stamp a pavement
+        // half-disc onto an earlier edge's deck at a shared mid-bridge node. With every
+        // surface down first, decks always land on top. Two stages — every parapet band
+        // (with its end-cap discs) before any deck — so a band stroke can never land on
+        // a neighboring edge's deck at a node where the bridge continues.
+        if (_anyBridges)
+        {
+            DrawBridgeDeckPass(canvas, graph, visibleEdges, visCount, viewRect, cull, bandStage: true);
+            DrawBridgeDeckPass(canvas, graph, visibleEdges, visCount, viewRect, cull, bandStage: false);
+        }
+
+        // Heat-map field is only valid through the deck pass above; clear it so stale
+        // data is never accidentally accessed by intersection-fill or marking passes.
         _heatMap = null;
 
         // Pass 1.5: fill intersection interiors and draw corner curves
@@ -374,7 +466,18 @@ public class RoadRenderer
             // One-way roads (no reverse edge) get direction chevrons down each lane.
             if (reverse < 0 && RoadTypeVisuals.HasPaintedLines(edge.RoadType))
                 DrawOneWayArrows(canvas, graph, i, zoom);
+
+            // Bridge furniture (guard rails, post ticks, expansion joints) over water spans.
+            if (_cache[i].BridgeSpans.Count > 0)
+                DrawBridgeDetails(canvas, graph, edge, i, zoom);
         }
+
+        // Pass 2.1: bridge corner rails — the per-edge rails above break at each road
+        // opening of an intersection over water (their intersection trims); this pass
+        // wraps rail arcs around the corners between adjacent wet approaches so the
+        // railing still reads as one continuous track along the deck/water interface.
+        if (_anyBridges)
+            DrawBridgeCornerRails(canvas, graph, stopLines, zoom, viewRect);
 
         DrawStopLines(canvas, graph, stopLines, zoom, viewRect, stopSigns);
         if (trafficSignals != null && zoom >= CrosswalkMinZoom)
@@ -421,10 +524,12 @@ public class RoadRenderer
         }
     }
 
-    /// <summary>Rebuilds the per-edge path cache if the graph version has changed.</summary>
-    private void RebuildCacheIfNeeded(RoadGraph graph, StopLineCache stopLines)
+    /// <summary>Rebuilds the per-edge path cache if the graph OR water-layer version has
+    /// changed (water edits move bridge spans without touching the graph).</summary>
+    private void RebuildCacheIfNeeded(RoadGraph graph, StopLineCache stopLines, WaterLayer? water)
     {
-        if (_cachedVersion == graph.Version) return;
+        int waterVersion = water?.Version ?? -1;
+        if (_cachedVersion == graph.Version && _cachedWaterVersion == waterVersion) return;
 
         // Dispose old SKPath objects before clearing to prevent memory leak
         foreach (var entry in _cache)
@@ -438,18 +543,30 @@ public class RoadRenderer
                 _cache.Add(null!); // placeholder for defunct edge
                 continue;
             }
-            _cache.Add(BuildEdgePaths(graph, i, stopLines));
+            _cache.Add(BuildEdgePaths(graph, i, stopLines, water));
+        }
+        _anyBridges = false;
+        foreach (var entry in _cache)
+        {
+            if (entry != null && entry.BridgeSpans.Count > 0)
+            {
+                _anyBridges = true;
+                break;
+            }
         }
         _cachedVersion = graph.Version;
+        _cachedWaterVersion = waterVersion;
     }
 
     /// <summary>
     /// Builds the cached Bezier paths for a single edge: center path (full length for surface),
-    /// left/right boundary paths, lane dividers, and per-type marking paths (arterial
+    /// left/right boundary paths, lane dividers, per-type marking paths (arterial
     /// double-yellow, highway median yellows, dirt tire tracks) — all marking paths trimmed
-    /// to stop line t-values so they don't extend into intersections.
+    /// to stop line t-values so they don't extend into intersections — and bridge spans
+    /// (deck spine + rail offset paths) where the edge touches painted water.
     /// </summary>
-    private CachedEdgePaths BuildEdgePaths(RoadGraph graph, int edgeIndex, StopLineCache stopLines)
+    private CachedEdgePaths BuildEdgePaths(RoadGraph graph, int edgeIndex, StopLineCache stopLines,
+        WaterLayer? water)
     {
         var edge = graph.Edges[edgeIndex];
         float totalWidth = GeometryUtil.RoadSurfaceWidth(graph, edgeIndex);
@@ -545,8 +662,82 @@ public class RoadRenderer
             typeMarkingPaths.Add(BuildOffsetPath(graph, edgeIndex, HighwayYellowOffset, tMin, tMax));
         }
 
+        // Bridge spans: where this edge touches painted water (only computed for the drawn
+        // edge of a forward/reverse pair — the twin is never rendered). Each span carries
+        // its own deck spine sub-path and rail offset paths, trimmed to the wet range plus
+        // lead-in. halfWidth is the DRAWN asphalt half-width, so the rail sits just outside
+        // the visible asphalt on the deck-edge band. Rails are additionally trimmed to the
+        // per-side intersection trims (like the boundary lines) so they BREAK at each road
+        // opening of an intersection over water; DrawBridgeCornerRails closes the track
+        // around the intersection corners.
+        var bridgeSpans = new List<BridgeSpanPaths>();
+        int reverseTwin = graph.FindReverseEdge(edgeIndex);
+        if (water != null && !water.IsEmpty && (reverseTwin < 0 || reverseTwin > edgeIndex))
+        {
+            CollectBridgeSpans(graph, edgeIndex, water, halfWidth, _bridgeSpanScratch);
+            float railOffset = halfWidth + BridgeRailOutset;
+            foreach (var (t0, t1) in _bridgeSpanScratch)
+            {
+                float lT0 = MathF.Max(t0, tMinLeft), lT1 = MathF.Min(t1, tMaxLeft);
+                float rT0 = MathF.Max(t0, tMinRight), rT1 = MathF.Min(t1, tMaxRight);
+                bridgeSpans.Add(new BridgeSpanPaths(t0, t1, lT0, lT1, rT0, rT1,
+                    BuildOffsetPath(graph, edgeIndex, 0f, t0, t1),
+                    lT1 > lT0 ? BuildOffsetPath(graph, edgeIndex, -railOffset, lT0, lT1) : new SKPath(),
+                    rT1 > rT0 ? BuildOffsetPath(graph, edgeIndex, railOffset, rT0, rT1) : new SKPath()));
+            }
+        }
+
         return new CachedEdgePaths(centerPath, centerLinePath, leftPath, rightPath, lanePaths,
-            typeMarkingPaths, totalWidth, hasCenterLine, dashedEdges);
+            typeMarkingPaths, bridgeSpans, totalWidth, hasCenterLine, dashedEdges);
+    }
+
+    /// <summary>
+    /// Finds the t-ranges of an edge that read as bridge: contiguous spine samples in
+    /// contact with water — inflated by <see cref="WaterLayer.ShoreBand"/> plus the drawn
+    /// asphalt half-width, so "the blue/tan touches the roadway" counts — each extended by
+    /// <see cref="BridgeLeadIn"/> meters of dry lead-in and merged where they meet.
+    /// Sampling resolution is ~<see cref="BridgeSampleSpacing"/> m (clamped), matching the
+    /// lead-in scale, so span ends land within a couple of meters of the true shoreline.
+    /// </summary>
+    private static void CollectBridgeSpans(RoadGraph graph, int edgeIndex, WaterLayer water,
+        float drawnHalfWidth, List<(float T0, float T1)> spans)
+    {
+        spans.Clear();
+        var edge = graph.Edges[edgeIndex];
+        if (edge.Length <= 0.01f) return;
+
+        float contact = WaterLayer.ShoreBand + drawnHalfWidth;
+        int samples = Math.Clamp((int)MathF.Ceiling(edge.Length / BridgeSampleSpacing),
+            BridgeMinSamples, BridgeMaxSamples);
+
+        float runStart = -1f;
+        for (int s = 0; s <= samples; s++)
+        {
+            float t = s / (float)samples;
+            bool wet = water.IsWater(graph.EvaluateBezier(edgeIndex, t), contact);
+            if (wet && runStart < 0f) runStart = t;
+            else if (!wet && runStart >= 0f)
+            {
+                spans.Add((runStart, (s - 1) / (float)samples));
+                runStart = -1f;
+            }
+        }
+        if (runStart >= 0f) spans.Add((runStart, 1f));
+        if (spans.Count == 0) return;
+
+        // Extend each span by the lead-in, then merge neighbors that now touch so a
+        // braided shoreline doesn't produce rapid rail on/off stutter.
+        float leadT = BridgeLeadIn / edge.Length;
+        for (int i = 0; i < spans.Count; i++)
+            spans[i] = (MathF.Max(0f, spans[i].T0 - leadT), MathF.Min(1f, spans[i].T1 + leadT));
+        for (int i = spans.Count - 2; i >= 0; i--)
+        {
+            if (spans[i + 1].T0 <= spans[i].T1)
+            {
+                spans[i] = (spans[i].T0, MathF.Max(spans[i].T1, spans[i + 1].T1));
+                spans.RemoveAt(i + 1);
+            }
+        }
     }
 
     /// <summary>
@@ -636,6 +827,10 @@ public class RoadRenderer
         _surfacePaint.StrokeWidth = strokeWidth;
         canvas.DrawPath(cached.CenterPath, _surfacePaint);
 
+        // Bridge decks are NOT drawn here — they get their own sub-pass (1.25) after all
+        // asphalt is down, because a later edge's round asphalt end-cap would otherwise
+        // overdraw this edge's deck at a shared mid-bridge node.
+
         // Blend congestion tint over the base surface (skipped when overlay is off or
         // congestion is zero/near-zero so alpha is effectively 0).
         if (_heatMap != null)
@@ -646,6 +841,114 @@ public class RoadRenderer
                 var overlayPaint = _heatMap.GetOverlayPaint(congestion, strokeWidth);
                 canvas.DrawPath(cached.CenterPath, overlayPaint);
             }
+        }
+    }
+
+    /// <summary>
+    /// One stage of the bridge deck pass (1.25) over the visible edges that have bridge
+    /// spans: the parapet-band stage first, then the deck stage, with the same cull
+    /// skeleton as the other passes. No reverse-twin skip is needed — spans exist only
+    /// on the drawn edge of a forward/reverse pair.
+    /// </summary>
+    private void DrawBridgeDeckPass(SKCanvas canvas, RoadGraph graph, IReadOnlyList<int>? visibleEdges,
+        int visCount, SKRect viewRect, bool cull, bool bandStage)
+    {
+        for (int k = 0; k < visCount; k++)
+        {
+            int i = visibleEdges != null ? visibleEdges[k] : k;
+            if (i >= _cache.Count) continue;
+            var edge = graph.Edges[i];
+            if (edge.FromNode < 0) continue;
+            if (_cache[i].BridgeSpans.Count == 0) continue;
+
+            if (cull)
+            {
+                var from = graph.Nodes[edge.FromNode].Position;
+                var to   = graph.Nodes[edge.ToNode].Position;
+                float halfW = GeometryUtil.RoadHalfWidth(graph, i);
+                if (!RenderDetail.IsVisible(RenderDetail.EdgeBounds(from, to,
+                        edge.ControlPoint1, edge.ControlPoint2, halfW), viewRect))
+                    continue;
+            }
+
+            if (bandStage) DrawBridgeBand(canvas, edge, i);
+            else DrawBridgeDeck(canvas, edge, i);
+        }
+    }
+
+    /// <summary>
+    /// Band stage of the deck pass: strokes the parapet band (deck-edge) for one edge's
+    /// water spans at the shoulder pass's width, fully covering the sidewalk/shoulder
+    /// drawn in pass 0, plus filled discs over the shoulder's round end-caps where a
+    /// span reaches an edge endpoint.
+    /// </summary>
+    private void DrawBridgeBand(SKCanvas canvas, RoadEdge edge, int edgeIndex)
+    {
+        var cached = _cache[edgeIndex];
+        float strokeWidth = cached.TotalWidth * RoadTypeVisuals.GetWidthMultiplier(edge.RoadType);
+        float bandWidth = strokeWidth + 2f * RoadTypeVisuals.GetShoulderWidth(edge.RoadType);
+        _bridgeEdgePaint.Color = RoadTypeVisuals.GetBridgeEdgeColor(edge.RoadType, _ambient);
+        _bridgeEdgePaint.StrokeWidth = bandWidth;
+        _bridgeCapPaint.Color = _bridgeEdgePaint.Color;
+        foreach (var span in cached.BridgeSpans)
+        {
+            canvas.DrawPath(span.Deck, _bridgeEdgePaint);
+            DrawSpanEndCaps(canvas, span, bandWidth * 0.5f);
+        }
+    }
+
+    /// <summary>
+    /// Deck stage of the deck pass: strokes the pale concrete deck at asphalt width over
+    /// the parapet band, plus filled discs over the asphalt's round end-caps where a span
+    /// reaches an edge endpoint — without them a road ENDING over water shows a dark
+    /// pavement tip past the butt-capped deck. When the congestion heat map is active its
+    /// tint is re-applied over each span (the pass-1 tint sits under the deck), so
+    /// congestion still reads on bridges. Lane markings land later in pass 2 and continue
+    /// across the deck.
+    /// </summary>
+    private void DrawBridgeDeck(SKCanvas canvas, RoadEdge edge, int edgeIndex)
+    {
+        var cached = _cache[edgeIndex];
+        float strokeWidth = cached.TotalWidth * RoadTypeVisuals.GetWidthMultiplier(edge.RoadType);
+        _bridgeDeckPaint.Color = RoadTypeVisuals.GetBridgeDeckColor(edge.RoadType, _ambient);
+        _bridgeDeckPaint.StrokeWidth = strokeWidth;
+        _bridgeCapPaint.Color = _bridgeDeckPaint.Color;
+        foreach (var span in cached.BridgeSpans)
+        {
+            canvas.DrawPath(span.Deck, _bridgeDeckPaint);
+            DrawSpanEndCaps(canvas, span, strokeWidth * 0.5f);
+        }
+
+        if (_heatMap != null)
+        {
+            float congestion = _heatMap.GetCongestion(edgeIndex);
+            if (congestion > 0.005f)
+            {
+                var overlayPaint = _heatMap.GetOverlayPaint(congestion, strokeWidth);
+                foreach (var span in cached.BridgeSpans)
+                    canvas.DrawPath(span.Deck, overlayPaint);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fills a disc of the current <see cref="_bridgeCapPaint"/> color at each span end
+    /// clamped to the edge's endpoint (t=0/1). Covers the round end-caps of the asphalt/
+    /// shoulder strokes that extend past the last node; harmless where the bridge
+    /// continues onto a neighboring edge, since the neighbor's strokes match the color.
+    /// </summary>
+    private void DrawSpanEndCaps(SKCanvas canvas, BridgeSpanPaths span, float radius)
+    {
+        if (span.Deck.PointCount == 0) return;
+        if (span.T0 <= 0.001f)
+        {
+            var p = span.Deck.GetPoint(0);
+            canvas.DrawCircle(p.X, p.Y, radius, _bridgeCapPaint);
+        }
+        if (span.T1 >= 0.999f)
+        {
+            var p = span.Deck.LastPoint;
+            canvas.DrawCircle(p.X, p.Y, radius, _bridgeCapPaint);
         }
     }
 
@@ -726,6 +1029,130 @@ public class RoadRenderer
                 canvas.DrawPath(lanePath, _laneDividerPaint);
             }
         }
+    }
+
+    /// <summary>
+    /// Draws the bridge furniture for one edge's water spans: a guard-rail line along each
+    /// deck edge (with darker post ticks every <see cref="BridgePostSpacing"/> m at close
+    /// zoom) and a dark expansion joint across the deck at each span end that lies strictly
+    /// inside the edge — a span clamped to t=0/1 continues as bridge on the neighboring
+    /// edge, where a joint would read as a seam in the middle of the bridge.
+    /// </summary>
+    private void DrawBridgeDetails(SKCanvas canvas, RoadGraph graph, RoadEdge edge, int edgeIndex, float zoom)
+    {
+        var cached = _cache[edgeIndex];
+        float halfWidth = cached.TotalWidth * 0.5f * RoadTypeVisuals.GetWidthMultiplier(edge.RoadType);
+        float railOffset = halfWidth + BridgeRailOutset;
+
+        _bridgeRailPaint.Color = RoadTypeVisuals.GetBridgeRailColor(edge.RoadType, _ambient);
+        _bridgeRailPaint.StrokeWidth = MathF.Max(0.3f, 0.5f / zoom);
+        _bridgeJointPaint.StrokeWidth = BridgeJointWidth;
+        bool drawPosts = zoom >= BridgePostMinZoom;
+        if (drawPosts)
+        {
+            _bridgePostPaint.Color = RoadTypeVisuals.GetBridgePostColor(edge.RoadType, _ambient);
+            _bridgePostPaint.StrokeWidth = 0.25f;
+        }
+
+        foreach (var span in cached.BridgeSpans)
+        {
+            canvas.DrawPath(span.RailLeft, _bridgeRailPaint);
+            canvas.DrawPath(span.RailRight, _bridgeRailPaint);
+
+            if (span.T0 > 0.001f) DrawBridgeJoint(canvas, graph, edgeIndex, span.T0, halfWidth);
+            if (span.T1 < 0.999f) DrawBridgeJoint(canvas, graph, edgeIndex, span.T1, halfWidth);
+
+            if (!drawPosts) continue;
+
+            // Post ticks follow each rail's own trimmed range so no post lands inside an
+            // intersection where the rail is broken.
+            DrawRailPosts(canvas, graph, edge, edgeIndex, span.LeftT0, span.LeftT1, -railOffset);
+            DrawRailPosts(canvas, graph, edge, edgeIndex, span.RightT0, span.RightT1, railOffset);
+        }
+    }
+
+    /// <summary>
+    /// Draws post ticks evenly distributed along one rail's t-range (inset half a pitch
+    /// from each end so no post collides with an expansion joint or rail break), each
+    /// perpendicular to the road, centered on the rail at the given signed lateral offset.
+    /// </summary>
+    private void DrawRailPosts(SKCanvas canvas, RoadGraph graph, RoadEdge edge, int edgeIndex,
+        float railT0, float railT1, float railOffset)
+    {
+        if (railT1 <= railT0) return;
+        float railLen = (railT1 - railT0) * edge.Length;
+        int posts = Math.Max(2, (int)MathF.Round(railLen / BridgePostSpacing) + 1);
+        for (int p = 0; p < posts; p++)
+        {
+            float t = railT0 + (railT1 - railT0) * ((p + 0.5f) / posts);
+            var pos = graph.EvaluateBezier(edgeIndex, t);
+            var tan = graph.EvaluateBezierTangent(edgeIndex, t);
+            float len = tan.Length();
+            if (len < 0.001f) continue;
+            float nx = -tan.Y / len, ny = tan.X / len; // right normal (Y-down)
+            float cx = pos.X + nx * railOffset;
+            float cy = pos.Y + ny * railOffset;
+            canvas.DrawLine(cx - nx * BridgePostHalf, cy - ny * BridgePostHalf,
+                cx + nx * BridgePostHalf, cy + ny * BridgePostHalf, _bridgePostPaint);
+        }
+    }
+
+    /// <summary>
+    /// Draws rail arcs around the corners of every intersection node that sits on a
+    /// bridge, connecting adjacent per-edge rail ends (which are trimmed back at the
+    /// intersection) into a continuous track. An arc is drawn only between two approaches
+    /// that BOTH arrive on bridge spans — at a shoreline intersection the wet road's rail
+    /// simply terminates instead of wrapping onto dry land. Uses the same approach/corner
+    /// machinery as the intersection fills, pushed out to the rail offset so arcs land
+    /// exactly on the rail lines; reuses the per-node scratch state, so it must run
+    /// outside the fill pass (it does — pass 2.1).
+    /// </summary>
+    private void DrawBridgeCornerRails(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines,
+        float zoom, SKRect cullRect)
+    {
+        _bridgeRailPaint.StrokeWidth = MathF.Max(0.3f, 0.5f / zoom);
+
+        for (int n = 0; n < graph.Nodes.Count; n++)
+        {
+            var node = graph.Nodes[n];
+            if (float.IsNaN(node.Position.X)) continue;
+            if (!InView(node.Position.X, node.Position.Y, cullRect, 60f)) continue;
+            if (!NodeOnBridge(graph, n)) continue;
+
+            CollectApproaches(graph, stopLines, n, BridgeRailOutset);
+            var approaches = _approaches;
+            if (approaches.Count < 2) continue;
+            approaches.Sort(static (a, b) => a.Angle.CompareTo(b.Angle));
+
+            _bridgeRailPaint.Color = RoadTypeVisuals.GetBridgeRailColor(
+                HighestRoadTypeAtNode(graph, n), _ambient);
+
+            int count = approaches.Count;
+            for (int i = 0; i < count; i++)
+            {
+                var curr = approaches[i];
+                var next = approaches[(i + 1) % count];
+                if (!curr.WetAtNode || !next.WetAtNode) continue;
+
+                _cornerPath.Reset();
+                _cornerPath.MoveTo(curr.RightBound.X, curr.RightBound.Y);
+                AddCornerCurve(_cornerPath, curr.RightBound, curr.RightAwayDir,
+                    next.LeftBound, next.LeftAwayDir);
+                canvas.DrawPath(_cornerPath, _bridgeRailPaint);
+            }
+        }
+    }
+
+    /// <summary>Draws one dark expansion-joint line across the full drawn asphalt width at parameter t.</summary>
+    private void DrawBridgeJoint(SKCanvas canvas, RoadGraph graph, int edgeIndex, float t, float halfWidth)
+    {
+        var pos = graph.EvaluateBezier(edgeIndex, t);
+        var tan = graph.EvaluateBezierTangent(edgeIndex, t);
+        float len = tan.Length();
+        if (len < 0.001f) return;
+        float nx = -tan.Y / len, ny = tan.X / len;
+        canvas.DrawLine(pos.X - nx * halfWidth, pos.Y - ny * halfWidth,
+            pos.X + nx * halfWidth, pos.Y + ny * halfWidth, _bridgeJointPaint);
     }
 
     /// <summary>True if (x,y) is within the cull rect (expanded by <paramref name="margin"/>), or
@@ -892,13 +1319,16 @@ public class RoadRenderer
         public Vector2 AwayDir;      // overall direction (for sorting)
         public Vector2 LeftAwayDir;   // tangent at left boundary's trim-t
         public Vector2 RightAwayDir;  // tangent at right boundary's trim-t
+        public bool WetAtNode;        // road arrives at this node on a bridge span
     }
 
     /// <summary>
-    /// Fills intersection interiors with asphalt and draws curved boundary lines connecting
-    /// adjacent roads at each intersection node. All per-node scratch state (approach list,
-    /// pair set, fill/corner paths, corner paint) lives in reusable fields — this runs for
-    /// every visible node every frame, so it must not allocate.
+    /// Fills intersection interiors with asphalt — or with the bridge deck tone when the
+    /// node sits on a bridge span, so a mid-bridge node (e.g. from a split over water)
+    /// doesn't stamp an asphalt blotch over the deck — and draws curved boundary lines
+    /// connecting adjacent roads at each intersection node. All per-node scratch state
+    /// (approach list, pair set, fill/corner paths, corner paint) lives in reusable
+    /// fields — this runs for every visible node every frame, so it must not allocate.
     /// </summary>
     private void DrawIntersectionFills(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines, float zoom, SKRect cullRect = default)
     {
@@ -920,9 +1350,12 @@ public class RoadRenderer
             int count = approaches.Count;
 
             // The intersection takes on the appearance of its highest-ranked incident road
-            // (e.g. a highway+arterial node looks like highway; an all-dirt node looks like dirt).
+            // (e.g. a highway+arterial node looks like highway; an all-dirt node looks like dirt),
+            // and its deck tone instead of asphalt when the node is on a bridge.
             RoadType nodeType = HighestRoadTypeAtNode(graph, n);
-            _intersectionFillPaint.Color = RoadTypeVisuals.GetSurfaceColor(nodeType, _ambient);
+            _intersectionFillPaint.Color = NodeOnBridge(graph, n)
+                ? RoadTypeVisuals.GetBridgeDeckColor(nodeType, _ambient)
+                : RoadTypeVisuals.GetSurfaceColor(nodeType, _ambient);
 
             // Build intersection fill polygon: for each road, a straight segment along the
             // stop line (left→right boundary), then a curve to the next road's left boundary.
@@ -965,6 +1398,46 @@ public class RoadRenderer
     }
 
     /// <summary>
+    /// True when the node sits on a bridge: some incident edge has a bridge span reaching
+    /// the node's end of the curve. Span data lives only on the drawn (lower-index) edge of
+    /// a forward/reverse pair, so <see cref="EdgeEndOnBridge"/> maps through the twin.
+    /// O(degree) per call with a free early-out on bridge-less maps via <see cref="_anyBridges"/>.
+    /// </summary>
+    private bool NodeOnBridge(RoadGraph graph, int nodeIndex)
+    {
+        if (!_anyBridges) return false;
+        foreach (int e in graph.GetIncomingEdges(nodeIndex))
+            if (EdgeEndOnBridge(graph, e, atToNode: true)) return true;
+        foreach (int e in graph.GetOutgoingEdges(nodeIndex))
+            if (EdgeEndOnBridge(graph, e, atToNode: false)) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// True when the given end of an edge lies inside one of its bridge spans. Redirects to
+    /// the drawn twin (flipping which end is tested) when the edge is the never-drawn
+    /// higher-index half of a forward/reverse pair, since only the drawn edge carries spans.
+    /// </summary>
+    private bool EdgeEndOnBridge(RoadGraph graph, int edgeIndex, bool atToNode)
+    {
+        if (!_anyBridges) return false;
+        if (graph.Edges[edgeIndex].FromNode < 0) return false;
+        int rev = graph.FindReverseEdge(edgeIndex);
+        int drawn = edgeIndex;
+        if (rev >= 0 && rev < edgeIndex)
+        {
+            drawn = rev;
+            atToNode = !atToNode;
+        }
+        if (drawn >= _cache.Count || _cache[drawn] == null) return false;
+        foreach (var span in _cache[drawn].BridgeSpans)
+        {
+            if (atToNode ? span.T1 >= 0.999f : span.T0 <= 0.001f) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// The highest-ranked road type among all edges incident to a node (see
     /// <see cref="RoadTypeVisuals.GetRank"/>). Determines the intersection's fill appearance.
     /// </summary>
@@ -994,8 +1467,12 @@ public class RoadRenderer
     /// Collects boundary endpoint info for each unique road meeting at a node into the
     /// reusable <see cref="_approaches"/> list (cleared first; result valid until the next
     /// call). Deduplicates forward/reverse pairs so each physical road appears once.
+    /// <paramref name="extraOffset"/> pushes the boundary points laterally outward past
+    /// the drawn asphalt edge — the corner-rail pass uses <see cref="BridgeRailOutset"/>
+    /// so its arcs land exactly on the per-edge rail lines; fills use 0.
     /// </summary>
-    private void CollectApproaches(RoadGraph graph, StopLineCache stopLines, int nodeIndex)
+    private void CollectApproaches(RoadGraph graph, StopLineCache stopLines, int nodeIndex,
+        float extraOffset = 0f)
     {
         var approaches = _approaches;
         approaches.Clear();
@@ -1015,8 +1492,11 @@ public class RoadRenderer
             float leftT = stopLines.GetLeftTrimAtToNode(edgeIdx);
             float rightT = stopLines.GetRightTrimAtToNode(edgeIdx);
             float stopT = stopLines.GetStopTAtToNode(edgeIdx);
-            if (ComputeApproach(graph, edgeIdx, leftT, rightT, stopT, atToNode: true) is { } info)
+            if (ComputeApproach(graph, edgeIdx, leftT, rightT, stopT, atToNode: true, extraOffset) is { } info)
+            {
+                info.WetAtNode = EdgeEndOnBridge(graph, edgeIdx, atToNode: true);
                 approaches.Add(info);
+            }
         }
 
         // Outgoing edges not already covered (one-way roads leaving the node)
@@ -1032,8 +1512,11 @@ public class RoadRenderer
             float leftT = stopLines.GetLeftTrimAtFromNode(edgeIdx);
             float rightT = stopLines.GetRightTrimAtFromNode(edgeIdx);
             float stopT = stopLines.GetStopTAtFromNode(edgeIdx);
-            if (ComputeApproach(graph, edgeIdx, leftT, rightT, stopT, atToNode: false) is { } info)
+            if (ComputeApproach(graph, edgeIdx, leftT, rightT, stopT, atToNode: false, extraOffset) is { } info)
+            {
+                info.WetAtNode = EdgeEndOnBridge(graph, edgeIdx, atToNode: false);
                 approaches.Add(info);
+            }
         }
     }
 
@@ -1042,9 +1525,11 @@ public class RoadRenderer
     /// Each boundary is evaluated at its own per-side trim t-value so that acute-angle
     /// intersections have asymmetric boundary positions. Left/right are defined looking
     /// away from the node, using the standard right-normal convention (-ty, tx) for Y-down.
+    /// <paramref name="extraOffset"/> widens the lateral offset past the drawn asphalt
+    /// edge (0 for fills/corner curves; the rail outset for bridge corner rails).
     /// </summary>
     private static ApproachInfo? ComputeApproach(RoadGraph graph, int edgeIdx,
-        float leftTrimT, float rightTrimT, float stopT, bool atToNode)
+        float leftTrimT, float rightTrimT, float stopT, bool atToNode, float extraOffset = 0f)
     {
         // Use the overall stopT for direction/angle (stable for sorting)
         var tangent = graph.EvaluateBezierTangent(edgeIdx, stopT);
@@ -1054,7 +1539,7 @@ public class RoadRenderer
         // Boundary endpoints sit at the DRAWN asphalt edge (geometric half-width × visual
         // multiplier) so fills and corner curves meet the surface strokes and curb lines.
         float halfWidth = GeometryUtil.RoadHalfWidth(graph, edgeIdx)
-            * RoadTypeVisuals.GetWidthMultiplier(graph.Edges[edgeIdx].RoadType);
+            * RoadTypeVisuals.GetWidthMultiplier(graph.Edges[edgeIdx].RoadType) + extraOffset;
 
         // Compute left boundary point at its own trim-t (negative offset in tangent frame)
         var posL = graph.EvaluateBezier(edgeIdx, leftTrimT);
@@ -1185,6 +1670,9 @@ public class RoadRenderer
         /// yellow lines flanking the median. Empty for other type/topology combinations.
         /// </summary>
         public readonly List<SKPath> TypeMarkingPaths;
+        /// <summary>Bridge spans where the edge touches painted water (empty when dry, and
+        /// always empty on the never-drawn higher-index edge of a forward/reverse pair).</summary>
+        public readonly List<BridgeSpanPaths> BridgeSpans;
         /// <summary>Total road width in meters (2 × <see cref="GeometryUtil.RoadHalfWidth"/>).</summary>
         public readonly float TotalWidth;
         /// <summary>True if the road has a center divider to mark (two-way roads only).</summary>
@@ -1193,7 +1681,8 @@ public class RoadRenderer
         public readonly bool DashedEdges;
 
         public CachedEdgePaths(SKPath center, SKPath centerLine, SKPath left, SKPath right, List<SKPath> lanes,
-            List<SKPath> typeMarkings, float totalWidth, bool hasCenterLine, bool dashedEdges)
+            List<SKPath> typeMarkings, List<BridgeSpanPaths> bridgeSpans, float totalWidth,
+            bool hasCenterLine, bool dashedEdges)
         {
             CenterPath = center;
             CenterLinePath = centerLine;
@@ -1201,6 +1690,7 @@ public class RoadRenderer
             RightEdgePath = right;
             LanePaths = lanes;
             TypeMarkingPaths = typeMarkings;
+            BridgeSpans = bridgeSpans;
             TotalWidth = totalWidth;
             HasCenterLine = hasCenterLine;
             DashedEdges = dashedEdges;
@@ -1214,6 +1704,54 @@ public class RoadRenderer
             RightEdgePath.Dispose();
             foreach (var p in LanePaths) p.Dispose();
             foreach (var p in TypeMarkingPaths) p.Dispose();
+            foreach (var s in BridgeSpans) s.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Cached geometry for one bridge span of an edge: the wet t-range (already extended by
+    /// the lead-in) with its deck spine sub-path — stroked shoulder-wide for the deck-edge
+    /// band and asphalt-wide for the deck — and the left/right guard-rail offset paths.
+    /// Rail paths carry their own t-ranges, further trimmed by the per-side intersection
+    /// trims so rails (and their posts) break at road openings; an empty path means the
+    /// whole rail fell inside an intersection.
+    /// </summary>
+    private sealed class BridgeSpanPaths : IDisposable
+    {
+        /// <summary>Span start parameter on the edge's Bezier.</summary>
+        public readonly float T0;
+        /// <summary>Span end parameter on the edge's Bezier.</summary>
+        public readonly float T1;
+        /// <summary>Left rail t-range (span clamped by the left-side intersection trims).</summary>
+        public readonly float LeftT0, LeftT1;
+        /// <summary>Right rail t-range (span clamped by the right-side intersection trims).</summary>
+        public readonly float RightT0, RightT1;
+        /// <summary>Spine sub-path over [T0, T1].</summary>
+        public readonly SKPath Deck;
+        /// <summary>Rail path offset left of travel direction, over [LeftT0, LeftT1].</summary>
+        public readonly SKPath RailLeft;
+        /// <summary>Rail path offset right of travel direction, over [RightT0, RightT1].</summary>
+        public readonly SKPath RailRight;
+
+        public BridgeSpanPaths(float t0, float t1, float leftT0, float leftT1,
+            float rightT0, float rightT1, SKPath deck, SKPath railLeft, SKPath railRight)
+        {
+            T0 = t0;
+            T1 = t1;
+            LeftT0 = leftT0;
+            LeftT1 = leftT1;
+            RightT0 = rightT0;
+            RightT1 = rightT1;
+            Deck = deck;
+            RailLeft = railLeft;
+            RailRight = railRight;
+        }
+
+        public void Dispose()
+        {
+            Deck.Dispose();
+            RailLeft.Dispose();
+            RailRight.Dispose();
         }
     }
 }
