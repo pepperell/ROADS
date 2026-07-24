@@ -62,7 +62,7 @@ public class RoadTool
         {
             PlanRoute(graph, planStart, state.RoadStartNode ?? -1, state.RoadStartEdge,
                 endProbe.Position, endProbe.Node, endProbe.Edge,
-                tangent, state.SelectedCurved, CommitLegsScratch, RouteScratch);
+                tangent, state.SelectedCurved, state.SelectedBridge, CommitLegsScratch, RouteScratch);
             if (RouteScratch.Count > 0) routePoints = RouteScratch.ToArray();
         }
 
@@ -155,6 +155,8 @@ public class RoadTool
         graph.SetLaneCount(forwardEdge, state.SelectedLaneCount);
         if (!state.SelectedOneWay && state.SelectedSharedLane)
             graph.SetSharedLane(forwardEdge, true);
+        if (state.SelectedBridge)
+            graph.SetBridge(forwardEdge, true);
 
         // Curved mode: bend the leg so it leaves its start node along the tangent,
         // BEFORE splitting — crossing detection samples the edge's actual Bezier, and
@@ -168,9 +170,23 @@ public class RoadTool
             graph.SetControlPoint(forwardEdge, 2, cp2);
         }
 
-        // Only split forward edge; SplitEdge handles reverse automatically.
+        // Smooth-link continuations: a leg that STARTS its chain on another road's dead
+        // end (later chain legs are chained by `tangent` instead — and must stay sharp in
+        // straight mode), or ENDS on one, gets that handle rotated to continue the
+        // existing road. The joint is born smooth and LINKED (RoadGraph.IsLinkedNode):
+        // dragging either handle keeps the pair anti-parallel. Runs BEFORE splitting so
+        // crossing detection samples the final shape.
+        if (state.RoadPrevEdge < 0)
+            graph.AlignHandleToContinuation(forwardEdge, startNode);
+        graph.AlignHandleToContinuation(forwardEdge, endNode);
+
+        // Only split forward edge; SplitEdge handles reverse automatically. Bridges are
+        // never split — they pass over their crossings (FindEdgeCrossings also returns
+        // nothing for a bridge; skipping the call just makes the intent explicit).
         // The trailing half (ending at endNode) is the next leg's tangent source.
-        state.RoadPrevEdge = SplitAtCrossings(graph, forwardEdge);
+        state.RoadPrevEdge = state.SelectedBridge
+            ? forwardEdge
+            : SplitAtCrossings(graph, forwardEdge);
         state.RoadStartNode = endNode;
     }
 
@@ -308,7 +324,7 @@ public class RoadTool
     {
         Vector2? tangent = state.SelectedCurved ? TryGetChainTangent(graph, state) : null;
         PlanRoute(graph, startPos, startNode, state.RoadStartEdge, endPos, endNode, endAnchorEdge,
-            tangent, state.SelectedCurved, legs, RouteScratch);
+            tangent, state.SelectedCurved, state.SelectedBridge, legs, RouteScratch);
         foreach (var routePoint in RouteScratch)
             if (routePoint.Node < 0)
                 crossingGhosts.Add(routePoint.Pos);
@@ -335,13 +351,22 @@ public class RoadTool
     /// route-point list and the matching legs.
     /// </summary>
     private static void PlanRoute(RoadGraph graph, Vector2 startPos, int startNode, int startAnchorEdge,
-        Vector2 endPos, int endNode, int endAnchorEdge, Vector2? tangent, bool curved,
+        Vector2 endPos, int endNode, int endAnchorEdge, Vector2? tangent, bool curved, bool bridge,
         List<PreviewLeg> legs, List<RoutePoint> route)
     {
         route.Clear();
         UsedNodeScratch.Clear();
         if (startNode >= 0) UsedNodeScratch.Add(startNode);
         if (endNode >= 0) UsedNodeScratch.Add(endNode);
+
+        // A bridge passes OVER everything between its endpoints: no pass-through nodes,
+        // no crossing splits — the single leg goes point-to-point.
+        if (bridge)
+        {
+            BuildLegs(graph, startPos, startNode, startAnchorEdge, endPos, endNode, endAnchorEdge,
+                tangent, curved, route, legs);
+            return;
+        }
 
         for (int pass = 0; ; pass++)
         {

@@ -59,7 +59,14 @@ public class VehicleRenderer
     /// <param name="zoom">Current camera zoom (world units per screen pixel).</param>
     /// <param name="darkness">Ambient darkness factor (0 = full day, 1 = full night).</param>
     /// <param name="viewRect">Visible world-space rectangle for frustum culling.</param>
-    public void Draw(SKCanvas canvas, VehicleStore store, float zoom, float darkness, SKRect viewRect)
+    /// <param name="graph">Optional road graph enabling the bridge layer split; null draws
+    /// every vehicle in one pass.</param>
+    /// <param name="bridges">With <paramref name="graph"/> supplied: false draws only
+    /// GROUND vehicles (current edge not a bridge — they pass under decks), true draws
+    /// only vehicles ON flagged bridges (called again after the bridge layer so they ride
+    /// on top of the deck).</param>
+    public void Draw(SKCanvas canvas, VehicleStore store, float zoom, float darkness, SKRect viewRect,
+        RoadGraph? graph = null, bool bridges = false)
     {
         if (store.Count == 0) return;
 
@@ -126,6 +133,15 @@ public class VehicleRenderer
         for (int i = 0; i < store.Count; i++)
         {
             if (store.State[i] != VehicleState.Driving) continue;
+
+            // Bridge layer split: draw only the requested population (see param docs).
+            if (graph != null)
+            {
+                int e = store.CurrentEdge[i];
+                bool onBridge = e >= 0 && e < graph.Edges.Count
+                    && (graph.Edges[e].Flags & EdgeFlags.Bridge) != 0;
+                if (onBridge != bridges) continue;
+            }
 
             // Derive render dimensions from the per-vehicle type (clamped to Sedan on unknown byte).
             var vtype = (VehicleType)store.PreferredVehicle[i];

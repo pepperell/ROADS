@@ -237,8 +237,13 @@ public class SceneRenderer
         // Draw drag crossing previews
         DrawCrossingPreviews(canvas, editorState, camera);
 
-        // Draw vehicles
-        _vehicleRenderer.Draw(canvas, vehicles, camera.Zoom, darkness, viewRect);
+        // Draw vehicles in two layers around the elevated bridges: ground traffic first
+        // (cars under a flagged bridge pass beneath its deck), then the bridge layer
+        // (decks, their markings, rails, node dots), then the cars ON bridges on top.
+        _vehicleRenderer.Draw(canvas, vehicles, camera.Zoom, darkness, viewRect, graph, bridges: false);
+        _roadRenderer.DrawBridgeLayer(canvas, graph, stopLineCache, camera.Zoom, viewRect,
+            _visibleEdges, stopSigns, trafficSignals);
+        _vehicleRenderer.Draw(canvas, vehicles, camera.Zoom, darkness, viewRect, graph, bridges: true);
         _vehicleRenderer.DrawArcConflictOverlay(canvas, vehicles, intersectionArcs);
         if (editorState.HoveredVehicle >= 0 && editorState.HoveredVehicle != editorState.SelectedVehicle)
             _vehicleRenderer.DrawHoverOverlay(canvas, vehicles, editorState.HoveredVehicle);

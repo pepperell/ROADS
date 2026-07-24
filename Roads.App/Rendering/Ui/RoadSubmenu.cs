@@ -11,9 +11,10 @@ namespace Roads.App.Rendering.Ui;
 /// the main toolbar). Row 2 holds the sticky road options applied by the Road and Update
 /// Segment tools: road-type group, per-direction width group (1x–3x; disabled beyond 1x
 /// while shared-lane is checked, since a shared lane is single-lane by definition),
-/// <see cref="Checkbox"/>es for one-way and single-lane two-way (mutually exclusive —
+/// <see cref="Checkbox"/>es for one-way, single-lane two-way (mutually exclusive —
 /// the <see cref="EditorState"/> setters enforce it; the live accessors make the visuals
-/// follow), and the Straight/Curved drawing-mode group (curved = each new segment leaves
+/// follow), and bridge (elevated segment passing over anything beneath, connecting only
+/// at its end nodes), and the Straight/Curved drawing-mode group (curved = each new segment leaves
 /// its start tangent to the previous one; Road tool only). Visibility is a live
 /// <see cref="Panel.VisibleWhen"/> gate on the active tool, covering both drawing and
 /// hit-testing. The background pad consumes clicks.
@@ -30,6 +31,7 @@ public class RoadSubmenu : Panel
     private const float Pad = 4f;
     private const float OneWayCheckboxWidth = 78f;
     private const float SharedCheckboxWidth = 122f;
+    private const float BridgeCheckboxWidth = 68f;
 
     public RoadSubmenu(EditorState editorState)
     {
@@ -140,7 +142,16 @@ public class RoadSubmenu : Panel
             Size = new SKSize(SharedCheckboxWidth, ButtonHeight),
             Offset = new SKPoint(x, rowY),
         });
-        x += SharedCheckboxWidth + GroupGap;
+        x += SharedCheckboxWidth + ButtonSpacing;
+        // Bridge: the segment is elevated and passes over roads/water beneath (no
+        // intersections along its span — it connects only at its end nodes).
+        Add(new Checkbox("Bridge",
+            () => editorState.SelectedBridge, v => editorState.SelectedBridge = v)
+        {
+            Size = new SKSize(BridgeCheckboxWidth, ButtonHeight),
+            Offset = new SKPoint(x, rowY),
+        });
+        x += BridgeCheckboxWidth + GroupGap;
 
         // Drawing-mode group: straight segments vs. tangent-continuous curves.
         var modes = new[] { (label: "Straight", curved: false), (label: "Curved", curved: true) };

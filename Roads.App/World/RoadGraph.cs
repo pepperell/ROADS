@@ -967,6 +967,32 @@ public class RoadGraph
     /// flag has no meaning. Vehicles entering a shared edge are gated against oncoming traffic by the
     /// steering controller's shared-lane gate.
     /// </summary>
+    /// <summary>
+    /// Sets or clears <see cref="EdgeFlags.Bridge"/> on an edge and its reverse twin (if
+    /// any). A bridge passes over everything it crosses: crossing detection skips bridge
+    /// edges in both directions, so the segment connects to the network only at its end
+    /// nodes, and the renderer gives it the full bridge treatment.
+    /// </summary>
+    public void SetBridge(int edgeIndex, bool bridge)
+    {
+        if (edgeIndex < 0 || edgeIndex >= _edges.Count) return;
+        if (_edges[edgeIndex].FromNode < 0) return;
+
+        void Apply(int e)
+        {
+            var edge = _edges[e];
+            var flags = bridge ? edge.Flags | EdgeFlags.Bridge : edge.Flags & ~EdgeFlags.Bridge;
+            if (flags == edge.Flags) return;
+            edge.Flags = flags;
+            _edges[e] = edge;
+            Version++;
+        }
+
+        Apply(edgeIndex);
+        int reverse = FindReverseEdge(edgeIndex);
+        if (reverse >= 0) Apply(reverse);
+    }
+
     public void SetSharedLane(int edgeIndex, bool shared)
     {
         if (edgeIndex < 0 || edgeIndex >= _edges.Count) return;
@@ -1238,6 +1264,14 @@ public class RoadGraph
     /// near one end — breaking the uniform t≈distance convention that all Δt·Length math
     /// relies on (IDM gaps, stop lines, signal detection zones). Proportional rescaling
     /// keeps a chord/3 handle at chord/3 while preserving any hand-tuned handle ratio.
+    /// Additionally, when the moved node is the DEAD END of a single road, BOTH of that
+    /// edge's handles rotate with the chord (each about its own node; the far node acts as
+    /// the swing center) — combined with the rescale this is a similarity transform, so
+    /// dragging the free end of an upward road down-and-right swings the whole curve like
+    /// a rigid pendulum, the tip ending up pointing right. At shared nodes (2+ roads)
+    /// handle directions are preserved, since rotating them would kink the other roads'
+    /// joints. Moving back to the start position inverts the rescale and the swing exactly
+    /// (drag revert).
     /// </summary>
     /// <param name="nodeIndex">Index of the node to move.</param>
     /// <param name="newPosition">New world-space position.</param>
@@ -1248,6 +1282,21 @@ public class RoadGraph
 
         var oldPosition = _nodes[nodeIndex].Position;
         var delta = newPosition - oldPosition;
+
+        // Dead-end test for the swing rotation: exactly one distinct road at the node.
+        int soleRoadKey = -1;
+        bool deadEnd = true;
+        void CountRoad(int e)
+        {
+            if (_edges[e].FromNode < 0) return;
+            int rev = FindReverseEdge(e);
+            int key = rev >= 0 ? Math.Min(e, rev) : e;
+            if (soleRoadKey < 0) soleRoadKey = key;
+            else if (key != soleRoadKey) deadEnd = false;
+        }
+        foreach (int e in GetIncomingEdges(nodeIndex)) CountRoad(e);
+        foreach (int e in GetOutgoingEdges(nodeIndex)) CountRoad(e);
+        if (soleRoadKey < 0) deadEnd = false;
 
         var node = _nodes[nodeIndex];
         node.Position = newPosition;
@@ -1272,6 +1321,23 @@ public class RoadGraph
                 float scale = chordNew / chordOld;
                 edge.ControlPoint1 = p0 + (edge.ControlPoint1 - p0) * scale;
                 edge.ControlPoint2 = p3 + (edge.ControlPoint2 - p3) * scale;
+
+                // Dead-end swing: rotate BOTH handles by the chord's rotation (each about
+                // its own node) — together with the chord-scale above this is a full
+                // similarity transform, so the curve keeps its exact shape relative to
+                // the swinging road, like a rigid pendulum.
+                if (deadEnd)
+                {
+                    float inv = 1f / (chordOld * chordNew);
+                    var co = p3Old - p0Old;
+                    var cn = p3 - p0;
+                    float cos = (co.X * cn.X + co.Y * cn.Y) * inv;
+                    float sin = (co.X * cn.Y - co.Y * cn.X) * inv;
+                    var h1 = edge.ControlPoint1 - p0;
+                    edge.ControlPoint1 = p0 + new Vector2(h1.X * cos - h1.Y * sin, h1.X * sin + h1.Y * cos);
+                    var h2 = edge.ControlPoint2 - p3;
+                    edge.ControlPoint2 = p3 + new Vector2(h2.X * cos - h2.Y * sin, h2.X * sin + h2.Y * cos);
+                }
             }
 
             edge.Length = EstimateBezierLength(p0, edge.ControlPoint1, edge.ControlPoint2, p3);
@@ -1424,6 +1490,147 @@ public class RoadGraph
         while (a > MathF.PI) a -= 2f * MathF.PI;
         while (a <= -MathF.PI) a += 2f * MathF.PI;
         return a;
+    }
+
+    /// <summary>cos of the tolerance (~10°) within which the two handle directions at a
+    /// 2-road node count as anti-parallel, making the node LINKED (<see cref="IsLinkedNode"/>).</summary>
+    private const float LinkedNodeCosTol = 0.9848f;
+
+    /// <summary>
+    /// True when the node is a LINKED smooth joint: exactly two distinct roads meet there
+    /// and their node-anchored handles point in (near) opposite directions, so the pair
+    /// reads as one continuous road. Created by drawing a road from another road's dead
+    /// end (<see cref="AlignHandleToContinuation"/>) and maintained by the editor syncing
+    /// the partner handle during drags (<see cref="SyncLinkedPartner"/>). Derived state —
+    /// never persisted: a third leg dissolves it automatically, and a kinked 2-road joint
+    /// (beyond the angle tolerance) is not linked, so its handles drag independently.
+    /// </summary>
+    public bool IsLinkedNode(int nodeIndex)
+    {
+        if (nodeIndex < 0 || nodeIndex >= _nodes.Count) return false;
+        if (float.IsNaN(_nodes[nodeIndex].Position.X)) return false;
+        var nodePos = _nodes[nodeIndex].Position;
+
+        int road0 = -1, road1 = -1;
+        Vector2 dir0 = default, dir1 = default;
+        int roadCount = 0;
+
+        bool Consider(int e, bool atToNode)
+        {
+            var edge = _edges[e];
+            if (edge.FromNode < 0) return true;
+            int rev = FindReverseEdge(e);
+            int key = rev >= 0 ? Math.Min(e, rev) : e;
+            if (key == road0 || key == road1) return true; // twin of an already-seen road
+            var h = (atToNode ? edge.ControlPoint2 : edge.ControlPoint1) - nodePos;
+            if (h.LengthSquared() < 1e-6f || roadCount >= 2)
+            {
+                roadCount = 3; // degenerate handle or third road — not linked
+                return false;
+            }
+            if (roadCount == 0) { road0 = key; dir0 = h; }
+            else { road1 = key; dir1 = h; }
+            roadCount++;
+            return true;
+        }
+
+        foreach (int e in GetIncomingEdges(nodeIndex))
+            if (!Consider(e, atToNode: true)) return false;
+        foreach (int e in GetOutgoingEdges(nodeIndex))
+            if (!Consider(e, atToNode: false)) return false;
+        if (roadCount != 2) return false;
+
+        return Vector2.Dot(Vector2.Normalize(dir0), Vector2.Normalize(dir1)) <= -LinkedNodeCosTol;
+    }
+
+    /// <summary>
+    /// Rotates the partner road's handle at a linked node to stay anti-parallel with the
+    /// just-moved handle of <paramref name="edgeIndex"/> at its
+    /// <paramref name="controlPointIndex"/> end, preserving the partner's handle length —
+    /// the drag-time half of the linked-node invariant. No-op unless the node hosts
+    /// exactly one other road with valid geometry. Callers decide WHEN the joint is
+    /// linked (checked before moving the source); this method deliberately skips the
+    /// angle test so one fast drag step cannot break the link mid-drag.
+    /// </summary>
+    public void SyncLinkedPartner(int edgeIndex, int controlPointIndex)
+    {
+        if (edgeIndex < 0 || edgeIndex >= _edges.Count) return;
+        var edge = _edges[edgeIndex];
+        if (edge.FromNode < 0) return;
+        int node = controlPointIndex == 1 ? edge.FromNode : edge.ToNode;
+        var nodePos = _nodes[node].Position;
+        var src = (controlPointIndex == 1 ? edge.ControlPoint1 : edge.ControlPoint2) - nodePos;
+        float srcLen = src.Length();
+        if (srcLen < 0.001f) return;
+
+        if (!TryGetSingleOtherRoad(node, edgeIndex, out int otherEdge, out bool otherAtToNode)) return;
+        var other = _edges[otherEdge];
+        var oh = (otherAtToNode ? other.ControlPoint2 : other.ControlPoint1) - nodePos;
+        float oLen = oh.Length();
+        if (oLen < 0.001f) return;
+
+        SetControlPoint(otherEdge, otherAtToNode ? 2 : 1, nodePos - src * (oLen / srcLen));
+    }
+
+    /// <summary>
+    /// Rotates <paramref name="edgeIndex"/>'s handle at <paramref name="node"/> to
+    /// continue the SINGLE other road at that node (anti-parallel node-anchored handles),
+    /// keeping the handle's length — called by the road tool when a new leg starts or
+    /// ends on another road's dead end, so the joint is born smooth and LINKED
+    /// (<see cref="IsLinkedNode"/>). No-op when the node hosts zero or several other
+    /// roads, the edge does not end at the node, or geometry is degenerate.
+    /// </summary>
+    public void AlignHandleToContinuation(int edgeIndex, int node)
+    {
+        if (edgeIndex < 0 || edgeIndex >= _edges.Count) return;
+        var edge = _edges[edgeIndex];
+        if (edge.FromNode < 0) return;
+        int cpIndex = edge.FromNode == node ? 1 : edge.ToNode == node ? 2 : 0;
+        if (cpIndex == 0) return;
+        if (!TryGetSingleOtherRoad(node, edgeIndex, out int otherEdge, out bool otherAtToNode)) return;
+
+        var nodePos = _nodes[node].Position;
+        var other = _edges[otherEdge];
+        var oh = (otherAtToNode ? other.ControlPoint2 : other.ControlPoint1) - nodePos;
+        float oLen = oh.Length();
+        if (oLen < 0.001f) return;
+        var own = (cpIndex == 1 ? edge.ControlPoint1 : edge.ControlPoint2) - nodePos;
+        float ownLen = own.Length();
+        if (ownLen < 0.001f) return;
+
+        SetControlPoint(edgeIndex, cpIndex, nodePos - oh * (ownLen / oLen));
+    }
+
+    /// <summary>
+    /// Finds the single distinct road at <paramref name="node"/> other than
+    /// <paramref name="edgeIndex"/> and its reverse twin. False when there are zero or
+    /// several. The result is reported with which of its ends touches the node (its
+    /// node-anchored handle is CP2 at the ToNode end, CP1 at the FromNode end).
+    /// </summary>
+    private bool TryGetSingleOtherRoad(int node, int edgeIndex, out int otherEdge, out bool otherAtToNode)
+    {
+        otherEdge = -1;
+        otherAtToNode = false;
+        int reverse = FindReverseEdge(edgeIndex);
+        int otherKey = -1;
+
+        foreach (int e in GetIncomingEdges(node))
+        {
+            if (e == edgeIndex || e == reverse || _edges[e].FromNode < 0) continue;
+            int rev = FindReverseEdge(e);
+            int key = rev >= 0 ? Math.Min(e, rev) : e;
+            if (otherKey < 0) { otherKey = key; otherEdge = e; otherAtToNode = true; }
+            else if (key != otherKey) return false;
+        }
+        foreach (int e in GetOutgoingEdges(node))
+        {
+            if (e == edgeIndex || e == reverse || _edges[e].FromNode < 0) continue;
+            int rev = FindReverseEdge(e);
+            int key = rev >= 0 ? Math.Min(e, rev) : e;
+            if (otherKey < 0) { otherKey = key; otherEdge = e; otherAtToNode = false; }
+            else if (key != otherKey) return false;
+        }
+        return otherKey >= 0;
     }
 
     /// <summary>
@@ -1822,6 +2029,8 @@ public class RoadGraph
         var crossings = new List<(int, float, float)>();
         var edge = _edges[edgeIndex];
         if (edge.FromNode < 0) return crossings; // defunct
+        // A bridge passes over everything — it never crosses at grade.
+        if ((edge.Flags & EdgeFlags.Bridge) != 0) return crossings;
 
         const int segments = 20;
         var selfPoints = SampleBezier(edgeIndex, segments);
@@ -1846,6 +2055,8 @@ public class RoadGraph
             if (other == edgeIndex) continue;
             var otherEdge = _edges[other];
             if (otherEdge.FromNode < 0) continue; // defunct
+            // Roads pass UNDER bridges — never cross them at grade.
+            if ((otherEdge.Flags & EdgeFlags.Bridge) != 0) continue;
 
             // Bounding box cull: skip edges whose endpoints and control points
             // are entirely outside our edge's bounding box
@@ -1949,6 +2160,8 @@ public class RoadGraph
             if (other == ignoreEdge) continue;
             var otherEdge = _edges[other];
             if (otherEdge.FromNode < 0) continue; // defunct
+            // Roads pass UNDER bridges — never cross them at grade.
+            if ((otherEdge.Flags & EdgeFlags.Bridge) != 0) continue;
 
             // Skip reverse twins: of a two-way pair only the primary is tested, and the
             // ignored anchor edge's twin is skipped along with it.

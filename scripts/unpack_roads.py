@@ -30,7 +30,11 @@ DRIVER_ARCHETYPES = ["Commuter", "SundayDriver", "LeadFoot", "NervousNellie", "T
 
 RESIDENT_ACTIVITY = ["Dormant", "Driving", "OffMap", "MovingIn"]
 
-EDGE_FLAGS = {0: "None"}
+EDGE_FLAGS = {
+    0: "None",
+    1: "SharedLane",  # single-lane two-way
+    2: "Bridge",      # elevated; passes over crossings, connects only at end nodes
+}
 
 
 def decode_flags(value: int, flag_map: dict) -> str:

@@ -134,6 +134,12 @@ public class MainForm : Form
     /// <summary>World position of the dragged node or control point at drag start, so
     /// <see cref="AbortActiveDrag"/> can revert the geometry on cancel (Escape/right-click).</summary>
     private Vector2 _dragRevertPos;
+    /// <summary>True when the current control-point drag started on a LINKED node
+    /// (<see cref="World.RoadGraph.IsLinkedNode"/>): the partner road's handle is re-synced
+    /// anti-parallel on every drag update — and after an abort revert — so the smooth
+    /// joint survives the whole drag. Captured at drag start so one fast drag step cannot
+    /// break the link mid-drag.</summary>
+    private bool _dragLinkedAtStart;
 
     /// <summary>World-space radius within which the Destination placement tool will attach a
     /// connector to the nearest road. Larger than SnapDistance so a destination can be dropped
@@ -1679,8 +1685,15 @@ public class MainForm : Form
         if (_editorState.IsDraggingControlPoint)
         {
             if (_dragActive)
+            {
                 _roadGraph.SetControlPoint(_editorState.DragEdgeIndex,
                     _editorState.DragControlPointIndex, _dragRevertPos);
+                // The partner handle of a linked node followed the drag — bring it back
+                // to the reverted angle too.
+                if (_dragLinkedAtStart)
+                    _roadGraph.SyncLinkedPartner(_editorState.DragEdgeIndex,
+                        _editorState.DragControlPointIndex);
+            }
             _editorState.DragEdgeIndex = -1;
             _editorState.DragControlPointIndex = -1;
             _canvas.Cursor = Cursors.Default;
@@ -1814,6 +1827,7 @@ public class MainForm : Form
         _dragStartScreenPos = screenPos;
         _dragOffset = cpPos - worldVec;
         _dragRevertPos = cpPos;
+        _dragLinkedAtStart = _roadGraph.IsLinkedNode(bestCp == 1 ? dragEdge.FromNode : dragEdge.ToNode);
         _dragActive = false;
         _canvas.Cursor = Cursors.Hand;
         return true;
@@ -1991,6 +2005,11 @@ public class MainForm : Form
                 _editorState.DragControlPointIndex,
                 _roadGraph.ClampControlPointToNeighbors(
                     _editorState.DragEdgeIndex, _editorState.DragControlPointIndex, desiredCp));
+            // On a linked node the partner road's handle rotates along, keeping the
+            // smooth continuation (lengths stay independent).
+            if (_dragLinkedAtStart)
+                _roadGraph.SyncLinkedPartner(_editorState.DragEdgeIndex,
+                    _editorState.DragControlPointIndex);
         }
         else
         {

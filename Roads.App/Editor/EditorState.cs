@@ -129,6 +129,12 @@ public class EditorState
     /// tangent reference (first segment of a chain in open space) are straight either way.</summary>
     public bool SelectedCurved { get; set; }
 
+    /// <summary>Bridge option for new roads (sticky): segments commit with
+    /// <see cref="EdgeFlags.Bridge"/> — elevated, passing over any road or water beneath.
+    /// The planner skips pass-through/crossing discovery for them (a bridge connects only
+    /// at its end nodes) and they render with the full bridge treatment.</summary>
+    public bool SelectedBridge { get; set; }
+
     /// <summary>Index of the EXISTING node the current road segment starts from, or <c>null</c>
     /// when the start is a pending ghost anchor (<see cref="RoadStartAnchorPos"/>) or no
     /// road is being drawn.</summary>

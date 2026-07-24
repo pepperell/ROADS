@@ -30,6 +30,15 @@ public enum EdgeFlags : ushort
     /// directed edge with no reverse (FindReverseEdge &lt; 0).
     /// </summary>
     SharedLane = 1,
+    /// <summary>
+    /// Elevated bridge segment: passes OVER anything it crosses. Set on BOTH edges of a
+    /// two-way pair. Crossing detection skips bridge edges in both directions — drawing a
+    /// bridge never splits the roads beneath it, and drawing a road under an existing
+    /// bridge never splits the bridge — so a bridge connects to the network only at its
+    /// end nodes. Rendered with the bridge treatment (deck, parapet, guard rails) over
+    /// its full span regardless of water.
+    /// </summary>
+    Bridge = 2,
 }
 
 /// <summary>
