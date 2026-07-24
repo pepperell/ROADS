@@ -1983,10 +1983,14 @@ public class MainForm : Form
                 _dragActive = true;
             }
             var worldPos = _camera.ScreenToWorld(e.X, e.Y, _canvas.Width, _canvas.Height);
+            // The handle may not swing past any adjacent road at its anchor node (the
+            // bottom leg of a T stops at ±90°, meeting the main road's legs).
+            var desiredCp = new Vector2(worldPos.X, worldPos.Y) + _dragOffset;
             _roadGraph.SetControlPoint(
                 _editorState.DragEdgeIndex,
                 _editorState.DragControlPointIndex,
-                new Vector2(worldPos.X, worldPos.Y) + _dragOffset);
+                _roadGraph.ClampControlPointToNeighbors(
+                    _editorState.DragEdgeIndex, _editorState.DragControlPointIndex, desiredCp));
         }
         else
         {

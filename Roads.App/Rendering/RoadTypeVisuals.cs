@@ -43,20 +43,13 @@ public static class RoadTypeVisuals
     /// Returns the stroke-width multiplier for the given road type. The multiplier is
     /// applied to the lane-derived width (<see cref="GeometryUtil.RoadSurfaceWidth"/>)
     /// so that road type visually conveys importance without affecting lane geometry.
-    /// Highway roads appear noticeably wider; dirt roads appear narrower.
+    /// Highway roads appear noticeably wider; dirt roads appear narrower. The data lives
+    /// in <see cref="RoadTypeDefaults.GetDrawnWidthMultiplier"/> (World) because junction
+    /// clearance geometry measures against the drawn width too.
     /// </summary>
     /// <param name="type">Road classification.</param>
     public static float GetWidthMultiplier(RoadType type)
-    {
-        return type switch
-        {
-            RoadType.Highway     => 1.25f,
-            RoadType.Arterial    => 1.10f,
-            RoadType.Residential => 1.00f,
-            RoadType.Dirt        => 0.85f,
-            _                    => 1.00f,
-        };
-    }
+        => RoadTypeDefaults.GetDrawnWidthMultiplier(type);
 
     /// <summary>
     /// Width in meters of the shoulder band drawn on EACH side of the asphalt (sidewalk for

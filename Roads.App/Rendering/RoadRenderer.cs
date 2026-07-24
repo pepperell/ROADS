@@ -92,12 +92,17 @@ public class RoadRenderer
     /// </summary>
     private CongestionHeatMap? _heatMap;
 
-    // Reusable paints (avoid per-frame allocation)
+    // Reusable paints (avoid per-frame allocation).
+    // Surface/shoulder strokes are BUTT-capped in the detail passes: a round cap half a
+    // road-width past the node bleeds through a narrower crossing road (a wide leg teeing
+    // into a small street grew a dome past it). Dead ends get explicit end-cap discs, and
+    // junction corners are covered by the junction shoulder ring + intersection fill.
+    // The LOD-simple schematic pass sets Round caps for clean thin-line joints.
     private readonly SKPaint _surfacePaint = new()
     {
         Color = new SKColor(70, 72, 78),
         Style = SKPaintStyle.Stroke,
-        StrokeCap = SKStrokeCap.Round,
+        StrokeCap = SKStrokeCap.Butt,
         StrokeJoin = SKStrokeJoin.Round,
         IsAntialias = true
     };
@@ -150,10 +155,27 @@ public class RoadRenderer
         IsAntialias = true
     };
     // Shoulder/sidewalk/verge band stroked under the asphalt (color set per edge type).
+    // Butt caps — see the surface paint note; dead ends get explicit band-radius discs.
     private readonly SKPaint _shoulderPaint = new()
     {
         Style = SKPaintStyle.Stroke,
-        StrokeCap = SKStrokeCap.Round,
+        StrokeCap = SKStrokeCap.Butt,
+        StrokeJoin = SKStrokeJoin.Round,
+        IsAntialias = true
+    };
+    // Filled discs restoring the round look at DEAD-END edge ends only (no other road at
+    // the node); recolored per use for the shoulder band and the asphalt surface.
+    private readonly SKPaint _endCapPaint = new()
+    {
+        Style = SKPaintStyle.Fill,
+        IsAntialias = true
+    };
+    // Junction shoulder ring: the node's fill outline stroked in shoulder color under the
+    // asphalt, covering the corner wedges that leg round caps used to cover.
+    private readonly SKPaint _junctionShoulderPaint = new()
+    {
+        Style = SKPaintStyle.Stroke,
+        StrokeCap = SKStrokeCap.Butt,
         StrokeJoin = SKStrokeJoin.Round,
         IsAntialias = true
     };
@@ -338,7 +360,10 @@ public class RoadRenderer
 
         // LOD simple: draw roads as plain center-line strokes at city-overview zoom.
         // Stroke width and (brightened) color grade by road type so the network hierarchy
-        // stays legible when roads collapse to lines.
+        // stays legible when roads collapse to lines. Round caps here (and butt in the
+        // detail passes — see the surface paint note): thin schematic lines need round
+        // joints, while full-width strokes must not dome past a narrower crossing road.
+        _surfacePaint.StrokeCap = lodSimple ? SKStrokeCap.Round : SKStrokeCap.Butt;
         if (lodSimple)
         {
             for (int i = 0; i < graph.Edges.Count; i++)
@@ -395,8 +420,16 @@ public class RoadRenderer
                 _shoulderPaint.Color = RoadTypeVisuals.GetShoulderColor(edge.RoadType, _ambient);
                 _shoulderPaint.StrokeWidth = asphaltWidth + 2f * RoadTypeVisuals.GetShoulderWidth(edge.RoadType);
                 canvas.DrawPath(cached.CenterPath, _shoulderPaint);
+                DrawDeadEndCaps(canvas, cached, _shoulderPaint.Color, _shoulderPaint.StrokeWidth * 0.5f);
             }
         }
+
+        // Pass 0.75: junction shoulder rings — each node's fill outline stroked in shoulder
+        // color, under the asphalt. With butt-capped leg strokes the junction corner wedges
+        // are no longer rounded over by end caps; the ring covers them along the actual
+        // corner curves (and, unlike the old caps, never bleeds past a narrower leg).
+        if (zoom >= ShoulderMinZoom)
+            DrawJunctionShoulders(canvas, graph, stopLines, viewRect);
 
         // Pass 1: draw all asphalt surfaces first so overlapping roads blend seamlessly
         for (int k = 0; k < visCount; k++)
@@ -470,6 +503,12 @@ public class RoadRenderer
             // Bridge furniture (guard rails, post ticks, expansion joints) over water spans.
             if (_cache[i].BridgeSpans.Count > 0)
                 DrawBridgeDetails(canvas, graph, edge, i, zoom);
+
+            // Dead-end tips: wrap the boundary wall and lane markings around the cap.
+            if (_cache[i].RoundCapAtFrom)
+                DrawDeadEndTurnaround(canvas, graph, edge, i, atToNode: false, zoom);
+            if (_cache[i].RoundCapAtTo)
+                DrawDeadEndTurnaround(canvas, graph, edge, i, atToNode: true, zoom);
         }
 
         // Pass 2.1: bridge corner rails — the per-edge rails above break at each road
@@ -687,8 +726,26 @@ public class RoadRenderer
             }
         }
 
+        // Round end-cap discs are drawn only at DEAD ENDS: an end whose node hosts any
+        // other road stays square (butt cap) — the junction fill and shoulder ring cover
+        // it, and a round cap would bleed past a narrower crossing road.
+        bool roundCapAtFrom = !NodeHasOtherRoad(graph, edge.FromNode, edgeIndex, reverseTwin);
+        bool roundCapAtTo = !NodeHasOtherRoad(graph, edge.ToNode, edgeIndex, reverseTwin);
+
         return new CachedEdgePaths(centerPath, centerLinePath, leftPath, rightPath, lanePaths,
-            typeMarkingPaths, bridgeSpans, totalWidth, hasCenterLine, dashedEdges);
+            typeMarkingPaths, bridgeSpans, totalWidth, hasCenterLine, dashedEdges,
+            roundCapAtFrom, roundCapAtTo);
+    }
+
+    /// <summary>True when any active edge other than <paramref name="edgeIndex"/> and its
+    /// reverse twin touches the node — i.e. the node is NOT a dead end of this road.</summary>
+    private static bool NodeHasOtherRoad(RoadGraph graph, int node, int edgeIndex, int reverseTwin)
+    {
+        foreach (int e in graph.GetIncomingEdges(node))
+            if (e != edgeIndex && e != reverseTwin && graph.Edges[e].FromNode >= 0) return true;
+        foreach (int e in graph.GetOutgoingEdges(node))
+            if (e != edgeIndex && e != reverseTwin && graph.Edges[e].FromNode >= 0) return true;
+        return false;
     }
 
     /// <summary>
@@ -826,9 +883,10 @@ public class RoadRenderer
         _surfacePaint.Color = RoadTypeVisuals.GetSurfaceColor(edge.RoadType, _ambient);
         _surfacePaint.StrokeWidth = strokeWidth;
         canvas.DrawPath(cached.CenterPath, _surfacePaint);
+        DrawDeadEndCaps(canvas, cached, _surfacePaint.Color, strokeWidth * 0.5f);
 
         // Bridge decks are NOT drawn here — they get their own sub-pass (1.25) after all
-        // asphalt is down, because a later edge's round asphalt end-cap would otherwise
+        // asphalt is down, because a later edge's asphalt end-cap disc could otherwise
         // overdraw this edge's deck at a shared mid-bridge node.
 
         // Blend congestion tint over the base surface (skipped when overlay is off or
@@ -949,6 +1007,30 @@ public class RoadRenderer
         {
             var p = span.Deck.LastPoint;
             canvas.DrawCircle(p.X, p.Y, radius, _bridgeCapPaint);
+        }
+    }
+
+    /// <summary>
+    /// Draws a filled disc over each DEAD-END end of an edge (no other road at that node),
+    /// restoring the round end look that the butt-capped surface/shoulder strokes no
+    /// longer provide. Ends shared with other roads stay square — the junction fill and
+    /// shoulder ring cover them — so a wide road teeing into a narrow one cannot dome
+    /// past it. Positions come from the cached center path's endpoints.
+    /// </summary>
+    private void DrawDeadEndCaps(SKCanvas canvas, CachedEdgePaths cached, SKColor color, float radius)
+    {
+        if (!cached.RoundCapAtFrom && !cached.RoundCapAtTo) return;
+        if (cached.CenterPath.PointCount == 0) return;
+        _endCapPaint.Color = color;
+        if (cached.RoundCapAtFrom)
+        {
+            var p = cached.CenterPath.GetPoint(0);
+            canvas.DrawCircle(p.X, p.Y, radius, _endCapPaint);
+        }
+        if (cached.RoundCapAtTo)
+        {
+            var p = cached.CenterPath.LastPoint;
+            canvas.DrawCircle(p.X, p.Y, radius, _endCapPaint);
         }
     }
 
@@ -1155,6 +1237,93 @@ public class RoadRenderer
             pos.X + nx * halfWidth, pos.Y + ny * halfWidth, _bridgeJointPaint);
     }
 
+    /// <summary>
+    /// Wraps the road markings around a dead-end tip (drawn as a round end-cap disc): the
+    /// boundary treatment (curb or white edge line, dashed on shared-lane roads) follows
+    /// the cap rim at the drawn half-width, and each lane divider / center-marking line
+    /// continues as a concentric semicircular arc — reading as "all lanes turn around
+    /// here", like a cul-de-sac. Arcs are centered on the node and sweep 180° from the
+    /// right boundary side around the tip to the left, so they meet the straight marking
+    /// ends exactly. Sub-pixel arcs are skipped.
+    /// </summary>
+    private void DrawDeadEndTurnaround(SKCanvas canvas, RoadGraph graph, RoadEdge edge,
+        int edgeIndex, bool atToNode, float zoom)
+    {
+        var cached = _cache[edgeIndex];
+        var tan = graph.EvaluateBezierTangent(edgeIndex, atToNode ? 1f : 0f);
+        float len = tan.Length();
+        if (len < 0.001f) return;
+        // Outward direction: past the tip, away from the road body.
+        float dx = tan.X / len, dy = tan.Y / len;
+        if (!atToNode) { dx = -dx; dy = -dy; }
+        float nx = -dy, ny = dx; // right normal of outward (Y-down)
+        var node = graph.Nodes[atToNode ? edge.ToNode : edge.FromNode].Position;
+        float startDeg = MathF.Atan2(ny, nx) * (180f / MathF.PI);
+
+        void TipArc(float radius, SKPaint paint)
+        {
+            if (radius * zoom < 0.5f) return; // sub-pixel (also skips zero-radius center lines)
+            var rect = new SKRect(node.X - radius, node.Y - radius, node.X + radius, node.Y + radius);
+            canvas.DrawArc(rect, startDeg, -180f, false, paint);
+        }
+
+        float halfWidth = cached.TotalWidth * 0.5f * RoadTypeVisuals.GetWidthMultiplier(edge.RoadType);
+        bool painted = RoadTypeVisuals.HasPaintedLines(edge.RoadType);
+
+        // Boundary wall around the rim — same paint policy as DrawRoadLines.
+        if (painted)
+        {
+            SKPaint boundaryPaint;
+            if (edge.RoadType == RoadType.Highway)
+            {
+                boundaryPaint = _edgeLinePaint;
+                boundaryPaint.StrokeWidth = Math.Max(0.3f, 0.5f / zoom);
+            }
+            else
+            {
+                boundaryPaint = _curbPaint;
+                boundaryPaint.StrokeWidth = Math.Max(0.25f, 0.4f / zoom);
+            }
+            boundaryPaint.PathEffect = cached.DashedEdges ? _centerLineDash : null;
+            TipArc(halfWidth, boundaryPaint);
+            boundaryPaint.PathEffect = null;
+        }
+
+        // Lane dividers turn around at their own radii. Symmetric one-way offsets produce
+        // the same radius twice — the identical arcs overdraw invisibly.
+        if (painted && edge.LaneCount > 1)
+        {
+            _laneDividerPaint.StrokeWidth = Math.Max(0.2f, 0.3f / zoom);
+            for (int lane = 1; lane < edge.LaneCount; lane++)
+            {
+                float radius = cached.HasCenterLine
+                    ? lane * LaneWidth
+                    : MathF.Abs((lane - edge.LaneCount * 0.5f) * LaneWidth);
+                TipArc(radius, _laneDividerPaint);
+            }
+        }
+
+        // Center-marking pairs (both lines of the pair share one radius).
+        if (cached.HasCenterLine && (edge.RoadType == RoadType.Arterial || edge.RoadType == RoadType.Highway))
+        {
+            _centerLinePaint.StrokeWidth = MathF.Max(0.15f, 0.2f / zoom);
+            TipArc(edge.RoadType == RoadType.Arterial ? ArterialYellowOffset : HighwayYellowOffset,
+                _centerLinePaint);
+        }
+
+        // Dirt: tire tracks loop around the tip.
+        if (edge.RoadType == RoadType.Dirt && zoom >= ShoulderMinZoom)
+        {
+            _tireTrackPaint.StrokeWidth = TireTrackWidth;
+            for (int lane = 0; lane < edge.LaneCount; lane++)
+            {
+                float laneOff = GeometryUtil.LaneLateralOffset(graph, edgeIndex, lane);
+                TipArc(MathF.Abs(laneOff - TireTrackSpread), _tireTrackPaint);
+                TipArc(MathF.Abs(laneOff + TireTrackSpread), _tireTrackPaint);
+            }
+        }
+    }
+
     /// <summary>True if (x,y) is within the cull rect (expanded by <paramref name="margin"/>), or
     /// culling is off (an empty rect means "draw everything"). Used to skip off-screen node/edge work.</summary>
     private static bool InView(float x, float y, SKRect cull, float margin)
@@ -1336,43 +1505,15 @@ public class RoadRenderer
 
         for (int n = 0; n < graph.Nodes.Count; n++)
         {
-            var node = graph.Nodes[n];
-            if (float.IsNaN(node.Position.X)) continue;
-            // Cull before the expensive CollectApproaches (Bezier evals + sort) for off-screen nodes.
-            if (!InView(node.Position.X, node.Position.Y, cullRect, 60f)) continue;
-
-            CollectApproaches(graph, stopLines, n);
-            var approaches = _approaches;
-            if (approaches.Count < 2) continue;
-
-            approaches.Sort(static (a, b) => a.Angle.CompareTo(b.Angle));
-
-            int count = approaches.Count;
+            if (!TryBuildJunctionOutline(graph, stopLines, n, cullRect, out var nodeType, out bool onBridge))
+                continue;
 
             // The intersection takes on the appearance of its highest-ranked incident road
             // (e.g. a highway+arterial node looks like highway; an all-dirt node looks like dirt),
             // and its deck tone instead of asphalt when the node is on a bridge.
-            RoadType nodeType = HighestRoadTypeAtNode(graph, n);
-            _intersectionFillPaint.Color = NodeOnBridge(graph, n)
+            _intersectionFillPaint.Color = onBridge
                 ? RoadTypeVisuals.GetBridgeDeckColor(nodeType, _ambient)
                 : RoadTypeVisuals.GetSurfaceColor(nodeType, _ambient);
-
-            // Build intersection fill polygon: for each road, a straight segment along the
-            // stop line (left→right boundary), then a curve to the next road's left boundary.
-            _fillPath.Reset();
-            _fillPath.MoveTo(approaches[0].LeftBound.X, approaches[0].LeftBound.Y);
-
-            for (int i = 0; i < count; i++)
-            {
-                var curr = approaches[i];
-                var next = approaches[(i + 1) % count];
-
-                _fillPath.LineTo(curr.RightBound.X, curr.RightBound.Y);
-                AddCornerCurve(_fillPath, curr.RightBound, curr.RightAwayDir,
-                    next.LeftBound, next.LeftAwayDir);
-            }
-
-            _fillPath.Close();
             canvas.DrawPath(_fillPath, _intersectionFillPaint);
 
             // Corner boundary lines — unpaved (dirt) intersections carry no paint, matching
@@ -1383,10 +1524,11 @@ public class RoadRenderer
 
             _cornerPaint.Color = nodeType == RoadType.Highway ? _edgeLinePaint.Color : _curbPaint.Color;
 
+            int count = _approaches.Count;
             for (int i = 0; i < count; i++)
             {
-                var curr = approaches[i];
-                var next = approaches[(i + 1) % count];
+                var curr = _approaches[i];
+                var next = _approaches[(i + 1) % count];
 
                 _cornerPath.Reset();
                 _cornerPath.MoveTo(curr.RightBound.X, curr.RightBound.Y);
@@ -1394,6 +1536,75 @@ public class RoadRenderer
                     next.LeftBound, next.LeftAwayDir);
                 canvas.DrawPath(_cornerPath, _cornerPaint);
             }
+        }
+    }
+
+    /// <summary>
+    /// Builds the junction outline polygon for a node into <see cref="_fillPath"/> — a
+    /// straight segment along each approach's stop line (left→right boundary) joined by
+    /// corner curves — leaving <see cref="_approaches"/> populated and angle-sorted for
+    /// the caller. Returns false for defunct, culled, or fewer-than-two-approach nodes.
+    /// Shared by the junction shoulder ring (pass 0.75, stroked) and the intersection
+    /// fill (pass 1.5, filled) so both follow identical geometry.
+    /// </summary>
+    private bool TryBuildJunctionOutline(RoadGraph graph, StopLineCache stopLines, int n,
+        SKRect cullRect, out RoadType nodeType, out bool onBridge)
+    {
+        nodeType = RoadType.Residential;
+        onBridge = false;
+
+        var node = graph.Nodes[n];
+        if (float.IsNaN(node.Position.X)) return false;
+        // Cull before the expensive CollectApproaches (Bezier evals + sort) for off-screen nodes.
+        if (!InView(node.Position.X, node.Position.Y, cullRect, 60f)) return false;
+
+        CollectApproaches(graph, stopLines, n);
+        var approaches = _approaches;
+        if (approaches.Count < 2) return false;
+
+        approaches.Sort(static (a, b) => a.Angle.CompareTo(b.Angle));
+
+        int count = approaches.Count;
+        _fillPath.Reset();
+        _fillPath.MoveTo(approaches[0].LeftBound.X, approaches[0].LeftBound.Y);
+        for (int i = 0; i < count; i++)
+        {
+            var curr = approaches[i];
+            var next = approaches[(i + 1) % count];
+
+            _fillPath.LineTo(curr.RightBound.X, curr.RightBound.Y);
+            AddCornerCurve(_fillPath, curr.RightBound, curr.RightAwayDir,
+                next.LeftBound, next.LeftAwayDir);
+        }
+        _fillPath.Close();
+
+        nodeType = HighestRoadTypeAtNode(graph, n);
+        onBridge = NodeOnBridge(graph, n);
+        return true;
+    }
+
+    /// <summary>
+    /// Pass 0.75: strokes each junction's outline polygon in the node's shoulder color
+    /// (bridge parapet tone on bridges), centered on the boundary so the outer half forms
+    /// a shoulder ring around the junction. Runs after the per-edge shoulder bands and
+    /// BEFORE the asphalt pass: the ring's inner half and its bars across the approaches
+    /// vanish under the asphalt and intersection fill, leaving exactly the corner cover
+    /// that the legs' round end caps used to provide — without their bleed past narrower
+    /// crossing roads.
+    /// </summary>
+    private void DrawJunctionShoulders(SKCanvas canvas, RoadGraph graph, StopLineCache stopLines,
+        SKRect cullRect)
+    {
+        for (int n = 0; n < graph.Nodes.Count; n++)
+        {
+            if (!TryBuildJunctionOutline(graph, stopLines, n, cullRect, out var nodeType, out bool onBridge))
+                continue;
+
+            _junctionShoulderPaint.Color = onBridge
+                ? RoadTypeVisuals.GetBridgeEdgeColor(nodeType, _ambient)
+                : RoadTypeVisuals.GetShoulderColor(nodeType, _ambient);
+            _junctionShoulderPaint.StrokeWidth = 2f * RoadTypeVisuals.GetShoulderWidth(nodeType);
+            canvas.DrawPath(_fillPath, _junctionShoulderPaint);
         }
     }
 
@@ -1679,10 +1890,15 @@ public class RoadRenderer
         public readonly bool HasCenterLine;
         /// <summary>True if the outer edge lines should be dashed (single-lane two-way roads).</summary>
         public readonly bool DashedEdges;
+        /// <summary>True when the FromNode end is a dead end and gets a round end-cap disc
+        /// (surface and shoulder strokes are butt-capped).</summary>
+        public readonly bool RoundCapAtFrom;
+        /// <summary>True when the ToNode end is a dead end and gets a round end-cap disc.</summary>
+        public readonly bool RoundCapAtTo;
 
         public CachedEdgePaths(SKPath center, SKPath centerLine, SKPath left, SKPath right, List<SKPath> lanes,
             List<SKPath> typeMarkings, List<BridgeSpanPaths> bridgeSpans, float totalWidth,
-            bool hasCenterLine, bool dashedEdges)
+            bool hasCenterLine, bool dashedEdges, bool roundCapAtFrom, bool roundCapAtTo)
         {
             CenterPath = center;
             CenterLinePath = centerLine;
@@ -1694,6 +1910,8 @@ public class RoadRenderer
             TotalWidth = totalWidth;
             HasCenterLine = hasCenterLine;
             DashedEdges = dashedEdges;
+            RoundCapAtFrom = roundCapAtFrom;
+            RoundCapAtTo = roundCapAtTo;
         }
 
         public void Dispose()

@@ -1347,6 +1347,85 @@ public class RoadGraph
         return repaired;
     }
 
+    /// <summary>Margin (rad, ~1.5°) kept between a clamped handle and the adjacent road it
+    /// ran into, so a dragged handle can meet a neighbor but never lie exactly on it
+    /// (exactly-collinear legs make degenerate junction geometry).</summary>
+    private const float HandleClampMargin = 0.026f;
+
+    /// <summary>
+    /// Clamps a control-point drag so the handle's direction at its anchor node cannot
+    /// swing PAST any adjacent road at that node — the bottom leg of a T can swing up to
+    /// ±90°, meeting either main-road leg, but not through them. The neighbor directions
+    /// are the adjacent edges' own node-anchored handles (their tangents at the node), and
+    /// the clamp is applied per drag step against the angularly nearest neighbor on each
+    /// side of the handle's CURRENT direction, so a fast mouse move cannot tunnel through
+    /// a leg. Handle length follows the cursor; only the angle is limited. Returns
+    /// <paramref name="desired"/> unchanged when the node has no other roads or the
+    /// geometry is degenerate. Editor interaction policy — call before
+    /// <see cref="SetControlPoint"/> on drag updates (aborts/reverts restore verbatim).
+    /// </summary>
+    /// <param name="edgeIndex">Edge whose control point is being dragged.</param>
+    /// <param name="controlPointIndex">Which control point: 1 (near FromNode) or 2 (near ToNode).</param>
+    /// <param name="desired">Requested world-space control-point position.</param>
+    public Vector2 ClampControlPointToNeighbors(int edgeIndex, int controlPointIndex, Vector2 desired)
+    {
+        if (edgeIndex < 0 || edgeIndex >= _edges.Count) return desired;
+        var edge = _edges[edgeIndex];
+        if (edge.FromNode < 0) return desired;
+
+        int node = controlPointIndex == 1 ? edge.FromNode : edge.ToNode;
+        var nodePos = _nodes[node].Position;
+        var cur = controlPointIndex == 1 ? edge.ControlPoint1 : edge.ControlPoint2;
+
+        var desiredVec = desired - nodePos;
+        var curVec = cur - nodePos;
+        float len = desiredVec.Length();
+        if (len < 0.001f || curVec.LengthSquared() < 1e-6f) return desired;
+
+        float thetaPrev = MathF.Atan2(curVec.Y, curVec.X);
+        float deltaDes = WrapAnglePi(MathF.Atan2(desiredVec.Y, desiredVec.X) - thetaPrev);
+
+        // Nearest neighbor angle on each side of the current direction (relative,
+        // counter-clockwise positive). The dragged road's own reverse twin is the same
+        // physical road and never constrains.
+        int reverse = FindReverseEdge(edgeIndex);
+        float ccw = float.MaxValue, cw = float.MinValue;
+
+        void Consider(int e, bool atToNode)
+        {
+            if (e == edgeIndex || e == reverse) return;
+            var other = _edges[e];
+            if (other.FromNode < 0) return;
+            var handle = atToNode ? other.ControlPoint2 : other.ControlPoint1;
+            var v = handle - nodePos;
+            if (v.LengthSquared() < 1e-6f) return;
+            float r = WrapAnglePi(MathF.Atan2(v.Y, v.X) - thetaPrev);
+            if (r > 0f && r < ccw) ccw = r;
+            else if (r < 0f && r > cw) cw = r;
+        }
+
+        foreach (int e in GetOutgoingEdges(node)) Consider(e, atToNode: false);
+        foreach (int e in GetIncomingEdges(node)) Consider(e, atToNode: true);
+
+        float delta = deltaDes;
+        if (deltaDes > 0f && ccw < float.MaxValue)
+            delta = MathF.Min(deltaDes, MathF.Max(0f, ccw - HandleClampMargin));
+        else if (deltaDes < 0f && cw > float.MinValue)
+            delta = MathF.Max(deltaDes, MathF.Min(0f, cw + HandleClampMargin));
+        if (delta == deltaDes) return desired;
+
+        float theta = thetaPrev + delta;
+        return nodePos + new Vector2(MathF.Cos(theta) * len, MathF.Sin(theta) * len);
+    }
+
+    /// <summary>Wraps an angle to (−π, π].</summary>
+    private static float WrapAnglePi(float a)
+    {
+        while (a > MathF.PI) a -= 2f * MathF.PI;
+        while (a <= -MathF.PI) a += 2f * MathF.PI;
+        return a;
+    }
+
     /// <summary>
     /// Updates a Bézier control point on an edge, recomputes its arc length, and syncs
     /// the corresponding control point on the reverse edge (if one exists).

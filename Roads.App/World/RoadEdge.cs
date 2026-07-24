@@ -61,10 +61,28 @@ public struct RoadEdge
 }
 
 /// <summary>
-/// Provides default speed limits per road type.
+/// Per-road-type gameplay data: default speed limits, right-of-way class ranks, and the
+/// drawn-width multiplier shared by rendering and junction-clearance geometry.
 /// </summary>
 public static class RoadTypeDefaults
 {
+    /// <summary>
+    /// Multiplier applied to the lane-derived (geometric) road width to get the DRAWN
+    /// asphalt width — highways render noticeably wider, dirt narrower, without affecting
+    /// lane geometry. Lives here rather than in the renderer because it is not purely
+    /// cosmetic: junction trims and stop lines (<see cref="StopLineCache"/>) must clear
+    /// the pavement the player actually sees, so they measure against half-width × this.
+    /// The renderer's <c>RoadTypeVisuals.GetWidthMultiplier</c> delegates to it.
+    /// </summary>
+    public static float GetDrawnWidthMultiplier(RoadType type) => type switch
+    {
+        RoadType.Highway     => 1.25f,
+        RoadType.Arterial    => 1.10f,
+        RoadType.Residential => 1.00f,
+        RoadType.Dirt        => 0.85f,
+        _                    => 1.00f,
+    };
+
     /// <summary>
     /// Returns the default speed limit in m/s for a given road type.
     /// </summary>
